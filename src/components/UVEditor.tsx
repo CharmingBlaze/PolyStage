@@ -641,14 +641,11 @@ export const UVEditor: React.FC<UVEditorProps> = ({
       if(tu!==0||tv!==0){ctx.fillStyle='#475569';ctx.font='10px monospace';ctx.fillText(`${1001+tu+tv*10}`,x+6,y+14)}
     }
     if(showTexture&&textureCanvas){
-      // UV editor screen Y uses (1-v); mesh textures use flipY=false (v=0 at canvas top).
-      // Flip the draw so the atlas matches 3D / Pixel Paint.
+      // Atlas buffer already has v=1 at canvas top (flipY=true / paint stamps 1-v).
       ctx.save();
       ctx.globalAlpha=.78;
       ctx.imageSmoothingEnabled=!nearest;
-      ctx.translate(v.x, v.y + v.scale);
-      ctx.scale(1, -1);
-      ctx.drawImage(textureCanvas,0,0,v.scale,v.scale);
+      ctx.drawImage(textureCanvas,v.x,v.y,v.scale,v.scale);
       ctx.restore();
     }
     if(referenceLayer){

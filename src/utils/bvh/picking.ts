@@ -187,9 +187,29 @@ export function pickPaintUv(
   };
 }
 
+export type SamplePaintStrokeOptions = {
+  maxSteps?: number;
+  /** Texture resolution — dedupes to true texels when known. */
+  textureSize?: number;
+  /** Skip segment start (already stamped by the previous sample). */
+  skipStart?: boolean;
+  /**
+   * Keep the stroke on one logical face. Hits on other faces are ignored so
+   * silhouette / edge grazing cannot paint a second parallel stroke.
+   */
+  lockFaceId?: string | null;
+  /**
+   * Reject samples that jump too far in UV from the previous accepted hit
+   * (guards island seams within a face lock miss).
+   */
+  maxUvJump?: number;
+  /** UV of the last stamped sample — seeds the jump guard across pointer events. */
+  seedUv?: { u: number; v: number } | null;
+};
+
 /**
- * Stroke painting helper: sample UV along a screen-space drag and fill gaps
- * so sparse pointer events still cover the brush path.
+ * Stroke painting helper: sample UV along a screen-space drag.
+ * Callers should stamp only these hits (no UV-space Bresenham) for pixel-accurate 3D paint.
  */
 export function samplePaintStrokeUvs(
   raycaster: THREE.Raycaster,
@@ -198,27 +218,51 @@ export function samplePaintStrokeUvs(
   rect: DOMRect,
   fromClient: { x: number; y: number },
   toClient: { x: number; y: number },
-  maxSteps = 96
+  options: SamplePaintStrokeOptions = {},
 ): BvhPaintHit[] {
+  const {
+    maxSteps = 64,
+    textureSize,
+    skipStart = false,
+    lockFaceId = undefined,
+    maxUvJump = 0.35,
+    seedUv = null,
+  } = options;
+
   const dx = toClient.x - fromClient.x;
   const dy = toClient.y - fromClient.y;
   const dist = Math.hypot(dx, dy);
-  // ~1.5px screen steps keep 3D strokes continuous even on low-res textures.
-  const steps = Math.max(1, Math.min(maxSteps, Math.ceil(dist / 1.5)));
+  // ~1px screen steps; a still click is a single sample at `to`.
+  const steps = dist < 0.5 ? 0 : Math.max(1, Math.min(maxSteps, Math.ceil(dist)));
   const hits: BvhPaintHit[] = [];
   const seen = new Set<string>();
+  const tex = textureSize && textureSize > 0 ? textureSize : 0;
+  const startI = skipStart && steps > 0 ? 1 : 0;
+  let lastUv: THREE.Vector2 | null = seedUv
+    ? new THREE.Vector2(seedUv.u, seedUv.v)
+    : null;
 
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
+  for (let i = startI; i <= steps; i++) {
+    const t = steps === 0 ? 1 : i / steps;
     const x = fromClient.x + dx * t;
     const y = fromClient.y + dy * t;
     setRayFromPointer(raycaster, camera, x, y, rect);
     const hit = pickPaintUv(raycaster, mesh);
     if (!hit) continue;
-    // Dedupe by face + coarse UV so adjacent texels on the same island still stamp.
-    const key = `${hit.faceId ?? ''}:${hit.uv.x.toFixed(3)}:${hit.uv.y.toFixed(3)}`;
+
+    if (lockFaceId != null && hit.faceId !== lockFaceId) continue;
+
+    if (lastUv && maxUvJump > 0) {
+      const jump = Math.hypot(hit.uv.x - lastUv.x, hit.uv.y - lastUv.y);
+      if (jump > maxUvJump) continue;
+    }
+
+    const key = tex
+      ? `${Math.floor(hit.uv.x * tex)}:${Math.floor(hit.uv.y * tex)}`
+      : `${hit.uv.x.toFixed(4)}:${hit.uv.y.toFixed(4)}`;
     if (seen.has(key)) continue;
     seen.add(key);
+    lastUv = hit.uv;
     hits.push(hit);
   }
 

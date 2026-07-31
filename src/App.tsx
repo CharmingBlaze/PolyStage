@@ -19,7 +19,7 @@ import { AssetBrowserModal } from './components/AssetBrowserModal';
 import { ImportModelModal } from './components/ImportModelModal';
 import { SpriteSheetModal } from './components/SpriteSheetModal';
 import { PixelPaintStudio, type Paint3DBridge, type PaintTool as StudioPaintTool } from './components/PixelPaintStudio';
-import { floodFill, hexToRgba, drawBresenham } from './utils/pixelPaint';
+import { floodFill, hexToRgba } from './utils/pixelPaint';
 import type {
   CADMesh, SceneGroup, CADBone, ToolState, RenderSettings, PrimitiveType, CADScene, AnimationClip,
   CADCamera, CADLight, ParticleEmitter, EnvironmentSettings, SceneSelection,
@@ -459,7 +459,8 @@ export const App: React.FC = () => {
     if (livePaintRafRef.current) return;
     livePaintRafRef.current = requestAnimationFrame(() => {
       livePaintRafRef.current = 0;
-      // Refresh 3D viewport from the live composite canvas without serializing a dataURL every stamp.
+      // Bump revision so CanvasTexture.needsUpdate runs — must NOT rebuild mesh geometry
+      // (Viewport strips textureRevision from the mesh rebuild deps for this reason).
       setTextureRevision((revision) => revision + 1);
       setToolState((state) => (state.viewMode === 'textured' ? state : { ...state, viewMode: 'textured' }));
     });
@@ -1354,8 +1355,6 @@ export const App: React.FC = () => {
         toolState.brushSize || 1,
         studioTool,
         toolState.paintOpacity ?? 1,
-        toolState.paintSpacing ?? .25,
-        toolState.paintMirrorU ?? false,
         faceId,
       );
       flushLivePaintPreview();
@@ -1373,8 +1372,8 @@ export const App: React.FC = () => {
     }
 
     const x = Math.max(0, Math.min(canvas.width - 1, Math.floor(uvU * canvas.width)));
-    // With texture.flipY=false, raycast UV.v maps directly to canvas Y (0 = top).
-    const y = Math.max(0, Math.min(canvas.height - 1, Math.floor(uvV * canvas.height)));
+    // Canvas top (y=0) ↔ UV v=1 — same as UV editor and texture.flipY=true.
+    const y = Math.max(0, Math.min(canvas.height - 1, Math.floor((1 - uvV) * canvas.height)));
     const color = toolState.activeColor || '#ff9a3c';
     const bSize = toolState.brushSize || 1;
     const tool = toolState.drawTool || 'pencil';
@@ -1413,7 +1412,7 @@ export const App: React.FC = () => {
         ctx.restore();
       };
       stampAt(px);
-      if (toolState.paintMirrorU) stampAt(canvas.width - 1 - px);
+      if (toolState.paintMirrorU === true) stampAt(canvas.width - 1 - px);
     };
 
     if (tool === 'fill') {
@@ -1424,30 +1423,11 @@ export const App: React.FC = () => {
       return;
     } else {
       const previous = lastPaintUvRef.current;
-      const sameIsland =
-        !!previous &&
-        ((faceId && previous.faceId && faceId === previous.faceId) ||
-          (!faceId &&
-            !previous.faceId &&
-            Math.abs(uvU - previous.u) <= 0.22 &&
-            Math.abs(uvV - previous.v) <= 0.22));
-
-      if (!previous || !sameIsland) {
-        stamp(x, y);
-      } else if (previous.px === x && previous.py === y) {
+      // Screen-space stroke sampling already walks the mesh — stamp this texel only.
+      if (previous && previous.px === x && previous.py === y) {
         // same texel
       } else {
-        const stepPx = bSize <= 1 ? 1 : Math.max(1, Math.round(bSize * Math.max(0.05, toolState.paintSpacing ?? 0.25)));
-        let traveled = 0;
-        let lastStampAt = -stepPx;
-        drawBresenham(ctx, previous.px, previous.py, x, y, 1, (px, py) => {
-          if (traveled - lastStampAt >= stepPx) {
-            stamp(px, py);
-            lastStampAt = traveled;
-          }
-          traveled += 1;
-        });
-        if (lastStampAt !== traveled - 1) stamp(x, y);
+        stamp(x, y);
       }
     }
     lastPaintUvRef.current = { u: uvU, v: uvV, px: x, py: y, faceId };
@@ -1904,6 +1884,27 @@ export const App: React.FC = () => {
             </>
           )}
         </main>
+
+        {/* Brush / 3D-paint outside the Paint workspace still needs the texture bridge
+            (layers + UV-correct stamping). Keep it mounted but invisible. */}
+        {toolState.isPainting3D && activeWorkspaceMode !== 'paint' && activeWorkspaceMode !== 'animation' && (
+          <div
+            className="pointer-events-none fixed -left-[9999px] top-0 h-px w-px overflow-hidden opacity-0"
+            aria-hidden
+          >
+            <PixelPaintStudio
+              key={`paint-bridge-${activeMesh.id}`}
+              toolState={toolState}
+              setToolState={setToolState}
+              onTextureUpdated={handleTextureUpdated}
+              textureCanvasRef={textureCanvasRef}
+              initialDataUrl={activeMesh.textureCanvasDataUrl}
+              paintBridgeRef={paintBridgeRef}
+              mesh={activeMesh}
+              selectedFaceIds={selectedFaceIds}
+            />
+          </div>
+        )}
 
         {!editorSplitOpen && activeWorkspaceMode !== 'animation' && <aside className="w-80 bg-[#333333] border-l border-[#1a1a1a] flex flex-col z-20 panel-surface">
           {activeWorkspaceMode === 'rigging' ? (

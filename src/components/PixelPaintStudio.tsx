@@ -162,8 +162,6 @@ export type Paint3DBridge = {
     brushSize: number,
     paintTool: PaintTool,
     opacity: number,
-    spacing: number,
-    mirrorU: boolean,
     faceId?: string | null,
   ) => void;
   endStroke: () => void;
@@ -293,6 +291,10 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
   const undoStack = useRef<string[]>([]);
   const redoStack = useRef<string[]>([]);
   const paint3DStrokeRef = useRef<{ u: number; v: number; px: number; py: number; faceId: string | null } | null>(null);
+  /** Texels stamped this 3D stroke — prevents double-pen overdraw across samples. */
+  const paint3DStrokeTexelsRef = useRef<Set<string>>(new Set());
+  const paintMirrorURef = useRef(!!toolState.paintMirrorU);
+  paintMirrorURef.current = !!toolState.paintMirrorU;
   const [, bumpUndoUi] = useState(0);
 
   useEffect(() => {
@@ -802,7 +804,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
   useEffect(() => {
     if (!paintBridgeRef) return;
     paintBridgeRef.current = {
-      paintUv: (uvU, uvV, color, size, paintTool, opacity, spacing, mirrorU, faceId = null) => {
+      paintUv: (uvU, uvV, color, size, paintTool, opacity, faceId = null) => {
         const canvas = activeLayerCanvas();
         if (!canvas) return;
         const ctx = canvas.getContext('2d');
@@ -810,15 +812,18 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
         ctx.imageSmoothingEnabled = false;
 
         const x = Math.max(0, Math.min(canvasSize - 1, Math.floor(uvU * canvasSize)));
-        // Match Viewport textures (flipY=false): UV.v → canvas Y.
-        const y = Math.max(0, Math.min(canvasSize - 1, Math.floor(uvV * canvasSize)));
+        // Canvas top (y=0) ↔ UV v=1 — same as UV editor and texture.flipY=true.
+        const y = Math.max(0, Math.min(canvasSize - 1, Math.floor((1 - uvV) * canvasSize)));
         if (paintTool === 'picker') {
           const sample = getComposite().getContext('2d')!.getImageData(x, y, 1, 1).data;
           if (sample[3]) setToolState((state) => ({ ...state, activeColor: rgbaToHex(sample[0], sample[1], sample[2]), drawTool: 'pencil' }));
           return;
         }
 
-        if (!paint3DStrokeRef.current) pushHistory();
+        if (!paint3DStrokeRef.current) {
+          paint3DStrokeTexelsRef.current = new Set();
+          pushHistory();
+        }
         if (paintTool === 'fill') {
           // One flood per stroke — pointer-move must not re-run fill.
           if (paint3DStrokeRef.current) return;
@@ -831,6 +836,10 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
         } else {
           const stamp = (px: number, py: number) => {
             const stampAt = (cx: number) => {
+              const key = `${cx}:${py}`;
+              if (paint3DStrokeTexelsRef.current.has(key)) return;
+              paint3DStrokeTexelsRef.current.add(key);
+
               const half = Math.floor(size / 2);
               ctx.save();
               ctx.globalAlpha = opacity;
@@ -854,37 +863,15 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
               ctx.restore();
             };
             stampAt(px);
-            if (mirrorU) stampAt(canvasSize - 1 - px);
+            // Read Mirror U from live tool state — never as a positional arg (spacing/faceId
+            // truthiness previously looked like "two pens" with Mirror U Off).
+            if (paintMirrorURef.current === true) stampAt(canvasSize - 1 - px);
           };
 
-          const previous = paint3DStrokeRef.current;
-          // Screen-space sampling already walks the 3D surface — never UV-lerp across
-          // packed islands (that painted empty atlas and looked like sloppy dots).
-          const sameIsland =
-            !!previous &&
-            ((faceId && previous.faceId && faceId === previous.faceId) ||
-              (!faceId &&
-                !previous.faceId &&
-                Math.abs(uvU - previous.u) <= 0.22 &&
-                Math.abs(uvV - previous.v) <= 0.22));
-
-          if (!previous || !sameIsland) {
-            stamp(x, y);
-          } else if (previous.px === x && previous.py === y) {
-            // Same texel as last sample — skip overdraw.
-          } else {
-            const stepPx = size <= 1 ? 1 : Math.max(1, Math.round(size * Math.max(0.05, spacing)));
-            let traveled = 0;
-            let lastStampAt = -stepPx;
-            drawBresenham(ctx, previous.px, previous.py, x, y, 1, (px, py) => {
-              if (traveled - lastStampAt >= stepPx) {
-                stamp(px, py);
-                lastStampAt = traveled;
-              }
-              traveled += 1;
-            });
-            if (lastStampAt !== traveled - 1) stamp(x, y);
-          }
+          // 3D strokes are already densified in screen space (samplePaintStrokeUvs).
+          // Never Bresenham/UV-lerp between samples — that paints texels the ray never hit
+          // (looks like a fat blob when brush size is 1).
+          stamp(x, y);
           paint3DStrokeRef.current = { u: uvU, v: uvV, px: x, py: y, faceId: faceId ?? null };
         }
         // live composite without full undo push — keep textureCanvasRef on the same canvas the 3D view samples
@@ -902,6 +889,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       },
       endStroke: () => {
         paint3DStrokeRef.current = null;
+        paint3DStrokeTexelsRef.current = new Set();
         paint();
       },
     };
@@ -1765,8 +1753,8 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                   {mesh.faces.map((face) => {
                     if (face.uvs.length < 2) return null;
                     const selected = selectedFaceSet.has(face.id);
-                    // Match paint/3D mapping (texture.flipY=false): v=0 at canvas top.
-                    const points = face.uvs.map((p) => `${p.u},${p.v}`).join(' ');
+                    // Canvas / SVG y=0 at top ↔ UV v=1 (matches UV editor).
+                    const points = face.uvs.map((p) => `${p.u},${1 - p.v}`).join(' ');
                     return (
                       <polygon
                         key={face.id}

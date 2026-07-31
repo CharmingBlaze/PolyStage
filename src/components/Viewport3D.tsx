@@ -326,6 +326,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const [placementHoverPos, setPlacementHoverPos] = useState<THREE.Vector3 | null>(null);
   const [isPainting3DActive, setIsPainting3DActive] = useState<boolean>(false);
   const lastPaintClientRef = useRef<{ x: number; y: number } | null>(null);
+  /** Logical face locked for the active 3D paint stroke (prevents edge-bleed double pens). */
+  const paintStrokeFaceIdRef = useRef<string | null>(null);
+  const paintStrokeLastUvRef = useRef<{ u: number; v: number } | null>(null);
   const [paintCursor, setPaintCursor] = useState<{ x: number; y: number; u: number; v: number } | null>(null);
   const [hoveredVertexId, setHoveredVertexId] = useState<string | null>(null);
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
@@ -589,10 +592,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       texture.minFilter = THREE.NearestFilter;
       texture.generateMipmaps = false;
       texture.colorSpace = THREE.SRGBColorSpace;
-      // UV editor draws canvas top at v=1 visually via (1-v) screen mapping, but Three's
-      // default flipY=true still lands upside-down on our CAD UVs — disable flipY so
-      // imported images match the UV workspace.
-      texture.flipY = false;
+      // Canvas top (y=0) ↔ UV v=1 — matches UV editor / Pixel Paint (OpenGL-style).
+      texture.flipY = true;
       texture.needsUpdate = true;
       return texture;
     };
@@ -615,6 +616,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         prev?.texture.dispose();
         const texture = styleTexture(new THREE.CanvasTexture(textureCanvas));
         map.set(m.id, { key, texture });
+        // New texture object — rebuild materials once. Do NOT tie mesh rebuild to
+        // every live paint stamp (textureRevision); that caused mid-stroke jitter
+        // and a second offset pen.
+        setMeshTextureTick((t) => t + 1);
         return;
       }
 
@@ -694,8 +699,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
   // Full 3D Rotation Gizmo & Mode Switcher
   useEffect(() => {
-    if (!transformControlsRef.current) return;
+    if (!transformControlsRef.current || !dummyTargetRef.current) return;
     const tControls = transformControlsRef.current;
+    const dummy = dummyTargetRef.current;
 
     if (toolState.transformMode === 'rotate') {
       tControls.setMode('rotate');
@@ -704,7 +710,15 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     } else {
       tControls.setMode('translate');
     }
-  }, [toolState.transformMode]);
+
+    // TransformControls inherits object scale — leftover S-mode scale inflates the
+    // orange plane helpers and makes translate/rotate feel broken.
+    dummy.scale.set(1, 1, 1);
+    if (toolState.editMode === 'vertex' || toolState.editMode === 'edge' || toolState.editMode === 'face') {
+      dummy.rotation.set(0, 0, 0);
+      dummy.quaternion.identity();
+    }
+  }, [toolState.transformMode, toolState.editMode]);
 
   // Cameras / lights / particles / weather helpers (selectable scene objects)
   // Hidden entirely in Model view — ANIM workspace owns these scene objects.
@@ -2046,7 +2060,14 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     meshes.forEach((m) => {
       if (m.visible === false) return;
 
-      const evaluated = evaluateMeshModifiers(m, 2);
+      const evaluated = evaluateMeshModifiers(
+        toolState.isPainting3D && (m.modifiers || []).some((mod) => mod.type === 'mirror' && mod.enabled)
+          ? // Mirror modifier duplicates faces with shared UVs — one stamp shows on both
+            // halves ("two pens"). Paint against the source cage instead.
+            { ...m, modifiers: (m.modifiers || []).filter((mod) => mod.type !== 'mirror') }
+          : m,
+        2,
+      );
       const displayMesh = deformMeshWithBones(evaluated, bones);
       const geometry = buildThreeGeometry(displayMesh);
       let material: THREE.Material;
@@ -2175,8 +2196,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         }
       }
 
-      // Render Blockbench-Style 3D Cube Vertex Handles (with Skin Weight Heatmap in Skinning mode)
+      // Vertex handles — screen-stable size (world boxes look enormous when zoomed in).
       if (isSelected && (toolState.editMode === 'vertex' || toolState.rigMode === 'skin') && verticesGroupRef.current) {
+        const cam = cameraRef.current;
         displayMesh.vertices.forEach((v) => {
           const isVertSelected = selectedVertexIds.includes(v.id);
           const isVertHovered = hoveredVertexId === v.id;
@@ -2193,15 +2215,20 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
             else vertColor = 0x2680eb; // Zero weight: Blue
           }
 
-          const size = isVertHovered ? 0.15 : isVertSelected ? 0.14 : 0.10;
+          const world = localToWorld(m, v.x, v.y, v.z);
+          const dist = cam ? cam.position.distanceTo(world) : 4;
+          const base = Math.max(0.018, Math.min(0.08, dist * 0.01));
+          const size = isVertHovered ? base * 1.35 : isVertSelected ? base * 1.2 : base;
           const vertGeo = new THREE.BoxGeometry(size, size, size);
           const vertMat = new THREE.MeshBasicMaterial({
             color: vertColor,
             depthTest: false,
+            transparent: true,
+            opacity: isVertSelected || isVertHovered ? 1 : 0.92,
           });
           const cube = new THREE.Mesh(vertGeo, vertMat);
-          const world = localToWorld(m, v.x, v.y, v.z);
           cube.position.copy(world);
+          cube.renderOrder = 40;
           cube.userData = { vertexId: v.id, meshId: m.id };
           verticesGroupRef.current?.add(cube);
         });
@@ -2497,7 +2524,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         } else {
           transformControlsRef.current.enabled = true;
           transformControlsRef.current.getHelper().visible = true;
-          transformControlsRef.current.setSize(toolState.editMode === 'object' ? 1.0 : 0.85);
+          // Smaller gizmo in component modes so it doesn't swallow the vertex handle.
+          transformControlsRef.current.setSize(toolState.editMode === 'object' ? 1.0 : 0.65);
           transformControlsRef.current.setSpace(
             toolState.editMode === 'object' || toolState.editMode === 'bone' || (sceneSel && sceneSel.kind !== 'mesh')
               ? 'local'
@@ -2509,7 +2537,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         transformControlsRef.current.getHelper().visible = false;
       }
     }
-  }, [meshes, bones, selectedBoneId, activeMeshId, hoveredMeshId, hoveredVertexId, hoveredFaceId, toolState.viewMode, toolState.editMode, toolState.rigMode, toolState.isCadDrawing, toolState.cadDrawPrimitive, toolState.placeOnClick, toolState.activePrimitive, toolState.showTriangulation, toolState.isPainting3D, placementHoverPos, cadStep, drawBaseStart, drawBaseEnd, drawHeight, selectedVertexIds, selectedEdgeIds, selectedFaceIds, selectedMeshIds, renderSettings.wireframeColor, textureRevision, meshTextureTick, cameras, lights, particles, environment, sceneSelection]);
+  }, [meshes, bones, selectedBoneId, activeMeshId, hoveredMeshId, hoveredVertexId, hoveredFaceId, toolState.viewMode, toolState.editMode, toolState.rigMode, toolState.isCadDrawing, toolState.cadDrawPrimitive, toolState.placeOnClick, toolState.activePrimitive, toolState.showTriangulation, toolState.isPainting3D, placementHoverPos, cadStep, drawBaseStart, drawBaseEnd, drawHeight, selectedVertexIds, selectedEdgeIds, selectedFaceIds, selectedMeshIds, renderSettings.wireframeColor, meshTextureTick, cameras, lights, particles, environment, sceneSelection]);
 
   // Update edge hover/selection colors in place — avoid full scene rebuild on every hover
   useEffect(() => {
@@ -2547,7 +2575,18 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       if (event.value) {
         onBeginHistory?.();
         if (dummyTargetRef.current) {
-          dragStartGizmoPosRef.current.copy(dummyTargetRef.current.position);
+          // Keep gizmo PRS clean so leftover S-mode scale can't inflate the helper.
+          const dummy = dummyTargetRef.current;
+          if (
+            toolState.editMode === 'vertex' ||
+            toolState.editMode === 'edge' ||
+            toolState.editMode === 'face'
+          ) {
+            dummy.rotation.set(0, 0, 0);
+            dummy.quaternion.identity();
+          }
+          dummy.scale.set(1, 1, 1);
+          dragStartGizmoPosRef.current.copy(dummy.position);
         }
         initialVertsMapRef.current.clear();
         activeMesh.vertices.forEach((v) => {
@@ -2609,9 +2648,24 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           pendingComponentVertsRef.current &&
           (toolState.editMode === 'vertex' || toolState.editMode === 'edge' || toolState.editMode === 'face')
         ) {
+          let verts = pendingComponentVertsRef.current;
+          const step = toolState.gridSnap || 0;
+          // Snap only on commit so live drag doesn't fight the gizmo (jitter).
+          if (step > 0 && toolState.transformMode === 'translate') {
+            const editIds = new Set(collectEditVertIds(activeMesh));
+            verts = verts.map((v) => {
+              if (!editIds.has(v.id)) return v;
+              return {
+                ...v,
+                x: snapToGrid(v.x, step),
+                y: snapToGrid(v.y, step),
+                z: snapToGrid(v.z, step),
+              };
+            });
+          }
           let nextMesh: CADMesh = {
             ...activeMesh,
-            vertices: pendingComponentVertsRef.current,
+            vertices: verts,
             revision: (activeMesh.revision || 0) + 1,
           };
           pendingComponentVertsRef.current = null;
@@ -2626,6 +2680,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
             if (ids.length) nextMesh = syncSymmetricalVertices(nextMesh, ids, axis);
           }
           setMesh(nextMesh);
+          if (dummyTargetRef.current) {
+            dummyTargetRef.current.scale.set(1, 1, 1);
+            dummyTargetRef.current.rotation.set(0, 0, 0);
+            dummyTargetRef.current.quaternion.identity();
+          }
         } else if (toolState.liveMirror && (toolState.editMode === 'vertex' || toolState.editMode === 'edge' || toolState.editMode === 'face')) {
           // Live mirror sync on release (Blender X-mirror style)
           const axis = toolState.mirrorAxis || 'x';
@@ -2641,6 +2700,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         if (toolState.liveMirror && toolState.mirrorBones && toolState.editMode === 'bone' && selectedBoneId && setBones) {
           const axis = toolState.mirrorAxis || 'x';
           setBones((prev) => syncMirroredBonePose(prev, selectedBoneId, axis));
+        }
+        if (dummyTargetRef.current && toolState.transformMode === 'scale') {
+          dummyTargetRef.current.scale.set(1, 1, 1);
         }
       }
     };
@@ -2700,10 +2762,24 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         });
       }
       if (verticesGroupRef.current && toolStateRef.current.editMode === 'vertex') {
+        const cam = cameraRef.current;
         verticesGroupRef.current.children.forEach((child) => {
           const v = vertMap.get(child.userData.vertexId);
           if (!v) return;
-          child.position.copy(localToWorld(mesh, v.x, v.y, v.z));
+          const world = localToWorld(mesh, v.x, v.y, v.z);
+          child.position.copy(world);
+          // Keep handle screen size stable while dragging (rebuild is skipped).
+          if (cam && child instanceof THREE.Mesh && child.geometry) {
+            const dist = cam.position.distanceTo(world);
+            const base = Math.max(0.018, Math.min(0.08, dist * 0.01));
+            const selected = selectedVertexIdsRef.current.includes(child.userData.vertexId);
+            const size = selected ? base * 1.2 : base;
+            const cur = (child.geometry as THREE.BoxGeometry).parameters;
+            if (!cur || Math.abs(cur.width - size) > 0.002) {
+              child.geometry.dispose();
+              child.geometry = new THREE.BoxGeometry(size, size, size);
+            }
+          }
         });
       }
     };
@@ -2791,11 +2867,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         let deltaX = dummy.position.x - dragStartGizmoPosRef.current.x;
         let deltaY = dummy.position.y - dragStartGizmoPosRef.current.y;
         let deltaZ = dummy.position.z - dragStartGizmoPosRef.current.z;
-        if (step > 0) {
-          deltaX = snapToGrid(deltaX, step);
-          deltaY = snapToGrid(deltaY, step);
-          deltaZ = snapToGrid(deltaZ, step);
-        }
+        // Do not snap during the drag — snapping here makes verts jump while the
+        // gizmo moves smoothly (looks jittery). Snap is applied on pointer-up.
         const localDelta = worldDeltaToLocal(activeMesh, deltaX, deltaY, deltaZ);
         const updatedVerts = activeMesh.vertices.map((v) => {
           if (!editIds.has(v.id)) return v;
@@ -2933,6 +3006,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     }
     setIsPainting3DActive(false);
     lastPaintClientRef.current = null;
+    paintStrokeFaceIdRef.current = null;
+    paintStrokeLastUvRef.current = null;
     isWeightPaintingRef.current = false;
     if (controlsRef.current) {
       const cur = toolStateRef.current;
@@ -3174,7 +3249,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       let hit: THREE.Intersection | null = null;
       let hitMeshId = activeMeshId;
       if (paintTargets.length) {
+        const prevFirst = raycaster.firstHitOnly;
+        raycaster.firstHitOnly = true;
         const hits = raycaster.intersectObjects(paintTargets, false);
+        raycaster.firstHitOnly = prevFirst;
         // Prefer a hit on the active / selected mesh when several overlap.
         const preferred =
           hits.find((h) => {
@@ -3224,6 +3302,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         }
         const faceMap = (hit.object as THREE.Mesh).geometry?.userData?.triangleToFaceId as string[] | undefined;
         const faceId = hit.faceIndex != null ? faceMap?.[hit.faceIndex] ?? null : null;
+        paintStrokeFaceIdRef.current = faceId;
+        paintStrokeLastUvRef.current = { u: uv.x, v: uv.y };
         onDirect3DPaintPixel(uv.x, uv.y, false, faceId);
         e.preventDefault();
         e.stopPropagation();
@@ -3493,6 +3573,14 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       if (isPainting3DActive && onDirect3DPaintPixel && cameraRef.current) {
         const from = lastPaintClientRef.current ?? { x: e.clientX, y: e.clientY };
         const to = { x: e.clientX, y: e.clientY };
+        const skipStart = !!lastPaintClientRef.current;
+        const texImage = meshTexturesRef.current.get(activeMeshId)?.texture?.image as
+          | { width?: number }
+          | undefined;
+        const texSize =
+          textureCanvas?.width
+          || texImage?.width
+          || 64;
         const strokeHits = samplePaintStrokeUvs(
           raycaster,
           cameraRef.current,
@@ -3500,12 +3588,23 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           rect,
           from,
           to,
-          96,
+          {
+            maxSteps: 64,
+            textureSize: texSize,
+            skipStart,
+            // Stay on the face the stroke started on — grazing rays at edges
+            // used to paint a second parallel stroke on the neighbouring face.
+            lockFaceId: paintStrokeFaceIdRef.current,
+            // With face lock, only reject true UV teleports (seam bleed), not normal face travel.
+            maxUvJump: 0.85,
+            seedUv: paintStrokeLastUvRef.current,
+          },
         );
         lastPaintClientRef.current = to;
 
         if (strokeHits.length > 0) {
           const last = strokeHits[strokeHits.length - 1];
+          paintStrokeLastUvRef.current = { u: last.uv.x, v: last.uv.y };
           setPaintCursor({
             x: e.clientX - rect.left,
             y: e.clientY - rect.top,

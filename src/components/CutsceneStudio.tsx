@@ -94,7 +94,7 @@ function makeNearestTexture(source: HTMLCanvasElement | HTMLImageElement): THREE
   texture.minFilter = THREE.NearestFilter;
   texture.generateMipmaps = false;
   texture.colorSpace = THREE.SRGBColorSpace;
-  texture.flipY = false;
+  texture.flipY = true;
   texture.needsUpdate = true;
   return texture;
 }
