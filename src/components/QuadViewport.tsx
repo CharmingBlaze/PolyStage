@@ -32,7 +32,7 @@ interface QuadViewportProps {
   setSelectedFaceIds: React.Dispatch<React.SetStateAction<string[]>>;
   selectedMeshIds?: string[];
   setSelectedMeshIds?: React.Dispatch<React.SetStateAction<string[]>>;
-  onDirect3DPaintPixel?: (uvU: number, uvV: number) => void;
+  onDirect3DPaintPixel?: (uvU: number, uvV: number, isFinal?: boolean, faceId?: string | null) => void;
   onDirect3DPaintStrokeEnd?: () => void;
   onSpawnDrawnPrimitive?: (newMesh: CADMesh) => void;
   onOpenUVModal?: () => void;
@@ -191,12 +191,12 @@ export const QuadViewport: React.FC<QuadViewportProps> = ({
         style={{ zIndex: 5 }}
       >
         <div
-          className="absolute top-0 bottom-0 w-1 -ml-0.5 pointer-events-auto cursor-col-resize bg-transparent hover:bg-[#1473e6]/40"
+          className="absolute top-0 bottom-0 w-1 -ml-0.5 pointer-events-auto cursor-col-resize bg-transparent hover:bg-[#ed7300]/40"
           style={{ left: `${splitRatioX}%` }}
           onPointerDown={handlePointerDownSplitter}
         />
         <div
-          className="absolute left-0 right-0 h-1 -mt-0.5 pointer-events-auto cursor-row-resize bg-transparent hover:bg-[#1473e6]/40"
+          className="absolute left-0 right-0 h-1 -mt-0.5 pointer-events-auto cursor-row-resize bg-transparent hover:bg-[#ed7300]/40"
           style={{ top: `${splitRatioY}%` }}
           onPointerDown={handlePointerDownSplitter}
         />

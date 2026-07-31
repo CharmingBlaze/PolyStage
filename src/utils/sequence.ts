@@ -700,7 +700,7 @@ export function snapSeqTime(t: number, fps: number, snap: boolean): number {
 }
 
 export const SEQ_CLIP_COLORS: Record<string, string> = {
-  animClip: '#1473e6',
+  animClip: '#ed7300',
   audio: '#2d9d78',
   particle: '#e68619',
   weather: '#6a9fd8',

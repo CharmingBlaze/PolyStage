@@ -259,7 +259,7 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
     <div className="adobe-workspace h-full flex flex-col text-[10px] overflow-hidden">
       <div className="adobe-panel-header h-9 shrink-0 justify-between">
         <span className="flex items-center gap-1.5 font-semibold">
-          <Bone className="w-3.5 h-3.5 text-[#2680eb]"/>
+          <Bone className="w-3.5 h-3.5 text-[#ed7300]"/>
           {easyRig ? 'EASY RIG' : 'RIGGING'}
         </span>
         <span className={diagnostics.valid ? 'text-[#2d9d78]' : 'text-[#ec5b62]'}>
@@ -268,7 +268,7 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
       </div>
 
       {easyRig && (
-        <div className="shrink-0 border-b border-[#2d2d2d] bg-[#121212] p-2 space-y-2">
+        <div className="shrink-0 border-b border-[#1a1a1a] bg-[#3a3a3a] p-2 space-y-2">
           <div className="grid grid-cols-6 gap-0.5">
             {EASY_STEPS.map((step) => (
               <button
@@ -278,8 +278,8 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
                 onClick={() => goEasyStep(step.id)}
                 className={`h-7 px-0.5 rounded text-[8px] font-bold tracking-tight ${
                   easyStep === step.id
-                    ? 'bg-[#1473e6] text-white'
-                    : 'bg-[#202020] text-[#8c8c8c] hover:text-white'
+                    ? 'bg-[#ed7300] text-white'
+                    : 'bg-[#2e2e2e] text-[#8c8c8c] hover:text-white'
                 }`}
               >
                 {step.label.replace(/^\d+\s/, '')}
@@ -356,7 +356,7 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
       </div>
 
       {!easyRig && (
-        <div className="px-2 py-1.5 border-b border-[#2d2d2d] bg-[#161616] text-[9px] text-[#8c8c8c] leading-snug shrink-0">
+        <div className="px-2 py-1.5 border-b border-[#1a1a1a] bg-[#2b2b2b] text-[9px] text-[#8c8c8c] leading-snug shrink-0">
           {rigMode === 'edit' && '1) Add bones · 2) Parent hierarchy · 3) Set Rest Pose · then Auto Weights'}
           {rigMode === 'pose' && 'Drag bones in the viewport. IK solves on release. Key Pose → Animation when ready.'}
           {rigMode === 'skin' && 'Select a bone, paint the mesh. Red = strong · Blue = none. Shift=Sub · Alt=Smooth'}
@@ -365,8 +365,8 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
 
       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-2 space-y-2">
         {(rigMode === 'skin' || easyStep === 'paint') && (
-          <section className="cad-card p-2 space-y-2 border border-[#1473e6]/40">
-            <b className="uppercase tracking-wide text-[#2680eb] flex items-center gap-1">
+          <section className="cad-card p-2 space-y-2 border border-[#ed7300]/40">
+            <b className="uppercase tracking-wide text-[#ed7300] flex items-center gap-1">
               <Paintbrush className="w-3 h-3" /> Weight Paint Tools
             </b>
             <div className="grid grid-cols-4 gap-1">
@@ -390,7 +390,7 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
                 step={0.1}
                 value={toolState.brushSize || 2}
                 onChange={(e) => setToolState((s) => ({ ...s, brushSize: Number(e.target.value) }))}
-                className="w-full accent-[#1473e6] mt-1"
+                className="w-full accent-[#ed7300] mt-1"
               />
             </label>
             <label className="block text-[#8c8c8c]">
@@ -405,7 +405,7 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
                 className="w-full accent-[#e68619] mt-1"
               />
             </label>
-            <div className="rounded bg-[#121212] px-2 py-1.5 text-[#8c8c8c]">
+            <div className="rounded bg-[#3a3a3a] px-2 py-1.5 text-[#8c8c8c]">
               Painting for: <b className="text-white">{selected?.name || 'select a bone'}</b>
             </div>
           </section>
@@ -428,10 +428,10 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
               const active = bone.id === selected?.id;
               return (
                 <button key={bone.id} onClick={() => setSelectedBoneId(bone.id)}
-                  className={`w-full h-7 rounded border flex items-center gap-1.5 pr-2 text-left ${active ? 'bg-[rgba(20,115,230,.24)] border-[#1473e6] text-white' : 'bg-[#202020] border-transparent hover:border-[#3e3e3e] text-[#b3b3b3]'}`}
+                  className={`w-full h-7 rounded border flex items-center gap-1.5 pr-2 text-left ${active ? 'bg-[rgba(20,115,230,.24)] border-[#ed7300] text-white' : 'bg-[#2e2e2e] border-transparent hover:border-[#4d4d4d] text-[#b3b3b3]'}`}
                   style={{ paddingLeft: 6 + depth * 13 }}>
                   {depth > 0 && <ChevronRight className="w-3 h-3 text-[#6f6f6f]"/>}
-                  <Bone className="w-3.5 h-3.5" style={{ color: bone.color || '#2680eb' }}/>
+                  <Bone className="w-3.5 h-3.5" style={{ color: bone.color || '#ed7300' }}/>
                   <span className="truncate flex-1">{bone.name}</span>
                   {bone.locked && <Lock className="w-3 h-3 text-[#8c8c8c]"/>}
                   {bone.deform === false && <span className="text-[8px] text-[#e68619]">IK</span>}
@@ -451,11 +451,11 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
                   className="adobe-control h-7 px-1 text-[9px]"
                   onClick={() => applyPreset(preset.id)}
                 >
-                  <Wand2 className="w-3 h-3 text-[#1473e6]" />{preset.label}
+                  <Wand2 className="w-3 h-3 text-[#ed7300]" />{preset.label}
                 </button>
               ))}
             </div>
-            <div className="grid grid-cols-3 gap-1 pt-1 border-t border-[#2d2d2d]">
+            <div className="grid grid-cols-3 gap-1 pt-1 border-t border-[#1a1a1a]">
               <button className="adobe-control h-7 px-1 text-[9px]" onClick={() => {
                 if (bones.length && !window.confirm('Replace the current skeleton with Tail Chain?')) return;
                 const preset = createTailChainRig(5);
@@ -539,7 +539,7 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
             restPosition: { ...selected.position }, restRotation: { ...selected.rotation }, restScale: { ...selected.scale },
           })}><RotateCw className="w-3 h-3"/>Set Current as Rest Pose</button>
 
-          <div className="border-t border-[#323232] pt-2 space-y-1">
+          <div className="border-t border-[#4d4d4d] pt-2 space-y-1">
             <b className="uppercase tracking-wide text-[8px] text-[#8c8c8c]">IK & Constraints</b>
             <button className={`adobe-control w-full h-7 ${selected.constraints?.some((item) => item.type === 'limit-rotation' && item.enabled) ? 'is-active' : ''}`}
               onClick={() => {
@@ -586,7 +586,7 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
 
         <section className="cad-card p-2 space-y-2">
           <b className="uppercase tracking-wide text-[#b3b3b3] flex items-center gap-1"><Box className="w-3 h-3"/>Skin binding</b>
-          <div className="rounded bg-[#121212] p-2">
+          <div className="rounded bg-[#3a3a3a] p-2">
             <div className="truncate text-white">{activeMesh?.name || 'No mesh selected'}</div>
             <div className="text-[#8c8c8c] mt-0.5">{weightedCount}/{activeMesh?.vertices.length || 0} weighted vertices</div>
           </div>

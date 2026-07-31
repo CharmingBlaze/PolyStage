@@ -51,7 +51,7 @@ export const EnvironmentSettingsModal: React.FC<EnvironmentSettingsModalProps> =
 
   return (
     <div
-      className="absolute z-40 shadow-2xl rounded-lg border border-[#3e3e3e] bg-[#1a1a1a]/95 backdrop-blur-md font-mono text-[10px] text-[#cccccc] select-none"
+      className="absolute z-40 shadow-2xl rounded-lg border border-[#4d4d4d] bg-[#1a1a1a]/95 backdrop-blur-md font-mono text-[10px] text-[#cccccc] select-none"
       style={{ left: position.x, top: position.y, width: minimized ? 220 : 280 }}
     >
       <div
@@ -68,7 +68,7 @@ export const EnvironmentSettingsModal: React.FC<EnvironmentSettingsModalProps> =
           <span>ENVIRONMENT</span>
         </div>
         <div className="flex items-center gap-0.5">
-          <button type="button" className="p-1 rounded hover:bg-[#383838] text-[#aaa]" onClick={() => setMinimized((v) => !v)}>
+          <button type="button" className="p-1 rounded hover:bg-[#4d4d4d] text-[#aaa]" onClick={() => setMinimized((v) => !v)}>
             {minimized ? <Maximize2 className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
           </button>
           <button type="button" className="p-1 rounded hover:bg-rose-900/40 text-[#aaa] hover:text-rose-400" onClick={onClose}>
@@ -87,8 +87,8 @@ export const EnvironmentSettingsModal: React.FC<EnvironmentSettingsModalProps> =
                 onClick={() => setEnvironment((prev) => weatherPresetToEnv(w, prev))}
                 className={`h-6 rounded text-[9px] capitalize border ${
                   environment.weather === w
-                    ? 'border-[#1473e6] bg-[#1473e6]/20 text-[#8ec5ff]'
-                    : 'border-[#2a2a2a] text-[#888] hover:text-white'
+                    ? 'border-[#ed7300] bg-[#ed7300]/20 text-[#8ec5ff]'
+                    : 'border-[#1a1a1a] text-[#888] hover:text-white'
                 }`}
               >
                 {w}
@@ -143,8 +143,8 @@ export const EnvironmentSettingsModal: React.FC<EnvironmentSettingsModalProps> =
                 type="button"
                 className={`h-6 rounded text-[9px] border ${
                   environment.backgroundMode !== 'solid'
-                    ? 'border-[#1473e6] bg-[#1473e6]/20 text-[#8ec5ff]'
-                    : 'border-[#2a2a2a] text-[#888] hover:text-white'
+                    ? 'border-[#ed7300] bg-[#ed7300]/20 text-[#8ec5ff]'
+                    : 'border-[#1a1a1a] text-[#888] hover:text-white'
                 }`}
                 onClick={() => patch({ backgroundMode: 'sky' })}
               >
@@ -154,8 +154,8 @@ export const EnvironmentSettingsModal: React.FC<EnvironmentSettingsModalProps> =
                 type="button"
                 className={`h-6 rounded text-[9px] border ${
                   environment.backgroundMode === 'solid'
-                    ? 'border-[#1473e6] bg-[#1473e6]/20 text-[#8ec5ff]'
-                    : 'border-[#2a2a2a] text-[#888] hover:text-white'
+                    ? 'border-[#ed7300] bg-[#ed7300]/20 text-[#8ec5ff]'
+                    : 'border-[#1a1a1a] text-[#888] hover:text-white'
                 }`}
                 onClick={() => patch({ backgroundMode: 'solid', backgroundColor: environment.backgroundColor || '#000000' })}
               >

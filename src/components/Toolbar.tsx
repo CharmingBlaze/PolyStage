@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Box,
   Move,
@@ -23,6 +23,7 @@ import {
   MousePointer2,
   PersonStanding,
   Hand,
+  GripHorizontal,
 } from 'lucide-react';
 import type { ToolState, EditMode, TransformMode, RigMode } from '../types/cad';
 
@@ -58,6 +59,27 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   paintWorkspace = false,
   rigWorkspace = false,
 }) => {
+  const [paintPanelPos, setPaintPanelPos] = useState({ x: 40, y: 72 });
+  const [draggingPaintPanel, setDraggingPaintPanel] = useState(false);
+  const paintDragOffsetRef = useRef({ x: 0, y: 0 });
+
+  useEffect(() => {
+    if (!draggingPaintPanel) return;
+    const onMove = (e: MouseEvent) => {
+      setPaintPanelPos({
+        x: Math.max(8, Math.min(window.innerWidth - 240, e.clientX - paintDragOffsetRef.current.x)),
+        y: Math.max(8, Math.min(window.innerHeight - 80, e.clientY - paintDragOffsetRef.current.y)),
+      });
+    };
+    const onUp = () => setDraggingPaintPanel(false);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [draggingPaintPanel]);
+
   const editModes: { id: EditMode; label: string; icon: any; shortcut: string }[] = [
     { id: 'object', label: 'Object', icon: Box, shortcut: '1' },
     { id: 'vertex', label: 'Vertex', icon: CircleDot, shortcut: '2' },
@@ -94,12 +116,12 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   };
 
   return (
-    <aside className="w-10 bg-[#1c1c1c] border-r border-[#323232] flex flex-col items-center py-1.5 gap-1.5 z-[90] font-sans select-none text-[#e0e0e0] shadow-md">
-      <div className="w-7 h-5 rounded bg-[#262626] border border-[#383838] flex items-center justify-center text-[#1473e6] font-bold font-mono text-[9px] shadow-sm">
+    <aside className="w-10 sp-tool-shelf flex flex-col items-center py-1.5 gap-1 z-[90] font-sans select-none text-[#cccccc]">
+      <div className="w-7 h-5 bg-[#262626] border border-[#1a1a1a] flex items-center justify-center text-[#ed7300] font-bold text-[8px] uppercase tracking-wide">
         {rigWorkspace ? 'Rig' : 'Tools'}
       </div>
 
-      <div className="w-5 h-px bg-[#323232]" />
+      <div className="sp-sep-h is-rail" />
 
       {rigWorkspace ? (
         <div className="flex flex-col gap-0.5 w-full px-0.5 items-center">
@@ -111,15 +133,11 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 key={mode.id}
                 type="button"
                 onClick={() => setRigMode(mode.id)}
-                className={`w-7 h-7 rounded flex items-center justify-center transition relative group ${
-                  isActive
-                    ? 'bg-[#1473e6] text-white shadow-md font-bold'
-                    : 'bg-[#262626] text-[#a0a0a0] hover:bg-[#383838] hover:text-white'
-                }`}
+                className={`sp-tool-btn relative group ${isActive ? 'is-active' : ''}`}
                 title={mode.title}
               >
                 <Icon className="w-3.5 h-3.5" />
-                <span className="absolute left-9 bg-[#121212] text-white text-[9px] font-mono px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#383838]">
+                <span className="absolute left-9 bg-[#4d4d4d] text-[#cccccc] text-[9px] px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#1a1a1a]">
                   {mode.label} — {mode.title}
                 </span>
               </button>
@@ -139,15 +157,11 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                   editMode: mode.id,
                   isPainting3D: paintWorkspace ? true : false,
                 }))}
-                className={`w-7 h-7 rounded flex items-center justify-center transition relative group ${
-                  isActive
-                    ? 'bg-[#1473e6] text-white shadow-md font-bold'
-                    : 'bg-[#262626] text-[#a0a0a0] hover:bg-[#383838] hover:text-white'
-                }`}
+                className={`sp-tool-btn relative group ${isActive ? 'is-active' : ''}`}
                 title={`${mode.label} Mode (${mode.shortcut})`}
               >
                 <Icon className="w-3.5 h-3.5" />
-                <span className="absolute left-9 bg-[#121212] text-white text-[9px] font-mono px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#383838]">
+                <span className="absolute left-9 bg-[#4d4d4d] text-[#cccccc] text-[9px] px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#1a1a1a]">
                   {mode.label} Mode ({mode.shortcut})
                 </span>
               </button>
@@ -156,32 +170,32 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </div>
       )}
 
-      <div className="w-5 h-px bg-[#323232]" />
+      <div className="sp-sep-h is-rail" />
 
       <div className="flex flex-col gap-0.5 w-full px-0.5 items-center">
         <button
           onClick={onSelectAll}
-          className="w-7 h-7 bg-[#262626] text-[#a0a0a0] hover:bg-[#383838] hover:text-white rounded flex items-center justify-center transition relative group"
+          className="sp-tool-btn relative group"
           title="Select All (A)"
         >
           <CheckSquare className="w-3.5 h-3.5" />
-          <span className="absolute left-9 bg-[#121212] text-white text-[9px] font-mono px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#383838]">
+          <span className="absolute left-9 bg-[#4d4d4d] text-[#cccccc] text-[9px] px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#1a1a1a]">
             Select All (A)
           </span>
         </button>
         <button
           onClick={onDeselectAll}
-          className="w-7 h-7 bg-[#262626] text-[#a0a0a0] hover:bg-[#383838] hover:text-white rounded flex items-center justify-center transition relative group"
+          className="sp-tool-btn relative group"
           title="Deselect All (Alt+A)"
         >
           <SquareDashed className="w-3.5 h-3.5" />
-          <span className="absolute left-9 bg-[#121212] text-white text-[9px] font-mono px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#383838]">
+          <span className="absolute left-9 bg-[#4d4d4d] text-[#cccccc] text-[9px] px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#1a1a1a]">
             Deselect All (Alt+A)
           </span>
         </button>
       </div>
 
-      <div className="w-5 h-px bg-[#323232]" />
+      <div className="sp-sep-h is-rail" />
 
       <div className="flex flex-col gap-0.5 w-full px-0.5 items-center">
         {transformModes.map((mode) => {
@@ -195,15 +209,11 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 transformMode: mode.id,
                 isPainting3D: paintWorkspace ? true : false,
               }))}
-              className={`w-7 h-7 rounded flex items-center justify-center transition relative group ${
-                isActive
-                  ? 'bg-[#1473e6] text-white shadow-md font-bold'
-                  : 'bg-[#262626] text-[#a0a0a0] hover:bg-[#383838] hover:text-white'
-              }`}
+              className={`sp-tool-btn relative group ${isActive ? 'is-active' : ''}`}
               title={`${mode.label} Transform (${mode.shortcut})`}
             >
               <Icon className="w-3.5 h-3.5" />
-              <span className="absolute left-9 bg-[#121212] text-white text-[9px] font-mono px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#383838]">
+              <span className="absolute left-9 bg-[#4d4d4d] text-[#cccccc] text-[9px] px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#1a1a1a]">
                 {mode.label} ({mode.shortcut})
               </span>
             </button>
@@ -211,7 +221,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         })}
       </div>
 
-      <div className="w-5 h-px bg-[#323232]" />
+      <div className="sp-sep-h is-rail" />
 
       {!rigWorkspace && (
         <>
@@ -238,145 +248,215 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                   };
                 })
               }
-              className={`w-7 h-7 rounded flex items-center justify-center transition relative group ${
-                toolState.isPainting3D
-                  ? 'bg-[#1473e6] text-white font-semibold shadow-md'
-                  : 'bg-[#262626] text-[#a0a0a0] hover:bg-[#383838] hover:text-white'
+              className={`sp-tool-btn relative group ${
+                toolState.isPainting3D ? 'is-active' : ''
               }`}
               title={paintWorkspace ? 'Paint on 3D mesh (always on in Paint mode)' : 'Paint on 3D mesh (B)'}
             >
               <Paintbrush className="w-3.5 h-3.5" />
-              <span className="absolute left-9 bg-[#121212] text-white text-[9px] font-mono px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#383838]">
+              <span className="absolute left-9 bg-[#4d4d4d] text-[#cccccc] text-[9px] px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#1a1a1a]">
                 Paint on 3D (B)
               </span>
             </button>
             {toolState.isPainting3D && (
               <input
                 type="color"
-                value={toolState.activeColor || '#02a0e8'}
+                value={toolState.activeColor || '#ff9a3c'}
                 onChange={(e) => setToolState((s) => ({ ...s, activeColor: e.target.value, drawTool: 'pencil' }))}
-                className="w-6 h-5 bg-transparent border-0 cursor-pointer"
+                className="w-6 h-6 p-0 border border-[#4d4d4d] rounded-sm bg-transparent cursor-pointer"
                 title="Brush color"
               />
             )}
             {toolState.isPainting3D && (
-              <div className="adobe-menu fixed left-10 top-[76px] z-[100] w-56 p-3 text-[10px] font-mono">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-bold text-[#2680eb]">3D PAINT BRUSH</span>
-                  <span className="text-[#8c8c8c]">B / E / I</span>
-                </div>
-                <div className="grid grid-cols-5 gap-1 mb-3">
-                  {[
-                    { id: 'pencil', icon: Pencil, label: 'Brush' },
-                    { id: 'eraser', icon: Eraser, label: 'Erase' },
-                    { id: 'picker', icon: Pipette, label: 'Pick' },
-                    { id: 'fill', icon: PaintBucket, label: 'Fill' },
-                    { id: 'spray', icon: SprayCan, label: 'Spray' },
-                    { id: 'select', icon: MousePointer2, label: 'Select' },
-                  ].map(({ id, icon: Icon, label }) => (
-                    <button
-                      key={id}
-                      onClick={() => setToolState((s) => ({ ...s, drawTool: id as ToolState['drawTool'] }))}
-                      className={`h-8 rounded flex items-center justify-center border transition ${
-                        toolState.drawTool === id
-                          ? 'bg-[#1473e6] border-[#1473e6] text-white'
-                          : 'bg-[#2d2d2d] border-[#3e3e3e] text-[#b3b3b3] hover:bg-[#383838] hover:text-white'
-                      }`}
-                      title={label}
-                    >
-                      <Icon className="w-3.5 h-3.5"/>
-                    </button>
-                  ))}
-                </div>
-                <label className="flex items-center gap-2 mb-3">
-                  <input
-                    type="color"
-                    value={toolState.activeColor || '#02a0e8'}
-                    onChange={(e) => setToolState((s) => ({ ...s, activeColor: e.target.value, drawTool: 'pencil' }))}
-                    className="w-8 h-8 rounded bg-transparent border-0 cursor-pointer"
-                  />
-                  <span className="flex-1">
-                    <span className="block text-[#8c8c8c] mb-1">COLOR</span>
-                    <span className="text-[#e8e8e8]">{toolState.activeColor.toUpperCase()}</span>
-                  </span>
-                </label>
-                <label className="block mb-2 text-[#b3b3b3]">
-                  <span>SIZE</span><b className="float-right text-[#2680eb]">{toolState.brushSize}px</b>
-                  <input type="range" min="1" max="16" value={toolState.brushSize} onChange={(e) => setToolState((s) => ({...s, brushSize: +e.target.value}))} className="w-full"/>
-                </label>
-                <label className="block mb-2 text-[#b3b3b3]">
-                  <span>OPACITY</span><b className="float-right text-[#2680eb]">{Math.round(toolState.paintOpacity * 100)}%</b>
-                  <input type="range" min="0.05" max="1" step="0.05" value={toolState.paintOpacity} onChange={(e) => setToolState((s) => ({...s, paintOpacity: +e.target.value}))} className="w-full"/>
-                </label>
-                <label className="block mb-3 text-[#b3b3b3]">
-                  <span>SPACING</span><b className="float-right text-[#2680eb]">{Math.round(toolState.paintSpacing * 100)}%</b>
-                  <input type="range" min="0.1" max="1" step="0.05" value={toolState.paintSpacing} onChange={(e) => setToolState((s) => ({...s, paintSpacing: +e.target.value}))} className="w-full"/>
-                </label>
-                <button
-                  onClick={() => setToolState((s) => ({...s, paintMirrorU: !s.paintMirrorU}))}
-                  className={`adobe-control w-full h-7 text-[10px] flex items-center justify-center gap-1.5 ${toolState.paintMirrorU ? 'is-active' : ''}`}
+              <div
+                className="sp-paint3d fixed z-[100] w-[220px]"
+                style={{ left: paintPanelPos.x, top: paintPanelPos.y }}
+              >
+                <div
+                  className={`sp-paint3d__head ${draggingPaintPanel ? 'is-dragging' : ''}`}
+                  onMouseDown={(e) => {
+                    if ((e.target as HTMLElement).closest('button')) return;
+                    setDraggingPaintPanel(true);
+                    paintDragOffsetRef.current = {
+                      x: e.clientX - paintPanelPos.x,
+                      y: e.clientY - paintPanelPos.y,
+                    };
+                  }}
                 >
-                  <FlipHorizontal className="w-3 h-3"/> MIRROR ACROSS U
-                </button>
-                <div className="mt-2 text-[#8c8c8c] leading-relaxed">LMB on model paints · empty LMB orbits · continuous seam-aware strokes</div>
+                  <span className="sp-paint3d__accent" aria-hidden />
+                  <GripHorizontal className="sp-paint3d__grip" aria-hidden />
+                  <div className="min-w-0 flex-1">
+                    <div className="sp-paint3d__title">Paint Properties</div>
+                    <div className="sp-paint3d__sub">3D Brush · B E I</div>
+                  </div>
+                  <button
+                    type="button"
+                    className="sp-paint3d__close"
+                    title="Close 3D paint (B)"
+                    onClick={() => {
+                      if (paintWorkspace) return;
+                      setToolState((s) => ({ ...s, isPainting3D: false }));
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <div className="sp-paint3d__section">
+                  <div className="sp-paint3d__label">Tool</div>
+                  <div className="sp-paint3d__tools">
+                    {[
+                      { id: 'pencil', icon: Pencil, label: 'Brush (B)' },
+                      { id: 'eraser', icon: Eraser, label: 'Eraser (E)' },
+                      { id: 'picker', icon: Pipette, label: 'Picker (I)' },
+                      { id: 'fill', icon: PaintBucket, label: 'Fill' },
+                      { id: 'spray', icon: SprayCan, label: 'Spray' },
+                      { id: 'select', icon: MousePointer2, label: 'Select' },
+                    ].map(({ id, icon: Icon, label }) => (
+                      <button
+                        key={id}
+                        type="button"
+                        title={label}
+                        onClick={() => setToolState((s) => ({ ...s, drawTool: id as ToolState['drawTool'] }))}
+                        className={`sp-paint3d__tool ${toolState.drawTool === id ? 'is-active' : ''}`}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="sp-paint3d__section">
+                  <div className="sp-paint3d__label">Color</div>
+                  <label className="sp-paint3d__color">
+                    <input
+                      type="color"
+                      value={toolState.activeColor || '#ff9a3c'}
+                      onChange={(e) => setToolState((s) => ({ ...s, activeColor: e.target.value, drawTool: 'pencil' }))}
+                      className="sp-paint3d__swatch"
+                      title="Brush color"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="sp-paint3d__hex">{(toolState.activeColor || '#ff9a3c').toUpperCase()}</div>
+                      <div className="sp-paint3d__hint">Click swatch to pick</div>
+                    </div>
+                  </label>
+                </div>
+
+                <div className="sp-paint3d__section sp-paint3d__props">
+                  <label className="sp-paint3d__prop">
+                    <div className="sp-paint3d__prop-row">
+                      <span>Size</span>
+                      <b>{toolState.brushSize} px</b>
+                    </div>
+                    <input
+                      type="range"
+                      min="1"
+                      max="16"
+                      value={toolState.brushSize}
+                      onChange={(e) => setToolState((s) => ({ ...s, brushSize: +e.target.value }))}
+                    />
+                  </label>
+                  <label className="sp-paint3d__prop">
+                    <div className="sp-paint3d__prop-row">
+                      <span>Opacity</span>
+                      <b>{Math.round(toolState.paintOpacity * 100)}%</b>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.05"
+                      max="1"
+                      step="0.05"
+                      value={toolState.paintOpacity}
+                      onChange={(e) => setToolState((s) => ({ ...s, paintOpacity: +e.target.value }))}
+                    />
+                  </label>
+                  <label className="sp-paint3d__prop">
+                    <div className="sp-paint3d__prop-row">
+                      <span>Spacing</span>
+                      <b>{Math.round(toolState.paintSpacing * 100)}%</b>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.1"
+                      max="1"
+                      step="0.05"
+                      value={toolState.paintSpacing}
+                      onChange={(e) => setToolState((s) => ({ ...s, paintSpacing: +e.target.value }))}
+                    />
+                  </label>
+                </div>
+
+                <div className="sp-paint3d__section sp-paint3d__footer">
+                  <button
+                    type="button"
+                    onClick={() => setToolState((s) => ({ ...s, paintMirrorU: !s.paintMirrorU }))}
+                    className={`sp-paint3d__toggle ${toolState.paintMirrorU ? 'is-active' : ''}`}
+                  >
+                    <FlipHorizontal className="w-3 h-3" />
+                    <span>Mirror U</span>
+                    <span className="sp-paint3d__toggle-state">{toolState.paintMirrorU ? 'On' : 'Off'}</span>
+                  </button>
+                  <p className="sp-paint3d__tips">LMB paint · empty LMB orbit · continuous strokes</p>
+                </div>
               </div>
             )}
           </div>
 
-          <div className="w-5 h-px bg-[#323232]" />
+          <div className="sp-sep-h is-rail" />
 
           <div className="flex flex-col gap-0.5 w-full px-0.5 items-center">
             <button
               onClick={onExtrudeFace}
-              className="w-7 h-7 bg-[#262626] text-[#e68619] hover:bg-[#383838] rounded flex items-center justify-center transition relative group"
+              className="w-7 h-7 bg-[#262626] text-[#e68619] hover:bg-[#4d4d4d] rounded flex items-center justify-center transition relative group"
               title="Extrude Face (E)"
             >
               <Pencil className="w-3.5 h-3.5" />
-              <span className="absolute left-9 bg-[#121212] text-white text-[9px] font-mono px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#383838]">
+              <span className="absolute left-9 bg-[#3a3a3a] text-white text-[9px] font-mono px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#4d4d4d]">
                 Extrude Face (E)
               </span>
             </button>
 
             <button
               onClick={onInsetFace}
-              className="w-7 h-7 bg-[#262626] text-[#2680eb] hover:bg-[#383838] rounded flex items-center justify-center transition relative group"
+              className="w-7 h-7 bg-[#262626] text-[#ed7300] hover:bg-[#4d4d4d] rounded flex items-center justify-center transition relative group"
               title="Inset Face (I)"
             >
               <Minimize className="w-3.5 h-3.5" />
-              <span className="absolute left-9 bg-[#121212] text-white text-[9px] font-mono px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#383838]">
+              <span className="absolute left-9 bg-[#3a3a3a] text-white text-[9px] font-mono px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#4d4d4d]">
                 Inset Face (I)
               </span>
             </button>
 
             <button
               onClick={onMergeVertices}
-              className="w-7 h-7 bg-[#262626] text-[#2680eb] hover:bg-[#383838] rounded flex items-center justify-center transition relative group"
+              className="w-7 h-7 bg-[#262626] text-[#ed7300] hover:bg-[#4d4d4d] rounded flex items-center justify-center transition relative group"
               title="Weld / Merge Vertices"
             >
               <Grid className="w-3.5 h-3.5" />
-              <span className="absolute left-9 bg-[#121212] text-white text-[9px] font-mono px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#383838]">
+              <span className="absolute left-9 bg-[#3a3a3a] text-white text-[9px] font-mono px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#4d4d4d]">
                 Weld Vertices
               </span>
             </button>
 
             <button
               onClick={onMirrorSymmetry}
-              className="w-7 h-7 bg-[#262626] text-[#2d9d78] hover:bg-[#383838] rounded flex items-center justify-center transition relative group"
+              className="w-7 h-7 bg-[#262626] text-[#2d9d78] hover:bg-[#4d4d4d] rounded flex items-center justify-center transition relative group"
               title="Mirror Symmetry (X)"
             >
               <FlipHorizontal className="w-3.5 h-3.5" />
-              <span className="absolute left-9 bg-[#121212] text-white text-[9px] font-mono px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#383838]">
+              <span className="absolute left-9 bg-[#3a3a3a] text-white text-[9px] font-mono px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#4d4d4d]">
                 Mirror Symmetry
               </span>
             </button>
 
             <button
               onClick={onMagnetSnap}
-              className="w-7 h-7 bg-[#262626] text-[#ec5b62] hover:bg-[#383838] rounded flex items-center justify-center transition relative group"
+              className="w-7 h-7 bg-[#262626] text-[#ec5b62] hover:bg-[#4d4d4d] rounded flex items-center justify-center transition relative group"
               title="Magnet Vertex Snap"
             >
               <Magnet className="w-3.5 h-3.5" />
-              <span className="absolute left-9 bg-[#121212] text-white text-[9px] font-mono px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#383838]">
+              <span className="absolute left-9 bg-[#3a3a3a] text-white text-[9px] font-mono px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#4d4d4d]">
                 Magnet Vertex Snap
               </span>
             </button>
@@ -392,23 +472,23 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             className={`w-7 h-7 rounded flex items-center justify-center transition relative group ${
               activeRigMode === 'skin'
                 ? 'bg-[#ec5b62] text-white shadow-md'
-                : 'bg-[#262626] text-[#a0a0a0] hover:bg-[#383838] hover:text-white'
+                : 'bg-[#262626] text-[#a0a0a0] hover:bg-[#4d4d4d] hover:text-white'
             }`}
             title="Weight paint"
           >
             <Paintbrush className="w-3.5 h-3.5" />
-            <span className="absolute left-9 bg-[#121212] text-white text-[9px] font-mono px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#383838]">
+            <span className="absolute left-9 bg-[#3a3a3a] text-white text-[9px] font-mono px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#4d4d4d]">
               Weight Paint
             </span>
           </button>
           <button
             type="button"
             onClick={onMirrorSymmetry}
-            className="w-7 h-7 bg-[#262626] text-[#2d9d78] hover:bg-[#383838] rounded flex items-center justify-center transition relative group"
+            className="w-7 h-7 bg-[#262626] text-[#2d9d78] hover:bg-[#4d4d4d] rounded flex items-center justify-center transition relative group"
             title="Mirror bones / symmetry"
           >
             <FlipHorizontal className="w-3.5 h-3.5" />
-            <span className="absolute left-9 bg-[#121212] text-white text-[9px] font-mono px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#383838]">
+            <span className="absolute left-9 bg-[#3a3a3a] text-white text-[9px] font-mono px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition pointer-events-none z-50 whitespace-nowrap border border-[#4d4d4d]">
               Mirror Symmetry
             </span>
           </button>
@@ -420,7 +500,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <select
           value={toolState.gridSnap}
           onChange={(e) => setToolState((s) => ({ ...s, gridSnap: parseFloat(e.target.value) }))}
-          className="bg-[#121212] text-[#1473e6] text-[8.5px] font-mono p-0.5 rounded border border-[#383838] outline-none cursor-pointer text-center w-8"
+          className="bg-[#3a3a3a] text-[#ed7300] text-[8.5px] font-mono p-0.5 rounded border border-[#4d4d4d] outline-none cursor-pointer text-center w-8"
         >
           {gridSnapValues.map((val) => (
             <option key={val} value={val}>

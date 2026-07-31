@@ -44,26 +44,26 @@ export const RenderExportPanel: React.FC<RenderExportPanelProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#1c1c1c] text-[#e0e0e0] font-sans text-xs select-none">
-      <div className="h-8 bg-[#141414] border-b border-[#323232] px-3 flex items-center justify-between font-mono text-[10px] text-[#1473e6] font-bold">
+    <div className="flex flex-col h-full bg-[#333333] text-[#e0e0e0] font-sans text-xs select-none">
+      <div className="h-8 bg-[#262626] border-b border-[#4d4d4d] px-3 flex items-center justify-between font-mono text-[10px] text-[#ed7300] font-bold">
         <span className="flex items-center gap-1.5 uppercase">
-          <Sparkles className="w-3.5 h-3.5 text-[#1473e6]" />
+          <Sparkles className="w-3.5 h-3.5 text-[#ed7300]" />
           MODERN AAA GAME RENDER STUDIO
         </span>
         <span className="text-[#888888]">HIGH-DEF PBR ENGINE</span>
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-4 custom-scrollbar">
-        <div className="cad-card p-2.5 space-y-3 border border-[#383838] bg-[#262626]">
-          <span className="text-[9px] font-mono font-bold text-[#1473e6] uppercase tracking-wider block flex items-center gap-1">
-            <Sun className="w-3 h-3 text-[#1473e6]" />
+        <div className="cad-card p-2.5 space-y-3 border border-[#4d4d4d] bg-[#262626]">
+          <span className="text-[9px] font-mono font-bold text-[#ed7300] uppercase tracking-wider block flex items-center gap-1">
+            <Sun className="w-3 h-3 text-[#ed7300]" />
             HIGH-DEF LIGHTING & SOFT SHADOWS
           </span>
 
           <div className="space-y-2 font-mono text-[10px]">
             <div className="flex justify-between items-center text-[#888888]">
               <span>Directional Key Light:</span>
-              <span className="text-[#1473e6] font-bold">{renderSettings.lightIntensity}x</span>
+              <span className="text-[#ed7300] font-bold">{renderSettings.lightIntensity}x</span>
             </div>
             <input
               type="range"
@@ -72,7 +72,7 @@ export const RenderExportPanel: React.FC<RenderExportPanelProps> = ({
               step="0.1"
               value={renderSettings.lightIntensity}
               onChange={(e) => setRenderSettings((s) => ({ ...s, lightIntensity: parseFloat(e.target.value) }))}
-              className="w-full accent-[#1473e6] cursor-pointer"
+              className="w-full accent-[#ed7300] cursor-pointer"
             />
 
             <div className="flex justify-between items-center text-[#888888]">
@@ -93,7 +93,7 @@ export const RenderExportPanel: React.FC<RenderExportPanelProps> = ({
               <span>Background</span>
               <input
                 type="color"
-                value={renderSettings.bgColor || '#161616'}
+                value={renderSettings.bgColor || '#2b2b2b'}
                 onChange={(e) => setRenderSettings((s) => ({ ...s, bgColor: e.target.value }))}
                 className="h-6 w-10 bg-transparent"
               />
@@ -101,7 +101,7 @@ export const RenderExportPanel: React.FC<RenderExportPanelProps> = ({
           </div>
         </div>
 
-        <div className="cad-card p-2.5 space-y-2 border border-[#383838] bg-[#262626]">
+        <div className="cad-card p-2.5 space-y-2 border border-[#4d4d4d] bg-[#262626]">
           <span className="text-[9px] font-mono font-bold text-[#2d9d78] uppercase tracking-wider flex items-center gap-1">
             <CloudRain className="w-3 h-3" /> Weather & Atmosphere
           </span>
@@ -114,7 +114,7 @@ export const RenderExportPanel: React.FC<RenderExportPanelProps> = ({
                 className={`h-7 rounded border capitalize text-[9px] font-bold ${
                   renderSettings.weather === w
                     ? 'border-[#2d9d78] bg-[#2d9d78]/25 text-white'
-                    : 'border-[#323232] text-[#b3b3b3] hover:border-[#2d9d78]'
+                    : 'border-[#4d4d4d] text-[#b3b3b3] hover:border-[#2d9d78]'
                 }`}
               >
                 {w}
@@ -136,7 +136,7 @@ export const RenderExportPanel: React.FC<RenderExportPanelProps> = ({
           />
         </div>
 
-        <div className="cad-card p-2.5 space-y-3 border border-[#383838] bg-[#262626]">
+        <div className="cad-card p-2.5 space-y-3 border border-[#4d4d4d] bg-[#262626]">
           <span className="text-[9px] font-mono font-bold text-[#2d9d78] uppercase tracking-wider block flex items-center gap-1">
             <Eye className="w-3 h-3 text-[#2d9d78]" />
             POST FX
@@ -145,44 +145,44 @@ export const RenderExportPanel: React.FC<RenderExportPanelProps> = ({
             <button
               type="button"
               onClick={() => setRenderSettings((s) => ({ ...s, bloom: !s.bloom }))}
-              className={`flex-1 h-7 rounded border text-[9px] font-bold ${renderSettings.bloom ? 'border-[#1473e6] bg-[#1473e6]/20' : 'border-[#323232]'}`}
+              className={`flex-1 h-7 rounded border text-[9px] font-bold ${renderSettings.bloom ? 'border-[#ed7300] bg-[#ed7300]/20' : 'border-[#4d4d4d]'}`}
             >
               Bloom
             </button>
             <button
               type="button"
               onClick={() => setRenderSettings((s) => ({ ...s, ssao: !s.ssao }))}
-              className={`flex-1 h-7 rounded border text-[9px] font-bold ${renderSettings.ssao ? 'border-[#e68619] bg-[#e68619]/20' : 'border-[#323232]'}`}
+              className={`flex-1 h-7 rounded border text-[9px] font-bold ${renderSettings.ssao ? 'border-[#e68619] bg-[#e68619]/20' : 'border-[#4d4d4d]'}`}
             >
               SSAO
             </button>
           </div>
         </div>
 
-        <div className="cad-card p-2.5 space-y-3 border border-[#383838] bg-[#262626]">
-          <span className="text-[9px] font-mono font-bold text-[#2680eb] uppercase tracking-wider block flex items-center gap-1">
-            <Film className="w-3 h-3 text-[#2680eb]" />
+        <div className="cad-card p-2.5 space-y-3 border border-[#4d4d4d] bg-[#262626]">
+          <span className="text-[9px] font-mono font-bold text-[#ed7300] uppercase tracking-wider block flex items-center gap-1">
+            <Film className="w-3 h-3 text-[#ed7300]" />
             GAME TURNTABLE CAMERA SPIN
           </span>
           <button
             onClick={() => setRenderSettings((s) => ({ ...s, isTurntablePlaying: !s.isTurntablePlaying }))}
             className={`px-3 py-1.5 rounded font-mono text-[10px] font-bold w-full transition ${
-              renderSettings.isTurntablePlaying ? 'bg-[#e68619] text-white' : 'bg-[#1473e6] text-white'
+              renderSettings.isTurntablePlaying ? 'bg-[#e68619] text-white' : 'bg-[#ed7300] text-white'
             }`}
           >
             {renderSettings.isTurntablePlaying ? 'PAUSE SPIN' : 'PLAY 360° SPIN'}
           </button>
         </div>
 
-        <div className="cad-card p-2.5 space-y-2 border border-[#383838] bg-[#262626]">
-          <span className="text-[9px] font-mono font-bold text-[#2680eb] uppercase tracking-wider block flex items-center gap-1">
-            <Layers className="w-3 h-3 text-[#2680eb]" />
+        <div className="cad-card p-2.5 space-y-2 border border-[#4d4d4d] bg-[#262626]">
+          <span className="text-[9px] font-mono font-bold text-[#ed7300] uppercase tracking-wider block flex items-center gap-1">
+            <Layers className="w-3 h-3 text-[#ed7300]" />
             MODERN ASSET EXPORT
           </span>
 
           <button
             onClick={onOpenSpriteSheetModal}
-            className="w-full py-2 bg-[#1473e6] text-white font-bold rounded text-xs flex items-center justify-center gap-1.5"
+            className="w-full py-2 bg-[#ed7300] text-white font-bold rounded text-xs flex items-center justify-center gap-1.5"
           >
             <Film className="w-3.5 h-3.5" />
             <span>EXPORT RENDER SEQUENCE</span>
@@ -206,9 +206,9 @@ export const RenderExportPanel: React.FC<RenderExportPanelProps> = ({
 
           <button
             onClick={handleExportOBJ}
-            className="w-full py-2 cad-button font-bold text-[#1473e6] text-xs flex items-center justify-center gap-1.5"
+            className="w-full py-2 cad-button font-bold text-[#ed7300] text-xs flex items-center justify-center gap-1.5"
           >
-            <Sparkles className="w-3.5 h-3.5 text-[#1473e6]" />
+            <Sparkles className="w-3.5 h-3.5 text-[#ed7300]" />
             <span>EXPORT HIGH-DEF OBJ</span>
           </button>
         </div>

@@ -54,7 +54,7 @@ export function LengthField({
 
   return (
     <div
-      className="flex items-center gap-1 h-6 px-1.5 rounded bg-[#121212] border border-[#e68619]/40 shrink-0 cursor-ew-resize select-none"
+      className="flex items-center gap-1 h-6 px-1.5 rounded bg-[#3a3a3a] border border-[#e68619]/40 shrink-0 cursor-ew-resize select-none"
       title={title || 'Drag left/right to change length · click number to type · Shift = fine'}
       onPointerDown={beginDrag}
       onPointerMove={onDragMove}

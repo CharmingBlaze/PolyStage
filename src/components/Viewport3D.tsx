@@ -5,6 +5,11 @@ import { applyStandardOrbitMouseButtons, bindBlockbenchOrbitModifiers, STANDARD_
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import type { CADMesh, CADBone, CADCamera, CADLight, ParticleEmitter, EnvironmentSettings, ToolState, RenderSettings, PrimitiveType, SceneSelection, Vector3D, WorkspaceMode } from '../types/cad';
 import { buildThreeGeometry, generatePrimitive, snapToGrid } from '../utils/meshUtils';
+import {
+  beginModalMeshOp,
+  applyModalAmount,
+  type ModalMeshSession,
+} from '../utils/modalMeshOps';
 import { evaluateMeshModifiers, syncMirroredBonePose, syncSymmetricalVertices } from '../utils/mirrorModeling';
 import { buildLogicalEdgeGeometry, buildTriangulationDebugGeometry } from '../utils/topology/edgeOverlay';
 import {
@@ -13,6 +18,7 @@ import {
   loopCutFactors,
   type KnifeHit,
 } from '../utils/meshCutTools';
+import { samplePaintStrokeUvs } from '../utils/bvh/picking';
 import { LightwaveNavToolbar } from './LightwaveNavToolbar';
 import { deformMeshWithBones, getBoneWorldMatrices, paintVertexWeight } from '../utils/rigging';
 import { evaluateConstraints } from '../utils/ik';
@@ -51,7 +57,7 @@ interface Viewport3DProps {
   setSelectedMeshIds?: React.Dispatch<React.SetStateAction<string[]>>;
   activeWorkspaceMode?: WorkspaceMode;
   activeRightTab?: string;
-  onDirect3DPaintPixel?: (uvU: number, uvV: number, isFinal?: boolean) => void;
+  onDirect3DPaintPixel?: (uvU: number, uvV: number, isFinal?: boolean, faceId?: string | null) => void;
   onSpawnDrawnPrimitive?: (newMesh: CADMesh) => void;
   onOpenUVModal?: () => void;
   isQuadSubViewport?: boolean;
@@ -146,6 +152,13 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const dragStartGizmoPosRef = useRef<THREE.Vector3>(new THREE.Vector3());
   const initialVertsMapRef = useRef<Map<string, { x: number; y: number; z: number }>>(new Map());
   const modalActiveRef = useRef(false);
+  /** Frozen pre-op mesh for extrude/inset/bevel — survives Strict Mode remounts. */
+  const meshOpFreezeRef = useRef<{
+    op: 'extrude' | 'inset' | 'bevel';
+    mesh: CADMesh;
+    faceIds: string[];
+    edgeIds: string[];
+  } | null>(null);
   const meshSnapshotRef = useRef<CADMesh | null>(null);
   const pendingComponentVertsRef = useRef<CADMesh['vertices'] | null>(null);
   const transformSnapshotRef = useRef<{
@@ -183,6 +196,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   setEnvironmentRef.current = setEnvironment;
   const setToolStateRef = useRef(setToolState);
   setToolStateRef.current = setToolState;
+  const onModalMeshConfirmRef = useRef(onModalMeshConfirm);
+  onModalMeshConfirmRef.current = onModalMeshConfirm;
+  const onModalMeshCancelRef = useRef(onModalMeshCancel);
+  onModalMeshCancelRef.current = onModalMeshCancel;
 
   /** Local → world matrix for a CAD mesh (position/rotation/scale). */
   const getMeshWorldMatrix = (mesh: CADMesh) => {
@@ -308,6 +325,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const [cadStep, setCadStep] = useState<0 | 1 | 2>(0);
   const [placementHoverPos, setPlacementHoverPos] = useState<THREE.Vector3 | null>(null);
   const [isPainting3DActive, setIsPainting3DActive] = useState<boolean>(false);
+  const lastPaintClientRef = useRef<{ x: number; y: number } | null>(null);
   const [paintCursor, setPaintCursor] = useState<{ x: number; y: number; u: number; v: number } | null>(null);
   const [hoveredVertexId, setHoveredVertexId] = useState<string | null>(null);
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
@@ -395,7 +413,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const height = containerRef.current.clientHeight;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color('#161616');
+    scene.background = new THREE.Color('#2b2b2b');
     sceneRef.current = scene;
 
     let camera: THREE.PerspectiveCamera | THREE.OrthographicCamera;
@@ -657,7 +675,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         Math.cos(el) * Math.cos(azr) * 20,
       );
     }
-    scene.background = new THREE.Color(renderSettings.bgColor || '#161616');
+    scene.background = new THREE.Color(renderSettings.bgColor || '#2b2b2b');
     const fogDensity = renderSettings.fogDensity ?? 0;
     if (fogDensity > 0.001) {
       scene.fog = new THREE.FogExp2(renderSettings.fogColor || '#a8b4c4', fogDensity);
@@ -1193,56 +1211,248 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   }, [toolState.modalTransform]);
 
 
-  // Blender-style modal Extrude / Inset / Bevel — mouse drag sets amount
+  // Blender-style modal Extrude / Inset / Bevel — topology once, verts follow mouse (live Three).
   useEffect(() => {
     const op = toolState.modalMeshOp;
-    if (!op || op === 'loopCut' || op === 'knife') return;
-    if (!onModalMeshPreview || !onModalMeshConfirm || !onModalMeshCancel) return;
+    if (!op || op === 'loopCut' || op === 'knife') {
+      if (op !== 'loopCut' && op !== 'knife') meshOpFreezeRef.current = null;
+      return;
+    }
+    // In quad view only the perspective pane owns the modal (avoids 4 sessions fighting).
+    if (isQuadSubViewport && cameraType !== 'perspective') return;
 
+    const confirmCb = () => onModalMeshConfirmRef.current?.();
+    const cancelCb = () => onModalMeshCancelRef.current?.();
+    if (!onModalMeshConfirmRef.current || !onModalMeshCancelRef.current) return;
+
+    // Freeze once per op so preview setMesh / Strict Mode remount can't re-bevel a beveled mesh.
+    if (!meshOpFreezeRef.current || meshOpFreezeRef.current.op !== op) {
+      const src = activeMeshRef.current;
+      if (!src) {
+        cancelCb();
+        return;
+      }
+      meshOpFreezeRef.current = {
+        op,
+        mesh: JSON.parse(JSON.stringify(src)) as CADMesh,
+        faceIds: [...selectedFaceIdsRef.current],
+        edgeIds: [...selectedEdgeIdsRef.current],
+      };
+    }
+    const frozen = meshOpFreezeRef.current;
+    const baseMesh = frozen.mesh;
+    const faceIds = frozen.faceIds;
+    const edgeIds = frozen.edgeIds;
+
+    modalActiveRef.current = true;
+    if (facesHighlightGroupRef.current) facesHighlightGroupRef.current.visible = false;
+    if (controlsRef.current) controlsRef.current.enabled = false;
+    const tc = transformControlsRef.current;
+    if (tc) {
+      tc.enabled = false;
+      tc.detach();
+      tc.getHelper().visible = false;
+    }
+
+    let segments = 1;
+    let session: ModalMeshSession | null = beginModalMeshOp(
+      op,
+      JSON.parse(JSON.stringify(baseMesh)) as CADMesh,
+      faceIds,
+      edgeIds,
+      segments,
+    );
+    if (!session) {
+      meshOpFreezeRef.current = null;
+      modalActiveRef.current = false;
+      if (facesHighlightGroupRef.current) facesHighlightGroupRef.current.visible = true;
+      cancelCb();
+      return;
+    }
+
+    // Seed a visible starting amount so Extrude/Inset/Bevel are obvious immediately.
+    const initialAmount = op === 'extrude' ? 0 : op === 'bevel' ? 0.12 : 0.15;
+    session = applyModalAmount(session, initialAmount);
+
+    const openedAt = performance.now();
     let originX = 0;
     let originY = 0;
     let started = false;
-    if (controlsRef.current) controlsRef.current.enabled = false;
-
-    const amountFromDelta = (dx: number, dy: number) => {
-      // Mouse right / up = positive extrude along normals (Blender-like).
-      if (op === 'extrude') return (dx - dy) * 0.006;
-      if (op === 'bevel') return Math.max(0.002, Math.min(0.45, 0.06 + dx * 0.0025));
-      return Math.max(0, Math.min(0.95, 0.08 + dx * 0.003));
-    };
-
+    let finished = false;
     let rafId = 0;
     let pendingAmount: number | null = null;
+    let liveMesh = session.mesh;
+    const seedAmount = session.amount;
+    let modalWire: THREE.LineSegments | null = null;
+
+    const clearModalWire = () => {
+      if (!modalWire) return;
+      modalWire.parent?.remove(modalWire);
+      disposeObject3D(modalWire);
+      modalWire = null;
+    };
+
+    const setStaticMeshWiresVisible = (visible: boolean) => {
+      meshesGroupRef.current?.children.forEach((child) => {
+        if (child.userData?.meshId === baseMesh.id && (child as THREE.LineSegments).isLineSegments) {
+          child.visible = visible;
+        }
+      });
+    };
+    setStaticMeshWiresVisible(false);
+
+    const paintLive = (mesh: CADMesh) => {
+      liveMesh = mesh;
+      let target: THREE.Mesh | null =
+        activeMeshObjectRef.current && activeMeshObjectRef.current.userData?.meshId === baseMesh.id
+          ? activeMeshObjectRef.current
+          : null;
+      if (!target && meshesGroupRef.current) {
+        const found = meshesGroupRef.current.children.find(
+          (c) => c instanceof THREE.Mesh && c.userData?.meshId === baseMesh.id,
+        );
+        if (found instanceof THREE.Mesh) target = found;
+      }
+      if (target) {
+        const old = target.geometry;
+        target.geometry = buildThreeGeometry(mesh);
+        old.dispose();
+        activeMeshObjectRef.current = target;
+      }
+
+      clearModalWire();
+      if (meshesGroupRef.current) {
+        const wireGeo = buildLogicalEdgeGeometry(mesh);
+        const wireMat = new THREE.LineBasicMaterial({
+          color: 0xed7300,
+          depthTest: false,
+          transparent: true,
+          opacity: 0.95,
+        });
+        modalWire = new THREE.LineSegments(wireGeo, wireMat);
+        modalWire.renderOrder = 50;
+        modalWire.userData = { modalWire: true, meshId: baseMesh.id };
+        if (target) {
+          modalWire.position.copy(target.position);
+          modalWire.rotation.copy(target.rotation);
+          modalWire.scale.copy(target.scale);
+        } else {
+          modalWire.position.set(baseMesh.position.x, baseMesh.position.y, baseMesh.position.z);
+          modalWire.rotation.set(baseMesh.rotation.x, baseMesh.rotation.y, baseMesh.rotation.z);
+          modalWire.scale.set(baseMesh.scale.x, baseMesh.scale.y, baseMesh.scale.z);
+        }
+        meshesGroupRef.current.add(modalWire);
+      }
+
+      // Keep CAD mesh in sync so confirm/cancel and other panes see the preview.
+      setMeshRef.current({ ...mesh, id: baseMesh.id, revision: (baseMesh.revision || 0) + 1 });
+    };
+
+    paintLive(liveMesh);
+
+    const amountFromDelta = (dx: number, dy: number) => {
+      if (op === 'extrude') return (dx - dy) * 0.01;
+      const dist = Math.hypot(dx, dy);
+      if (op === 'bevel') {
+        return Math.max(0.02, Math.min(0.5, seedAmount + dist * 0.008));
+      }
+      return Math.max(0.02, Math.min(0.92, seedAmount + dist * 0.012));
+    };
+
     const flushPreview = () => {
       rafId = 0;
-      if (pendingAmount == null) return;
+      if (pendingAmount == null || !session) return;
       const amount = pendingAmount;
       pendingAmount = null;
-      onModalMeshPreview(amount);
+      session = applyModalAmount(session, amount);
+      paintLive(session.mesh);
+    };
+
+    const rebuildBevelSegments = (nextSegs: number) => {
+      if (op !== 'bevel' || !session) return;
+      const amount = session.amount ?? seedAmount;
+      segments = Math.max(1, Math.min(8, nextSegs));
+      const fresh = beginModalMeshOp(
+        'bevel',
+        JSON.parse(JSON.stringify(baseMesh)) as CADMesh,
+        faceIds,
+        edgeIds,
+        segments,
+      );
+      if (!fresh) return;
+      session = applyModalAmount(fresh, amount);
+      paintLive(session.mesh);
+    };
+
+    const confirm = () => {
+      if (finished || !session) return;
+      finished = true;
+      clearModalWire();
+      setStaticMeshWiresVisible(true);
+      const finalMesh = {
+        ...session.mesh,
+        id: baseMesh.id,
+        revision: (baseMesh.revision || 0) + 1,
+      };
+      setMeshRef.current(finalMesh);
+      if (session.resultFaceIds.length > 0) {
+        setSelectedFaceIds(session.resultFaceIds);
+        setSelectedEdgeIds?.([]);
+        setSelectedVertexIds([]);
+        setToolStateRef.current((s) => ({ ...s, editMode: 'face' }));
+      }
+      meshOpFreezeRef.current = null;
+      modalActiveRef.current = false;
+      confirmCb();
+    };
+
+    const cancel = () => {
+      if (finished) return;
+      finished = true;
+      clearModalWire();
+      setStaticMeshWiresVisible(true);
+      meshOpFreezeRef.current = null;
+      modalActiveRef.current = false;
+      cancelCb();
     };
 
     const onMove = (e: PointerEvent) => {
+      if (finished) return;
       if (!started) {
         originX = e.clientX;
         originY = e.clientY;
         started = true;
+        pendingAmount = amountFromDelta(0, 0);
+        if (!rafId) rafId = requestAnimationFrame(flushPreview);
         return;
       }
       pendingAmount = amountFromDelta(e.clientX - originX, e.clientY - originY);
       if (!rafId) rafId = requestAnimationFrame(flushPreview);
     };
     const onUp = (e: PointerEvent) => {
-      // Ignore the click that opened the tool (button) until the mouse has moved.
-      if (!started) return;
-      if (e.button === 0) onModalMeshConfirm();
-      else if (e.button === 2) onModalMeshCancel();
+      if (finished) return;
+      // Ignore the pointerup that may still be in-flight from the click that started the op.
+      if (performance.now() - openedAt < 160) return;
+      if (e.button === 0) confirm();
+      else if (e.button === 2) cancel();
     };
     const onContext = (e: Event) => e.preventDefault();
+    const onWheel = (e: WheelEvent) => {
+      if (op !== 'bevel' || finished) return;
+      e.preventDefault();
+      e.stopPropagation();
+      rebuildBevelSegments(segments + (e.deltaY < 0 ? 1 : -1));
+    };
     const onKey = (e: KeyboardEvent) => {
+      if (finished) return;
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopImmediatePropagation();
-        onModalMeshCancel();
+        cancel();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        confirm();
       }
     };
 
@@ -1250,25 +1460,32 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     window.addEventListener('pointerup', onUp);
     window.addEventListener('contextmenu', onContext);
     window.addEventListener('keydown', onKey, true);
+    window.addEventListener('wheel', onWheel, { passive: false, capture: true });
     return () => {
       if (rafId) cancelAnimationFrame(rafId);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('contextmenu', onContext);
       window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('wheel', onWheel, true);
+      clearModalWire();
+      setStaticMeshWiresVisible(true);
+      const cur = toolStateRef.current;
+      // Strict Mode remount / dep refresh while op still active — keep ownership + freeze.
+      if (!finished && (cur.modalMeshOp === 'extrude' || cur.modalMeshOp === 'inset' || cur.modalMeshOp === 'bevel')) {
+        modalActiveRef.current = true;
+        return;
+      }
+      if (!finished) {
+        meshOpFreezeRef.current = null;
+        modalActiveRef.current = false;
+      }
+      if (facesHighlightGroupRef.current) facesHighlightGroupRef.current.visible = true;
       if (controlsRef.current) {
-        controlsRef.current.enabled = !toolState.isCadDrawing && !toolState.placeOnClick;
+        controlsRef.current.enabled = !toolStateRef.current.isCadDrawing && !toolStateRef.current.placeOnClick;
       }
     };
-  }, [
-    toolState.modalMeshOp,
-    onModalMeshPreview,
-    onModalMeshConfirm,
-    onModalMeshCancel,
-    toolState.isCadDrawing,
-    toolState.placeOnClick,
-    toolState.isPainting3D,
-  ]);
+  }, [toolState.modalMeshOp, isQuadSubViewport, cameraType, setSelectedFaceIds, setSelectedEdgeIds, setSelectedVertexIds]);
 
   // Blender-style Loop Cut (Ctrl+R): hover edge → pin → slide / wheel → LMB confirm
   useEffect(() => {
@@ -1665,9 +1882,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
   // Real-Time Mesh, Vertex, Edge, Face, CAD Ghost Preview, & Interactive Placement Ghost Renderer
   useEffect(() => {
-    // Modal G/R/S / mesh gizmo drag owns live Three.js transforms — rebuilding here fights the grab.
+    // Modal G/R/S / Extrude·Inset·Bevel owner sets modalActiveRef and owns live Three.js geometry.
     // Scene-object (light/camera/…) drags must still allow mesh rebuild so meshes don't stick to the gizmo.
-    if (modalActiveRef.current || toolStateRef.current.modalTransform) return;
+    const meshOp = toolStateRef.current.modalMeshOp;
+    const interactiveMeshOp = meshOp === 'extrude' || meshOp === 'inset' || meshOp === 'bevel';
+    if (modalActiveRef.current || toolStateRef.current.modalTransform || interactiveMeshOp) return;
     const sceneSelNow = sceneSelectionRef.current;
     const draggingSceneObj =
       Boolean(transformControlsRef.current?.dragging) &&
@@ -2051,7 +2270,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           const faceMat = new THREE.MeshBasicMaterial({
             color: isFaceHovered ? 0xff0055 : 0xf59e0b,
             transparent: true,
-            opacity: isFaceHovered ? 0.6 : 0.45,
+            opacity: isFaceHovered ? 0.22 : 0.12,
             side: THREE.DoubleSide,
             depthTest: false,
           });
@@ -2072,8 +2291,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           const edgeGeo = new THREE.BufferGeometry();
           edgeGeo.setAttribute('position', new THREE.Float32BufferAttribute(edgePositions, 3));
           const edgeMat = new THREE.LineBasicMaterial({
-            color: isFaceHovered ? 0xff0055 : 0xffffff,
-            linewidth: 3,
+            color: isFaceHovered ? 0xff0055 : 0xffb366,
+            transparent: true,
+            opacity: 0.85,
+            linewidth: 2,
             depthTest: false,
           });
           const edgeLines = new THREE.LineSegments(edgeGeo, edgeMat);
@@ -2111,7 +2332,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         const direction = end.clone().sub(start);
         const length = Math.max(.04, direction.length());
         const selected = bone.id === selectedBoneId;
-        const color = new THREE.Color(selected ? '#00ffff' : bone.color || '#2680eb');
+        const color = new THREE.Color(selected ? '#00ffff' : bone.color || '#ed7300');
 
         // Octahedral 3D bone geometry (tapered diamond shape)
         const radius = Math.max(0.04, length * 0.12);
@@ -2711,6 +2932,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       onDirect3DPaintPixel(0, 0, true);
     }
     setIsPainting3DActive(false);
+    lastPaintClientRef.current = null;
     isWeightPaintingRef.current = false;
     if (controlsRef.current) {
       const cur = toolStateRef.current;
@@ -2990,6 +3212,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       const uv = hit?.uv;
       if (hit && uv) {
         setIsPainting3DActive(true);
+        lastPaintClientRef.current = { x: e.clientX, y: e.clientY };
         if (controlsRef.current) controlsRef.current.enabled = false;
         try {
           e.currentTarget.setPointerCapture(e.pointerId);
@@ -2999,7 +3222,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         if (meshTexturesRef.current.get(activeMeshId)?.texture) {
           meshTexturesRef.current.get(activeMeshId)!.texture.needsUpdate = true;
         }
-        onDirect3DPaintPixel(uv.x, uv.y, false);
+        const faceMap = (hit.object as THREE.Mesh).geometry?.userData?.triangleToFaceId as string[] | undefined;
+        const faceId = hit.faceIndex != null ? faceMap?.[hit.faceIndex] ?? null : null;
+        onDirect3DPaintPixel(uv.x, uv.y, false, faceId);
         e.preventDefault();
         e.stopPropagation();
         return;
@@ -3264,22 +3489,51 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     raycaster.setFromCamera(new THREE.Vector2(mouseX, mouseY), cameraRef.current);
 
     if (toolState.isPainting3D && activeMeshObjectRef.current) {
-      const paintHits = raycaster.intersectObject(activeMeshObjectRef.current);
-      if (paintHits.length > 0 && paintHits[0].uv) {
-        setPaintCursor({
-          x: e.clientX - rect.left,
-          y: e.clientY - rect.top,
-          u: paintHits[0].uv.x,
-          v: paintHits[0].uv.y,
-        });
-        if (isPainting3DActive && onDirect3DPaintPixel) {
+      const paintMesh = activeMeshObjectRef.current;
+      if (isPainting3DActive && onDirect3DPaintPixel && cameraRef.current) {
+        const from = lastPaintClientRef.current ?? { x: e.clientX, y: e.clientY };
+        const to = { x: e.clientX, y: e.clientY };
+        const strokeHits = samplePaintStrokeUvs(
+          raycaster,
+          cameraRef.current,
+          paintMesh,
+          rect,
+          from,
+          to,
+          96,
+        );
+        lastPaintClientRef.current = to;
+
+        if (strokeHits.length > 0) {
+          const last = strokeHits[strokeHits.length - 1];
+          setPaintCursor({
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top,
+            u: last.uv.x,
+            v: last.uv.y,
+          });
           if (meshTexturesRef.current.get(activeMeshId)?.texture) {
             meshTexturesRef.current.get(activeMeshId)!.texture.needsUpdate = true;
           }
-          onDirect3DPaintPixel(paintHits[0].uv.x, paintHits[0].uv.y, false);
+          for (const sample of strokeHits) {
+            onDirect3DPaintPixel(sample.uv.x, sample.uv.y, false, sample.faceId);
+          }
+        } else {
+          // Keep last client pos so the next successful hit can fill the gap from here.
+          setPaintCursor(null);
         }
       } else {
-        setPaintCursor(null);
+        const paintHits = raycaster.intersectObject(paintMesh);
+        if (paintHits.length > 0 && paintHits[0].uv) {
+          setPaintCursor({
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top,
+            u: paintHits[0].uv.x,
+            v: paintHits[0].uv.y,
+          });
+        } else {
+          setPaintCursor(null);
+        }
       }
       return;
     }
@@ -3364,7 +3618,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const totalFaces = meshes.reduce((acc, m) => acc + m.faces.length, 0);
 
   return (
-    <div className="relative w-full h-full overflow-hidden bg-[#161616] select-none font-sans">
+    <div className="relative w-full h-full overflow-hidden bg-[#2b2b2b] select-none font-sans">
       <div
         ref={containerRef}
         onPointerDown={handlePointerDown}
@@ -3406,11 +3660,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
       <div className="absolute top-2 left-2 flex items-center gap-1.5 pointer-events-none z-10 font-mono text-[10px]">
         {isQuadSubViewport ? (
-          <span className="cad-card px-2 py-0.5 text-[#02a0e8] font-extrabold uppercase border-[#383838] bg-[#1a1a1a]/90 backdrop-blur tracking-wider">
+          <span className="cad-card px-2 py-0.5 text-[#ff9a3c] font-extrabold uppercase border-[#4d4d4d] bg-[#1a1a1a]/90 backdrop-blur tracking-wider">
             {cameraType} {cameraType === 'perspective' ? '3D' : 'ORTHO'}
           </span>
         ) : (
-          <span className="cad-card px-2.5 py-1 text-[#02a0e8] font-bold uppercase border-[#383838] bg-[#262626]">
+          <span className="cad-card px-2.5 py-1 text-[#ff9a3c] font-bold uppercase border-[#4d4d4d] bg-[#262626]">
             {cameraType} VIEWPORT ({toolState.editMode.toUpperCase()} MODE)
           </span>
         )}
@@ -3435,11 +3689,15 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
               ? ' · hover edge · click pin · slide · wheel cuts · LMB confirm · Esc/RMB cancel'
               : toolState.modalMeshOp === 'knife'
                 ? ' · click path · Z undo · Enter confirm · Esc/RMB cancel'
-                : ' · move mouse · LMB confirm · Esc/RMB cancel'}
+                : toolState.modalMeshOp === 'bevel'
+                  ? ' · move mouse · wheel segments · LMB/Enter confirm · Esc/RMB cancel'
+                  : toolState.modalMeshOp === 'inset'
+                    ? ' · move mouse to inset · LMB/Enter confirm · Esc/RMB cancel'
+                    : ' · move mouse · LMB/Enter confirm · Esc/RMB cancel'}
           </span>
         )}
         {toolState.isPainting3D && (
-          <span className="cad-card px-2.5 py-1 text-[#4b9cf5] font-bold border-[#1473e6] bg-[#262626]">
+          <span className="cad-card px-2.5 py-1 text-[#ffb366] font-bold border-[#ed7300] bg-[#262626]">
             3D PAINT ({toolState.drawTool?.toUpperCase() || 'PENCIL'}) · LMB on model paints · empty LMB orbits · {STANDARD_NAV_HINT}
           </span>
         )}
@@ -3459,7 +3717,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           </span>
         )}
         {hoveredEdgeId && (
-          <span className="cad-card px-2.5 py-1 text-[#02a0e8] font-bold border-cyan-900 bg-[#262626] animate-pulse">
+          <span className="cad-card px-2.5 py-1 text-[#ff9a3c] font-bold border-cyan-900 bg-[#262626] animate-pulse">
             HOVER: EDGE #{hoveredEdgeId}
           </span>
         )}
@@ -3474,7 +3732,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           </span>
         )}
         {!isQuadSubViewport && (
-          <span className="cad-card px-2.5 py-1 text-[#cccccc] bg-[#262626] border-[#383838]">
+          <span className="cad-card px-2.5 py-1 text-[#cccccc] bg-[#262626] border-[#4d4d4d]">
             GRID: {toolState.gridSnap === 0 ? 'OFF' : `${toolState.gridSnap}u`}
           </span>
         )}
@@ -3489,7 +3747,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           </span>
         )}
         {toolState.editMode === 'bone' && toolState.rigMode === 'edit' && (
-          <span className="cad-card px-2.5 py-1 text-[#2680eb] font-bold border-[#2680eb]/40 bg-[#2680eb]/10">
+          <span className="cad-card px-2.5 py-1 text-[#ed7300] font-bold border-[#ed7300]/40 bg-[#ed7300]/10">
             BONE EDIT
           </span>
         )}
@@ -3497,7 +3755,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
       {!isQuadSubViewport && (
         <div className="absolute top-2 right-2 flex flex-col items-end gap-1 z-10 font-mono text-[10px]">
-          <div className="cad-card p-1 flex gap-1 bg-[#262626] border-[#383838]">
+          <div className="cad-card p-1 flex gap-1 bg-[#262626] border-[#4d4d4d]">
             <button onClick={() => setViewOrientation('top')} className="px-2 py-0.5 cad-button font-bold">
               TOP
             </button>
@@ -3507,7 +3765,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
             <button onClick={() => setViewOrientation('side')} className="px-2 py-0.5 cad-button font-bold">
               SIDE
             </button>
-            <button onClick={() => setViewOrientation('iso')} className="px-2 py-0.5 cad-button font-bold text-[#02a0e8]">
+            <button onClick={() => setViewOrientation('iso')} className="px-2 py-0.5 cad-button font-bold text-[#ff9a3c]">
               3D ISO
             </button>
             <button
@@ -3520,7 +3778,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
             {onOpenUVModal && (
               <button
                 onClick={onOpenUVModal}
-                className="px-2.5 py-0.5 bg-[#1473e6] text-white font-bold rounded hover:bg-[#02a0e8] transition shadow-md shadow-[#1473e6]/30 flex items-center gap-1"
+                className="px-2.5 py-0.5 bg-[#ed7300] text-white font-bold rounded hover:bg-[#ff9a3c] transition shadow-md shadow-[#ed7300]/30 flex items-center gap-1"
                 title="Open UV Mapping Studio Popup (Hotkey: U)"
               >
                 <span>[UV Studio]</span>
@@ -3543,12 +3801,12 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       />
 
       {!isQuadSubViewport && (
-        <div className="absolute bottom-2 left-2 cad-card px-3 py-1 text-[10px] font-mono flex items-center gap-3 bg-[#262626] border-[#383838]">
+        <div className="absolute bottom-2 left-2 cad-card px-3 py-1 text-[10px] font-mono flex items-center gap-3 bg-[#262626] border-[#4d4d4d]">
           <span>Scene Objects: <strong className="text-amber-400">{meshes.length}</strong></span>
-          <span>Rig Bones: <strong className="text-[#2680eb]">{bones.length}</strong></span>
-          <span>Total Verts: <strong className="text-[#02a0e8]">{totalVerts}</strong></span>
-          <span>Total Faces: <strong className="text-[#2680eb]">{totalFaces}</strong></span>
-          <span>Selected Mesh: <strong className="text-[#02a0e8]">{activeMesh?.name || 'None'}</strong></span>
+          <span>Rig Bones: <strong className="text-[#ed7300]">{bones.length}</strong></span>
+          <span>Total Verts: <strong className="text-[#ff9a3c]">{totalVerts}</strong></span>
+          <span>Total Faces: <strong className="text-[#ed7300]">{totalFaces}</strong></span>
+          <span>Selected Mesh: <strong className="text-[#ff9a3c]">{activeMesh?.name || 'None'}</strong></span>
           <span className="text-[#6a7a8c]">{STANDARD_NAV_HINT}</span>
         </div>
       )}
@@ -3565,7 +3823,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
         return (
           <div
-            className="absolute pointer-events-none border-2 border-dashed border-[#1473e6] bg-[#1473e6]/15 backdrop-blur-[0.5px] z-40 rounded-sm shadow-md"
+            className="absolute pointer-events-none border-2 border-dashed border-[#ed7300] bg-[#ed7300]/15 backdrop-blur-[0.5px] z-40 rounded-sm shadow-md"
             style={{
               left: minX,
               top: minY,
@@ -3573,7 +3831,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
               height: h,
             }}
           >
-            <div className="absolute top-1 left-1.5 px-1.5 py-0.5 bg-[#1473e6] text-white font-mono text-[8px] font-bold rounded shadow-sm tracking-wider uppercase">
+            <div className="absolute top-1 left-1.5 px-1.5 py-0.5 bg-[#ed7300] text-white font-mono text-[8px] font-bold rounded shadow-sm tracking-wider uppercase">
               MARQUEE ({toolState.editMode.toUpperCase()})
             </div>
           </div>

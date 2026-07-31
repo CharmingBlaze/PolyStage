@@ -53,10 +53,10 @@ export const TextureEditor: React.FC<TextureEditorProps> = ({
     for (let x = 0; x < textureWidth; x++) {
       for (let y = 0; y < textureHeight; y++) {
         if ((x + y) % 2 === 0) {
-          ctx.fillStyle = '#1473e6';
+          ctx.fillStyle = '#ed7300';
           ctx.fillRect(x, y, 1, 1);
         } else {
-          ctx.fillStyle = '#1473e6';
+          ctx.fillStyle = '#ed7300';
           ctx.fillRect(x, y, 1, 1);
         }
       }
@@ -83,7 +83,7 @@ export const TextureEditor: React.FC<TextureEditorProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const color = toolState.activeColor || '#1473e6';
+    const color = toolState.activeColor || '#ed7300';
 
     if (asepriteTool === 'eraser') {
       ctx.clearRect(px, py, brushSize, brushSize);
@@ -144,7 +144,7 @@ export const TextureEditor: React.FC<TextureEditorProps> = ({
         if (canvas) {
           const ctx = canvas.getContext('2d');
           if (ctx) {
-            ctx.fillStyle = toolState.activeColor || '#1473e6';
+            ctx.fillStyle = toolState.activeColor || '#ed7300';
             if (asepriteTool === 'line') {
               let x0 = lineStart.x, y0 = lineStart.y;
               let x1 = end.x, y1 = end.y;
@@ -176,64 +176,64 @@ export const TextureEditor: React.FC<TextureEditorProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#1c1c1c] text-[#e0e0e0] font-sans text-xs select-none">
+    <div className="flex flex-col h-full bg-[#333333] text-[#e0e0e0] font-sans text-xs select-none">
       {/* Header */}
-      <div className="h-8 bg-[#121212] border-b border-[#323232] px-3 flex items-center justify-between font-mono text-[10px] text-[#1473e6] font-bold">
+      <div className="h-8 bg-[#3a3a3a] border-b border-[#4d4d4d] px-3 flex items-center justify-between font-mono text-[10px] text-[#ed7300] font-bold">
         <span className="flex items-center gap-1.5 uppercase">
-          <Sparkles className="w-3.5 h-3.5 text-[#1473e6]" />
+          <Sparkles className="w-3.5 h-3.5 text-[#ed7300]" />
           ASEPRITE PIXEL ART STUDIO
         </span>
         <span className="text-[#888888]">{textureWidth}x{textureHeight} px</span>
       </div>
 
       {/* Aseprite Toolbar */}
-      <div className="p-2 bg-[#262626] border-b border-[#323232] flex items-center justify-between gap-1 font-mono text-[10px]">
+      <div className="p-2 bg-[#262626] border-b border-[#4d4d4d] flex items-center justify-between gap-1 font-mono text-[10px]">
         <div className="flex items-center gap-1">
           <button
             onClick={() => setAsepriteTool('pencil')}
-            className={`p-1.5 rounded transition ${asepriteTool === 'pencil' ? 'bg-[#1473e6] text-white shadow-sm' : 'bg-[#1e1e1e] text-[#888888] hover:text-white'}`}
+            className={`p-1.5 rounded transition ${asepriteTool === 'pencil' ? 'bg-[#ed7300] text-white shadow-sm' : 'bg-[#1e1e1e] text-[#888888] hover:text-white'}`}
             title="Pencil Brush (B)"
           >
             <Pencil className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => setAsepriteTool('eraser')}
-            className={`p-1.5 rounded transition ${asepriteTool === 'eraser' ? 'bg-[#1473e6] text-white shadow-sm' : 'bg-[#1e1e1e] text-[#888888] hover:text-white'}`}
+            className={`p-1.5 rounded transition ${asepriteTool === 'eraser' ? 'bg-[#ed7300] text-white shadow-sm' : 'bg-[#1e1e1e] text-[#888888] hover:text-white'}`}
             title="Eraser (E)"
           >
             <Eraser className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => setAsepriteTool('fill')}
-            className={`p-1.5 rounded transition ${asepriteTool === 'fill' ? 'bg-[#1473e6] text-white shadow-sm' : 'bg-[#1e1e1e] text-[#888888] hover:text-white'}`}
+            className={`p-1.5 rounded transition ${asepriteTool === 'fill' ? 'bg-[#ed7300] text-white shadow-sm' : 'bg-[#1e1e1e] text-[#888888] hover:text-white'}`}
             title="Paint Bucket Fill (G)"
           >
             <PaintBucket className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => setAsepriteTool('picker')}
-            className={`p-1.5 rounded transition ${asepriteTool === 'picker' ? 'bg-[#1473e6] text-white shadow-sm' : 'bg-[#1e1e1e] text-[#888888] hover:text-white'}`}
+            className={`p-1.5 rounded transition ${asepriteTool === 'picker' ? 'bg-[#ed7300] text-white shadow-sm' : 'bg-[#1e1e1e] text-[#888888] hover:text-white'}`}
             title="Eyedropper Color Picker (I)"
           >
             <Pipette className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => setAsepriteTool('dither')}
-            className={`p-1.5 rounded transition ${asepriteTool === 'dither' ? 'bg-[#1473e6] text-white shadow-sm' : 'bg-[#1e1e1e] text-[#888888] hover:text-white'}`}
+            className={`p-1.5 rounded transition ${asepriteTool === 'dither' ? 'bg-[#ed7300] text-white shadow-sm' : 'bg-[#1e1e1e] text-[#888888] hover:text-white'}`}
             title="Dither Brush Shader Pattern"
           >
             <Grid className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => setAsepriteTool('line')}
-            className={`p-1.5 rounded transition ${asepriteTool === 'line' ? 'bg-[#1473e6] text-white shadow-sm' : 'bg-[#1e1e1e] text-[#888888] hover:text-white'}`}
+            className={`p-1.5 rounded transition ${asepriteTool === 'line' ? 'bg-[#ed7300] text-white shadow-sm' : 'bg-[#1e1e1e] text-[#888888] hover:text-white'}`}
             title="Straight Line Tool"
           >
             <Slash className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => setAsepriteTool('rect')}
-            className={`p-1.5 rounded transition ${asepriteTool === 'rect' ? 'bg-[#1473e6] text-white shadow-sm' : 'bg-[#1e1e1e] text-[#888888] hover:text-white'}`}
+            className={`p-1.5 rounded transition ${asepriteTool === 'rect' ? 'bg-[#ed7300] text-white shadow-sm' : 'bg-[#1e1e1e] text-[#888888] hover:text-white'}`}
             title="Rectangle Frame Tool"
           >
             <Square className="w-3.5 h-3.5" />
@@ -241,13 +241,13 @@ export const TextureEditor: React.FC<TextureEditorProps> = ({
         </div>
 
         {/* Brush Size Picker */}
-        <div className="flex items-center gap-1 bg-[#121212] px-2 py-0.5 rounded border border-[#383838]">
+        <div className="flex items-center gap-1 bg-[#3a3a3a] px-2 py-0.5 rounded border border-[#4d4d4d]">
           <span className="text-[#888888]">SIZE:</span>
           {[1, 2, 4].map((sz) => (
             <button
               key={sz}
               onClick={() => setBrushSize(sz)}
-              className={`px-1.5 py-0.5 rounded text-[9px] ${brushSize === sz ? 'bg-[#1473e6] text-white font-bold' : 'text-[#888888]'}`}
+              className={`px-1.5 py-0.5 rounded text-[9px] ${brushSize === sz ? 'bg-[#ed7300] text-white font-bold' : 'text-[#888888]'}`}
             >
               {sz}px
             </button>
@@ -256,8 +256,8 @@ export const TextureEditor: React.FC<TextureEditorProps> = ({
       </div>
 
       {/* Main Canvas Workspace */}
-      <div className="flex-1 bg-[#161616] p-4 flex flex-col items-center justify-center relative overflow-hidden">
-        <div className="relative border-2 border-[#383838] shadow-2xl bg-[#121212] p-1 rounded-sm">
+      <div className="flex-1 bg-[#2b2b2b] p-4 flex flex-col items-center justify-center relative overflow-hidden">
+        <div className="relative border-2 border-[#4d4d4d] shadow-2xl bg-[#3a3a3a] p-1 rounded-sm">
           <canvas
             ref={canvasRef}
             width={textureWidth}
@@ -276,9 +276,9 @@ export const TextureEditor: React.FC<TextureEditorProps> = ({
           {/* Grid Overlay */}
           {showGrid && (
             <div
-              className="absolute inset-0 pointer-events-none opacity-20 border border-[#1473e6]"
+              className="absolute inset-0 pointer-events-none opacity-20 border border-[#ed7300]"
               style={{
-                backgroundImage: 'linear-gradient(to right, #1473e6 1px, transparent 1px), linear-gradient(to bottom, #1473e6 1px, transparent 1px)',
+                backgroundImage: 'linear-gradient(to right, #ed7300 1px, transparent 1px), linear-gradient(to bottom, #ed7300 1px, transparent 1px)',
                 backgroundSize: `${(100 / textureWidth)}% ${(100 / textureHeight)}%`,
               }}
             />
@@ -287,11 +287,11 @@ export const TextureEditor: React.FC<TextureEditorProps> = ({
       </div>
 
       {/* Footer Controls */}
-      <div className="h-8 bg-[#121212] border-t border-[#323232] px-3 flex items-center justify-between text-[10px] font-mono">
+      <div className="h-8 bg-[#3a3a3a] border-t border-[#4d4d4d] px-3 flex items-center justify-between text-[10px] font-mono">
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowGrid(!showGrid)}
-            className={`px-2 py-0.5 rounded border transition ${showGrid ? 'bg-[#1473e6] border-[#1473e6] text-white font-bold' : 'bg-[#1e1e1e] border-[#383838] text-[#888888]'}`}
+            className={`px-2 py-0.5 rounded border transition ${showGrid ? 'bg-[#ed7300] border-[#ed7300] text-white font-bold' : 'bg-[#1e1e1e] border-[#4d4d4d] text-[#888888]'}`}
           >
             GRID {showGrid ? 'ON' : 'OFF'}
           </button>
@@ -301,7 +301,7 @@ export const TextureEditor: React.FC<TextureEditorProps> = ({
           <button onClick={() => setZoom((z) => Math.max(4, z - 2))} className="p-1 cad-button">
             <ZoomOut className="w-3 h-3" />
           </button>
-          <span className="text-[#1473e6] font-bold px-1">{zoom * 10}%</span>
+          <span className="text-[#ed7300] font-bold px-1">{zoom * 10}%</span>
           <button onClick={() => setZoom((z) => Math.min(24, z + 2))} className="p-1 cad-button">
             <ZoomIn className="w-3 h-3" />
           </button>

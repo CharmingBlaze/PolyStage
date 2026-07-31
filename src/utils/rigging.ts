@@ -17,7 +17,7 @@ export function createBone(name: string, parentId: string | null, position = v()
     restScale: v(1, 1, 1),
     length,
     assignedMeshIds: [],
-    color: '#2680eb',
+    color: '#ed7300',
     deform: true,
     inheritRotation: true,
     visible: true,

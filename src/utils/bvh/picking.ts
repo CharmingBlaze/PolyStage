@@ -198,12 +198,13 @@ export function samplePaintStrokeUvs(
   rect: DOMRect,
   fromClient: { x: number; y: number },
   toClient: { x: number; y: number },
-  maxSteps = 32
+  maxSteps = 96
 ): BvhPaintHit[] {
   const dx = toClient.x - fromClient.x;
   const dy = toClient.y - fromClient.y;
   const dist = Math.hypot(dx, dy);
-  const steps = Math.max(1, Math.min(maxSteps, Math.ceil(dist / 3)));
+  // ~1.5px screen steps keep 3D strokes continuous even on low-res textures.
+  const steps = Math.max(1, Math.min(maxSteps, Math.ceil(dist / 1.5)));
   const hits: BvhPaintHit[] = [];
   const seen = new Set<string>();
 
@@ -214,7 +215,8 @@ export function samplePaintStrokeUvs(
     setRayFromPointer(raycaster, camera, x, y, rect);
     const hit = pickPaintUv(raycaster, mesh);
     if (!hit) continue;
-    const key = `${hit.uv.x.toFixed(4)}:${hit.uv.y.toFixed(4)}`;
+    // Dedupe by face + coarse UV so adjacent texels on the same island still stamp.
+    const key = `${hit.faceId ?? ''}:${hit.uv.x.toFixed(3)}:${hit.uv.y.toFixed(3)}`;
     if (seen.has(key)) continue;
     seen.add(key);
     hits.push(hit);

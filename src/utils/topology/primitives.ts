@@ -701,10 +701,10 @@ export function createTubeMesh(sx = 1, sy = 1, segments = 8, thickness = 0.2): C
   return meshFrom('Tube Primitive', [...ob, ...ot, ...ib, ...it], faces, { x: 0, y: hy, z: 0 });
 }
 
-/** Compound “chest” from a box (editable). */
+/** Default starter box (editable). */
 export function createChestMesh(sx = 1, sy = 1, sz = 1): CADMesh {
   const m = createBoxMesh(sx, sy * 0.75, sz);
-  return { ...m, name: 'Chest Primitive', position: { x: 0, y: (sy * 0.75) / 2, z: 0 } };
+  return { ...m, name: 'Default Box', position: { x: 0, y: (sy * 0.75) / 2, z: 0 } };
 }
 
 export function createPrimitiveMesh(type: PrimitiveType, customSize?: Vector3D): CADMesh {

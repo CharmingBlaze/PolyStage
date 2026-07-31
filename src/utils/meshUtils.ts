@@ -11,6 +11,7 @@ import { generateId } from './topology/ids';
 import { createPrimitiveMesh } from './topology/primitives';
 import { triangulateFaces } from './topology/triangulate';
 import { finalizeEditableMesh } from './topology/validate';
+import { extrudeFacesOnce, insetFacesOnce } from './modalMeshOps';
 
 export function snapToGrid(val: number, step: number): number {
   if (step === 0) return val;
@@ -80,205 +81,22 @@ export function buildThreeGeometry(mesh: CADMesh): THREE.BufferGeometry {
   return geometry;
 }
 
-function faceNormal(faceVerts: { x: number; y: number; z: number }[]) {
-  let nx = 0;
-  let ny = 0;
-  let nz = 0;
-  for (let i = 0; i < faceVerts.length; i++) {
-    const cur = faceVerts[i];
-    const next = faceVerts[(i + 1) % faceVerts.length];
-    nx += (cur.y - next.y) * (cur.z + next.z);
-    ny += (cur.z - next.z) * (cur.x + next.x);
-    nz += (cur.x - next.x) * (cur.y + next.y);
-  }
-  const len = Math.hypot(nx, ny, nz) || 1;
-  return { x: nx / len, y: ny / len, z: nz / len };
-}
-
 export function extrudeFace(mesh: CADMesh, faceId: string, depth: number = 0.5): CADMesh {
   return extrudeFaces(mesh, [faceId], depth);
 }
 
 /** Extrude faces as a region — no internal walls between adjacent selected faces. */
 export function extrudeFaces(mesh: CADMesh, faceIds: string[], depth: number = 0.5): CADMesh {
-  const idSet = new Set(faceIds);
-  const targets = mesh.faces.filter((f) => idSet.has(f.id));
-  if (targets.length === 0) return mesh;
-
-  const vertMap = new Map(mesh.vertices.map((v) => [v.id, v]));
-  const vertsToExtrude = new Set<string>();
-  targets.forEach((f) => f.vertexIds.forEach((id) => vertsToExtrude.add(id)));
-
-  let nx = 0;
-  let ny = 0;
-  let nz = 0;
-  targets.forEach((f) => {
-    const fv = f.vertexIds.map((id) => vertMap.get(id)!).filter(Boolean);
-    if (fv.length < 3) return;
-    const n = faceNormal(fv);
-    nx += n.x;
-    ny += n.y;
-    nz += n.z;
-  });
-  const nLen = Math.hypot(nx, ny, nz) || 1;
-  nx = (nx / nLen) * depth;
-  ny = (ny / nLen) * depth;
-  nz = (nz / nLen) * depth;
-
-  const newVertMap = new Map<string, string>();
-  const newVertices = [...mesh.vertices];
-
-  vertsToExtrude.forEach((oldId) => {
-    const oldV = vertMap.get(oldId);
-    if (!oldV) return;
-    const newId = generateId();
-    newVertMap.set(oldId, newId);
-    newVertices.push({
-      id: newId,
-      x: oldV.x + nx,
-      y: oldV.y + ny,
-      z: oldV.z + nz,
-    });
-  });
-
-  const edgeUse = new Map<string, { a: string; b: string; count: number; faceId: string }>();
-  targets.forEach((f) => {
-    const n = f.vertexIds.length;
-    for (let i = 0; i < n; i++) {
-      const a = f.vertexIds[i];
-      const b = f.vertexIds[(i + 1) % n];
-      const key = a < b ? `${a}|${b}` : `${b}|${a}`;
-      const prev = edgeUse.get(key);
-      if (prev) prev.count++;
-      else edgeUse.set(key, { a, b, count: 1, faceId: f.id });
-    }
-  });
-
-  const sideFaces: Face[] = [];
-  edgeUse.forEach((info) => {
-    if (info.count !== 1) return;
-    const owner = targets.find((f) => f.id === info.faceId)!;
-    const n = owner.vertexIds.length;
-    let b1 = info.a;
-    let b2 = info.b;
-    for (let i = 0; i < n; i++) {
-      if (owner.vertexIds[i] === info.a && owner.vertexIds[(i + 1) % n] === info.b) {
-        b1 = info.a;
-        b2 = info.b;
-        break;
-      }
-      if (owner.vertexIds[i] === info.b && owner.vertexIds[(i + 1) % n] === info.a) {
-        b1 = info.b;
-        b2 = info.a;
-        break;
-      }
-    }
-    const t1 = newVertMap.get(b1)!;
-    const t2 = newVertMap.get(b2)!;
-    sideFaces.push({
-      id: generateId(),
-      vertexIds: [b1, b2, t2, t1],
-      uvs: [
-        { u: 0, v: 0 },
-        { u: 1, v: 0 },
-        { u: 1, v: 1 },
-        { u: 0, v: 1 },
-      ],
-    });
-  });
-
-  const topFaces: Face[] = targets.map((f) => ({
-    ...f,
-    id: generateId(),
-    vertexIds: f.vertexIds.map((oldId) => newVertMap.get(oldId)!),
-  }));
-
-  return finalizeEditableMesh({
-    ...mesh,
-    vertices: newVertices,
-    faces: mesh.faces.filter((f) => !idSet.has(f.id)).concat([...topFaces, ...sideFaces]),
-  });
+  return extrudeFacesOnce(mesh, faceIds, depth);
 }
 
 export function insetFace(mesh: CADMesh, faceId: string, factor: number = 0.25): CADMesh {
   return insetFaces(mesh, [faceId], factor);
 }
 
-/** Inset multiple faces from a shared base mesh (Blender-style modal amount). */
+/** Inset faces (Blender region inset). */
 export function insetFaces(mesh: CADMesh, faceIds: string[], factor: number = 0.25): CADMesh {
-  const idSet = new Set(faceIds);
-  const targets = mesh.faces.filter((f) => idSet.has(f.id));
-  if (targets.length === 0) return mesh;
-
-  const t = Math.max(0, Math.min(0.95, factor));
-  const vertMap = new Map(mesh.vertices.map((v) => [v.id, v]));
-  const newVertices = [...mesh.vertices];
-  const addedFaces: Face[] = [];
-  const removed = new Set<string>();
-
-  targets.forEach((targetFace) => {
-    const faceVerts = targetFace.vertexIds.map((id) => vertMap.get(id)!).filter(Boolean);
-    if (faceVerts.length < 3) return;
-
-    let cx = 0;
-    let cy = 0;
-    let cz = 0;
-    faceVerts.forEach((v) => {
-      cx += v.x;
-      cy += v.y;
-      cz += v.z;
-    });
-    cx /= faceVerts.length;
-    cy /= faceVerts.length;
-    cz /= faceVerts.length;
-
-    const newVertMap = new Map<string, string>();
-    targetFace.vertexIds.forEach((oldId) => {
-      const oldV = vertMap.get(oldId)!;
-      const newId = generateId();
-      newVertMap.set(oldId, newId);
-      const nv = {
-        id: newId,
-        x: oldV.x + (cx - oldV.x) * t,
-        y: oldV.y + (cy - oldV.y) * t,
-        z: oldV.z + (cz - oldV.z) * t,
-      };
-      newVertices.push(nv);
-      vertMap.set(newId, nv);
-    });
-
-    addedFaces.push({
-      ...targetFace,
-      id: generateId(),
-      vertexIds: targetFace.vertexIds.map((oldId) => newVertMap.get(oldId)!),
-      uvs: targetFace.uvs.map((uv) => ({ ...uv })),
-    });
-
-    const vCount = targetFace.vertexIds.length;
-    for (let i = 0; i < vCount; i++) {
-      const b1 = targetFace.vertexIds[i];
-      const b2 = targetFace.vertexIds[(i + 1) % vCount];
-      const t1 = newVertMap.get(b1)!;
-      const t2 = newVertMap.get(b2)!;
-      addedFaces.push({
-        id: generateId(),
-        vertexIds: [b1, b2, t2, t1],
-        uvs: [
-          { u: 0, v: 0 },
-          { u: 1, v: 0 },
-          { u: 1, v: 1 },
-          { u: 0, v: 1 },
-        ],
-      });
-    }
-    removed.add(targetFace.id);
-  });
-
-  return finalizeEditableMesh({
-    ...mesh,
-    vertices: newVertices,
-    faces: mesh.faces.filter((f) => !removed.has(f.id)).concat(addedFaces),
-  });
+  return insetFacesOnce(mesh, faceIds, factor);
 }
 
 export function knifeCutFace(mesh: CADMesh, faceId: string): CADMesh {

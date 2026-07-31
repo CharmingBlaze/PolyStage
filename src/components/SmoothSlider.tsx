@@ -32,7 +32,7 @@ export const SmoothSlider: React.FC<SmoothSliderProps> = ({
   onChange,
   onLiveChange,
   className = '',
-  accent = '#1473e6',
+  accent = '#ed7300',
   title,
   disabled = false,
   formatValue,

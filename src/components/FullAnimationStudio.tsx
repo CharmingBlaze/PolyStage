@@ -144,7 +144,7 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
     const height = containerRef.current.clientHeight;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color('#161616');
+    scene.background = new THREE.Color('#2b2b2b');
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
@@ -353,7 +353,7 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
       const direction = end.clone().sub(start);
       const length = Math.max(.04, direction.length());
       const selected = bone.id === selectedMeshId;
-      const color = new THREE.Color(selected ? '#ffffff' : bone.color || '#2680eb');
+      const color = new THREE.Color(selected ? '#ffffff' : bone.color || '#ed7300');
       const shaft = new THREE.Mesh(
         new THREE.CylinderGeometry(length * .035, length * .12, length, 6),
         new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: .9 }),
@@ -569,8 +569,8 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
 
       ticks.push(
         <div key={i} style={{ left: `${pct}%` }} className="absolute top-0 bottom-0 flex flex-col items-center pointer-events-none">
-          <div className={`w-px ${isMajor ? 'h-3 bg-[#1473e6]' : 'h-1.5 bg-[#323232]'}`} />
-          {isMajor && <span className="text-[9px] font-mono text-[#2680eb] mt-0.5">{timeVal.toFixed(1)}s</span>}
+          <div className={`w-px ${isMajor ? 'h-3 bg-[#ed7300]' : 'h-1.5 bg-[#404040]'}`} />
+          {isMajor && <span className="text-[9px] font-mono text-[#ed7300] mt-0.5">{timeVal.toFixed(1)}s</span>}
         </div>
       );
     }
@@ -580,13 +580,13 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
   const unTrackedMeshes = animationTargets.filter((target) => !activeClip.tracks.some((track) => track.targetId === target.id));
 
   return (
-    <div className="flex flex-col h-full w-full bg-[#161616] text-[#e8e8e8] font-sans select-none overflow-hidden">
+    <div className="flex flex-col h-full w-full bg-[#2b2b2b] text-[#e8e8e8] font-sans select-none overflow-hidden">
       {/* Upper Area: 3D Viewport + Left Clip Inspector */}
-      <div className="flex-1 flex overflow-hidden border-b border-[#323232] relative">
-        <div className="w-60 bg-[#1c1c1c] border-r border-[#323232] flex flex-col z-10">
-          <div className="h-8 bg-[#1c1c1c] border-b border-[#323232] px-3 flex items-center justify-between font-mono text-[10px] text-[#2680eb] font-bold">
+      <div className="flex-1 flex overflow-hidden border-b border-[#4d4d4d] relative">
+        <div className="w-60 bg-[#333333] border-r border-[#4d4d4d] flex flex-col z-10">
+          <div className="h-8 bg-[#333333] border-b border-[#4d4d4d] px-3 flex items-center justify-between font-mono text-[10px] text-[#ed7300] font-bold">
             <span className="flex items-center gap-1.5 uppercase">
-              <Film className="w-3.5 h-3.5 text-[#2680eb]" />
+              <Film className="w-3.5 h-3.5 text-[#ed7300]" />
               CLIPS LIBRARY
             </span>
             <button
@@ -605,7 +605,7 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
                 setClips((prev) => [...prev, newClip]);
                 setActiveClipId(newClip.id);
               }}
-              className="px-2 py-0.5 cad-button text-[#2680eb] text-[9px] font-bold"
+              className="px-2 py-0.5 cad-button text-[#ed7300] text-[9px] font-bold"
             >
               + Clip
             </button>
@@ -624,12 +624,12 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
                     }}
                     className={`p-2 rounded border flex items-center justify-between cursor-pointer font-mono text-xs transition ${
                       isActive
-                        ? 'bg-[rgba(20,115,230,0.22)] border-[#1473e6] text-[#2680eb] font-bold shadow-md shadow-none'
-                        : 'bg-[#262626] border-[#323232] text-[#b3b3b3] hover:border-[#3e3e3e]'
+                        ? 'bg-[rgba(20,115,230,0.22)] border-[#ed7300] text-[#ed7300] font-bold shadow-md shadow-none'
+                        : 'bg-[#262626] border-[#4d4d4d] text-[#b3b3b3] hover:border-[#4d4d4d]'
                     }`}
                   >
                     <div className="flex items-center gap-2">
-                      <Activity className={`w-3.5 h-3.5 ${isActive ? 'text-[#2680eb]' : 'text-[#8c8c8c]'}`} />
+                      <Activity className={`w-3.5 h-3.5 ${isActive ? 'text-[#ed7300]' : 'text-[#8c8c8c]'}`} />
                       <span>{clip.name}</span>
                     </div>
                     <span className="text-[10px] text-[#8c8c8c] font-mono">{clip.duration}s</span>
@@ -640,13 +640,13 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
           </div>
         </div>
 
-        <div ref={containerRef} className="flex-1 h-full relative bg-[#161616]">
+        <div ref={containerRef} className="flex-1 h-full relative bg-[#2b2b2b]">
           <div className="absolute top-2 left-2 flex items-center gap-2 pointer-events-none z-10 font-mono text-[10px]">
-            <span className="cad-card px-2.5 py-1 text-[#2680eb] font-bold border-[#323232] uppercase flex items-center gap-1">
-              <Sparkles className="w-3 h-3 text-[#2680eb]" />
+            <span className="cad-card px-2.5 py-1 text-[#ed7300] font-bold border-[#4d4d4d] uppercase flex items-center gap-1">
+              <Sparkles className="w-3 h-3 text-[#ed7300]" />
               ANIMATION STUDIO VIEWPORT
             </span>
-            <span className="cad-card px-2.5 py-1 text-[#2680eb]">
+            <span className="cad-card px-2.5 py-1 text-[#ed7300]">
               SCRUB: {currentTime.toFixed(2)}s / {activeClip?.duration}s
             </span>
           </div>
@@ -654,14 +654,14 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
       </div>
 
       {/* Lower Area: Professional Multi-Track Timecode Timeline Container */}
-      <div className="h-72 bg-[#0a0d14] border-t border-[#323232] flex flex-col select-none">
+      <div className="h-72 bg-[#0a0d14] border-t border-[#4d4d4d] flex flex-col select-none">
         {/* Top Transport & Action Toolbar */}
-        <div className="h-10 bg-[#1c1c1c] border-b border-[#323232] px-4 flex items-center justify-between font-mono text-xs">
+        <div className="h-10 bg-[#333333] border-b border-[#4d4d4d] px-4 flex items-center justify-between font-mono text-xs">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setIsPlaying(!isPlaying)}
               className={`p-1.5 rounded-full shadow-lg transition flex items-center justify-center ${
-                isPlaying ? 'bg-[#e68619] text-white shadow-none' : 'bg-[#1473e6] text-white shadow-none'
+                isPlaying ? 'bg-[#e68619] text-white shadow-none' : 'bg-[#ed7300] text-white shadow-none'
               }`}
             >
               {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
@@ -678,16 +678,16 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
               <RotateCcw className="w-3.5 h-3.5" />
             </button>
 
-            <div className="font-mono text-xs font-bold text-[#2680eb] bg-[#161616] px-3 py-1 rounded border border-[#323232]">
+            <div className="font-mono text-xs font-bold text-[#ed7300] bg-[#2b2b2b] px-3 py-1 rounded border border-[#4d4d4d]">
               {currentTime.toFixed(2)}s / {activeClip.duration.toFixed(2)}s
             </div>
 
             {/* Dope Sheet vs Graph Curve View Switcher */}
-            <div className="flex items-center gap-1 bg-[#161616] p-0.5 rounded border border-[#323232]">
+            <div className="flex items-center gap-1 bg-[#2b2b2b] p-0.5 rounded border border-[#4d4d4d]">
               <button
                 onClick={() => setTimelineMode('dopesheet')}
                 className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 ${
-                  timelineMode === 'dopesheet' ? 'bg-[#1473e6] text-white shadow-sm' : 'text-[#8c8c8c] hover:text-white'
+                  timelineMode === 'dopesheet' ? 'bg-[#ed7300] text-white shadow-sm' : 'text-[#8c8c8c] hover:text-white'
                 }`}
               >
                 <SlidersHorizontal className="w-3 h-3" />
@@ -696,7 +696,7 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
               <button
                 onClick={() => setTimelineMode('graph')}
                 className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 ${
-                  timelineMode === 'graph' ? 'bg-[#1473e6] text-white shadow-sm' : 'text-[#8c8c8c] hover:text-white'
+                  timelineMode === 'graph' ? 'bg-[#ed7300] text-white shadow-sm' : 'text-[#8c8c8c] hover:text-white'
                 }`}
               >
                 <Spline className="w-3 h-3" />
@@ -704,12 +704,12 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
               </button>
             </div>
 
-            <div className="flex items-center gap-1 bg-[#161616] px-2 py-0.5 rounded border border-[#323232]">
+            <div className="flex items-center gap-1 bg-[#2b2b2b] px-2 py-0.5 rounded border border-[#4d4d4d]">
               <span className="text-[9px] text-[#8c8c8c] uppercase">CURVE:</span>
               <button
                 onClick={() => setEasingCurve('smooth')}
                 className={`px-1.5 py-0.5 rounded text-[9px] ${
-                  easingCurve === 'smooth' ? 'bg-[#1473e6] text-white font-bold' : 'text-[#8c8c8c]'
+                  easingCurve === 'smooth' ? 'bg-[#ed7300] text-white font-bold' : 'text-[#8c8c8c]'
                 }`}
               >
                 SMOOTH
@@ -717,7 +717,7 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
               <button
                 onClick={() => setEasingCurve('bounce')}
                 className={`px-1.5 py-0.5 rounded text-[9px] ${
-                  easingCurve === 'bounce' ? 'bg-[#1473e6] text-white font-bold' : 'text-[#8c8c8c]'
+                  easingCurve === 'bounce' ? 'bg-[#ed7300] text-white font-bold' : 'text-[#8c8c8c]'
                 }`}
               >
                 BOUNCE
@@ -731,7 +731,7 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
             {unTrackedMeshes.length > 0 && (
               <button
                 onClick={() => handleAddTrack(unTrackedMeshes[0].id)}
-                className="px-2 py-1 cad-button text-[#e68619] font-bold border-[#323232] text-[10px] flex items-center gap-1"
+                className="px-2 py-1 cad-button text-[#e68619] font-bold border-[#4d4d4d] text-[10px] flex items-center gap-1"
                 title="Add Track for Mesh"
               >
                 <Plus className="w-3 h-3 text-[#e68619]" />
@@ -741,28 +741,28 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
 
             <button
               onClick={() => handleAddChannelKeyframe(selectedMeshId, 'pos')}
-              className="px-2 py-1 cad-button text-[#2680eb] font-bold border-[#323232] text-[10px] flex items-center gap-1"
+              className="px-2 py-1 cad-button text-[#ed7300] font-bold border-[#4d4d4d] text-[10px] flex items-center gap-1"
             >
-              <Move className="w-3 h-3 text-[#2680eb]" />
+              <Move className="w-3 h-3 text-[#ed7300]" />
               <span>+ POS</span>
             </button>
             <button
               onClick={() => handleAddChannelKeyframe(selectedMeshId, 'rot')}
-              className="px-2 py-1 cad-button text-[#ec5b62] font-bold border-[#323232] text-[10px] flex items-center gap-1"
+              className="px-2 py-1 cad-button text-[#ec5b62] font-bold border-[#4d4d4d] text-[10px] flex items-center gap-1"
             >
               <RotateCw className="w-3 h-3 text-[#ec5b62]" />
               <span>+ ROT</span>
             </button>
             <button
               onClick={() => handleAddChannelKeyframe(selectedMeshId, 'scl')}
-              className="px-2 py-1 cad-button text-[#e68619] font-bold border-[#323232] text-[10px] flex items-center gap-1"
+              className="px-2 py-1 cad-button text-[#e68619] font-bold border-[#4d4d4d] text-[10px] flex items-center gap-1"
             >
               <Maximize2 className="w-3 h-3 text-[#e68619]" />
               <span>+ SCL</span>
             </button>
             <button
               onClick={() => handleAddChannelKeyframe(selectedMeshId, 'all')}
-              className="px-2.5 py-1 bg-[#1473e6] text-white font-bold rounded shadow-md shadow-none text-[10px] flex items-center gap-1"
+              className="px-2.5 py-1 bg-[#ed7300] text-white font-bold rounded shadow-md shadow-none text-[10px] flex items-center gap-1"
             >
               <Key className="w-3 h-3 text-white" />
               <span>+ ALL KEY</span>
@@ -772,7 +772,7 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
             <div className="relative">
               <button
                 onClick={() => setUvClipMenuOpen((v) => !v)}
-                className="px-2 py-1 cad-button text-emerald-400 font-bold border-[#323232] text-[10px] flex items-center gap-1"
+                className="px-2 py-1 cad-button text-emerald-400 font-bold border-[#4d4d4d] text-[10px] flex items-center gap-1"
                 title="Trigger UV Texture Animation Clip (Talk, Blink, Dialog, etc.)"
               >
                 <Clapperboard className="w-3 h-3 text-emerald-400" />
@@ -780,8 +780,8 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
               </button>
 
               {uvClipMenuOpen && (
-                <div className="absolute right-0 top-full mt-1 z-50 w-48 bg-[#1a1a1a] border border-[#3e3e3e] rounded shadow-2xl p-1.5 text-xs font-mono">
-                  <div className="text-[9px] uppercase tracking-wide text-[#8c8c8c] px-1 py-0.5 border-b border-[#2d2d2d] mb-1 font-bold">
+                <div className="absolute right-0 top-full mt-1 z-50 w-48 bg-[#1a1a1a] border border-[#4d4d4d] rounded shadow-2xl p-1.5 text-xs font-mono">
+                  <div className="text-[9px] uppercase tracking-wide text-[#8c8c8c] px-1 py-0.5 border-b border-[#1a1a1a] mb-1 font-bold">
                     Select UV Animation Clip
                   </div>
                   {(() => {
@@ -797,7 +797,7 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
                       <button
                         key={clip.id}
                         onClick={() => handleAddTextureClipKey(selectedMeshId, clip.id)}
-                        className="w-full text-left px-2 py-1 rounded hover:bg-[#1473e6]/20 hover:text-[#2680eb] flex items-center justify-between text-[11px] font-semibold text-[#d8d8d8]"
+                        className="w-full text-left px-2 py-1 rounded hover:bg-[#ed7300]/20 hover:text-[#ed7300] flex items-center justify-between text-[11px] font-semibold text-[#d8d8d8]"
                       >
                         <span className="truncate">{clip.name}</span>
                         <span className="text-[8px] opacity-60 uppercase">{clip.loop ? 'loop' : 'once'}</span>
@@ -810,7 +810,7 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
 
             <button
               onClick={() => handleAddTexFrameKeyframe(selectedMeshId, 0)}
-              className="px-2 py-1 cad-button text-cyan-400 font-bold border-[#323232] text-[10px] flex items-center gap-1"
+              className="px-2 py-1 cad-button text-cyan-400 font-bold border-[#4d4d4d] text-[10px] flex items-center gap-1"
               title="Add Texture Frame Index Keyframe"
             >
               <ImageIcon className="w-3 h-3 text-cyan-400" />
@@ -831,9 +831,9 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
         </div>
 
         {/* Timeline Tracks Header & Time Ruler Scale */}
-        <div className="flex border-b border-[#323232] bg-[#111823]">
-          <div className="w-56 px-3 py-1 border-r border-[#323232] font-mono text-[10px] text-[#8c8c8c] uppercase font-bold flex items-center gap-1.5">
-            <Layers className="w-3.5 h-3.5 text-[#2680eb]" />
+        <div className="flex border-b border-[#4d4d4d] bg-[#2d2d2d]">
+          <div className="w-56 px-3 py-1 border-r border-[#4d4d4d] font-mono text-[10px] text-[#8c8c8c] uppercase font-bold flex items-center gap-1.5">
+            <Layers className="w-3.5 h-3.5 text-[#ed7300]" />
             <span>TRACKS & SUBTRACKS</span>
           </div>
 
@@ -855,7 +855,7 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
           <div className="flex-1 relative bg-[#06090f] p-4 flex items-center justify-center">
             <svg className="w-full h-full overflow-visible">
               {/* Grid Lines */}
-              <line x1="0" y1="50%" x2="100%" y2="50%" stroke="#323232" strokeDasharray="4 4" />
+              <line x1="0" y1="50%" x2="100%" y2="50%" stroke="#404040" strokeDasharray="4 4" />
 
               {/* Real-Time SVG Easing Curves for Active Selected Mesh Track */}
               {activeClip.tracks
@@ -872,18 +872,18 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
 
                   return (
                     <g key={t.targetId}>
-                      <path d={posPath} fill="none" stroke="#1473e6" strokeWidth="2.5" />
+                      <path d={posPath} fill="none" stroke="#ed7300" strokeWidth="2.5" />
                     </g>
                   );
                 })}
             </svg>
-            <div className="absolute top-2 right-2 bg-black/60 px-2 py-1 rounded text-[10px] font-mono text-[#2680eb] border border-[#323232]">
+            <div className="absolute top-2 right-2 bg-black/60 px-2 py-1 rounded text-[10px] font-mono text-[#ed7300] border border-[#4d4d4d]">
               BEZIER CURVE GRAPH VIEW
             </div>
           </div>
         ) : (
           /* Standard Multi-Track Dope Sheet View */
-          <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#121212]">
+          <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#3a3a3a]">
             {activeClip.tracks.map((track) => {
               const isSelected = track.targetId === selectedMeshId;
               const isExpanded = expandedTracks[track.targetId] ?? false;
@@ -894,10 +894,10 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
                   <div
                     onClick={() => setSelectedMeshId(track.targetId)}
                     className={`flex h-8 items-center transition cursor-pointer font-mono text-xs ${
-                      isSelected ? 'bg-[rgba(20,115,230,0.18)]/40 border-l-2 border-[#1473e6]' : 'bg-[#0f1622] hover:bg-[#151f2e]'
+                      isSelected ? 'bg-[rgba(237,115,0,0.18)]/40 border-l-2 border-[#ed7300]' : 'bg-[#0f1622] hover:bg-[#151f2e]'
                     }`}
                   >
-                    <div className="w-56 px-3 flex items-center justify-between border-r border-[#323232]">
+                    <div className="w-56 px-3 flex items-center justify-between border-r border-[#4d4d4d]">
                       <div
                         className="flex items-center gap-1.5 font-bold truncate flex-1"
                         onClick={(e) => {
@@ -906,12 +906,12 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
                         }}
                       >
                         {isExpanded ? (
-                          <ChevronDown className="w-3.5 h-3.5 text-[#2680eb]" />
+                          <ChevronDown className="w-3.5 h-3.5 text-[#ed7300]" />
                         ) : (
                           <ChevronRight className="w-3.5 h-3.5 text-[#8c8c8c]" />
                         )}
-                        {track.targetType === 'bone' && <Bone className="w-3 h-3 text-[#2680eb]"/>}
-                        <span className={isSelected ? 'text-[#2680eb]' : 'text-[#e8e8e8]'}>{track.targetName}</span>
+                        {track.targetType === 'bone' && <Bone className="w-3 h-3 text-[#ed7300]"/>}
+                        <span className={isSelected ? 'text-[#ed7300]' : 'text-[#e8e8e8]'}>{track.targetName}</span>
                       </div>
 
                       <div className="flex items-center gap-1">
@@ -930,7 +930,7 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
                             e.stopPropagation();
                             handleAddChannelKeyframe(track.targetId, 'all');
                           }}
-                          className="p-1 text-[#8c8c8c] hover:text-[#2680eb]"
+                          className="p-1 text-[#8c8c8c] hover:text-[#ed7300]"
                           title="Key All Channels"
                         >
                           <Key className="w-3 h-3" />
@@ -940,7 +940,7 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
 
                     {/* Master Keyframe Track Line */}
                     <div className="flex-1 relative h-full flex items-center px-2">
-                      <div className="absolute inset-x-0 h-px bg-[#323232]" />
+                      <div className="absolute inset-x-0 h-px bg-[#1a1a1a]" />
 
                       {Array.from(
                         new Set([
@@ -958,7 +958,7 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
                               e.stopPropagation();
                               setCurrentTime(t);
                             }}
-                            className="absolute transform -translate-x-1/2 w-3.5 h-3.5 bg-[#1473e6] rotate-45 border-2 border-[#121212] cursor-pointer hover:bg-[#2680eb] transition z-20 shadow-md shadow-none"
+                            className="absolute transform -translate-x-1/2 w-3.5 h-3.5 bg-[#ed7300] rotate-45 border-2 border-[#1a1a1a] cursor-pointer hover:bg-[#ed7300] transition z-20 shadow-md shadow-none"
                           />
                         );
                       })}
@@ -967,15 +967,15 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
 
                   {/* Sub-Track Channels (POSITION, ROTATION, SCALE) */}
                   {isExpanded && (
-                    <div className="bg-[#121212] space-y-px">
+                    <div className="bg-[#3a3a3a] space-y-px">
                       {/* Position Sub-Track */}
                       <div className="flex h-6 items-center font-mono text-[10px]">
-                        <div className="w-56 pl-8 pr-3 flex items-center gap-1.5 text-[#2680eb] font-bold border-r border-[#323232]">
-                          <Move className="w-3 h-3 text-[#2680eb]" />
+                        <div className="w-56 pl-8 pr-3 flex items-center gap-1.5 text-[#ed7300] font-bold border-r border-[#4d4d4d]">
+                          <Move className="w-3 h-3 text-[#ed7300]" />
                           <span>Position (XYZ)</span>
                         </div>
                         <div className="flex-1 relative h-full flex items-center px-2">
-                          <div className="absolute inset-x-0 h-px bg-[rgba(20,115,230,0.18)]" />
+                          <div className="absolute inset-x-0 h-px bg-[rgba(237,115,0,0.18)]" />
                           {track.posKeyframes.map((kf) => {
                             const pct = (kf.time / activeClip.duration) * 100;
                             const isKfSelected = selectedKeyframeId === kf.id;
@@ -988,8 +988,8 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
                                   setSelectedKeyframeId(kf.id);
                                   setCurrentTime(kf.time);
                                 }}
-                                className={`absolute transform -translate-x-1/2 w-3 h-3 bg-[#2680eb] rotate-45 border border-[#121212] cursor-pointer transition z-20 ${
-                                  isKfSelected ? 'ring-2 ring-white bg-white scale-125 z-30' : 'hover:bg-[#2680eb]'
+                                className={`absolute transform -translate-x-1/2 w-3 h-3 bg-[#ed7300] rotate-45 border border-[#1a1a1a] cursor-pointer transition z-20 ${
+                                  isKfSelected ? 'ring-2 ring-white bg-white scale-125 z-30' : 'hover:bg-[#ed7300]'
                                 }`}
                                 title={`Position Keyframe at ${kf.time.toFixed(2)}s`}
                               />
@@ -1000,12 +1000,12 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
 
                       {/* Rotation Sub-Track */}
                       <div className="flex h-6 items-center font-mono text-[10px]">
-                        <div className="w-56 pl-8 pr-3 flex items-center gap-1.5 text-[#ec5b62] font-bold border-r border-[#323232]">
+                        <div className="w-56 pl-8 pr-3 flex items-center gap-1.5 text-[#ec5b62] font-bold border-r border-[#4d4d4d]">
                           <RotateCw className="w-3 h-3 text-[#ec5b62]" />
                           <span>Rotation (XYZ)</span>
                         </div>
                         <div className="flex-1 relative h-full flex items-center px-2">
-                          <div className="absolute inset-x-0 h-px bg-[rgba(20,115,230,0.12)]" />
+                          <div className="absolute inset-x-0 h-px bg-[rgba(237,115,0,0.12)]" />
                           {track.rotKeyframes.map((kf) => {
                             const pct = (kf.time / activeClip.duration) * 100;
                             const isKfSelected = selectedKeyframeId === kf.id;
@@ -1018,8 +1018,8 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
                                   setSelectedKeyframeId(kf.id);
                                   setCurrentTime(kf.time);
                                 }}
-                                className={`absolute transform -translate-x-1/2 w-3 h-3 bg-[#1473e6] rotate-45 border border-[#121212] cursor-pointer transition z-20 ${
-                                  isKfSelected ? 'ring-2 ring-white bg-[#121212] scale-125 z-30' : 'hover:bg-[#2680eb]'
+                                className={`absolute transform -translate-x-1/2 w-3 h-3 bg-[#ed7300] rotate-45 border border-[#1a1a1a] cursor-pointer transition z-20 ${
+                                  isKfSelected ? 'ring-2 ring-white bg-[#3a3a3a] scale-125 z-30' : 'hover:bg-[#ed7300]'
                                 }`}
                                 title={`Rotation Keyframe at ${kf.time.toFixed(2)}s`}
                               />
@@ -1030,7 +1030,7 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
 
                       {/* Scale Sub-Track */}
                       <div className="flex h-6 items-center font-mono text-[10px]">
-                        <div className="w-56 pl-8 pr-3 flex items-center gap-1.5 text-[#e68619] font-bold border-r border-[#323232]">
+                        <div className="w-56 pl-8 pr-3 flex items-center gap-1.5 text-[#e68619] font-bold border-r border-[#4d4d4d]">
                           <Maximize2 className="w-3 h-3 text-[#e68619]" />
                           <span>Scale (XYZ)</span>
                         </div>
@@ -1048,8 +1048,8 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
                                   setSelectedKeyframeId(kf.id);
                                   setCurrentTime(kf.time);
                                 }}
-                                className={`absolute transform -translate-x-1/2 w-3 h-3 bg-[#e68619] rotate-45 border border-[#121212] cursor-pointer transition z-20 ${
-                                  isKfSelected ? 'ring-2 ring-white bg-[#121212] scale-125 z-30' : 'hover:bg-[#e68619]'
+                                className={`absolute transform -translate-x-1/2 w-3 h-3 bg-[#e68619] rotate-45 border border-[#1a1a1a] cursor-pointer transition z-20 ${
+                                  isKfSelected ? 'ring-2 ring-white bg-[#3a3a3a] scale-125 z-30' : 'hover:bg-[#e68619]'
                                 }`}
                                 title={`Scale Keyframe at ${kf.time.toFixed(2)}s`}
                               />
@@ -1061,7 +1061,7 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
                       {/* UV Texture Clips Sub-Track (Mesh targets only) */}
                       {track.targetType === 'mesh' && (
                         <div className="flex h-6 items-center font-mono text-[10px]">
-                          <div className="w-56 pl-8 pr-3 flex items-center gap-1.5 text-emerald-400 font-bold border-r border-[#323232]">
+                          <div className="w-56 pl-8 pr-3 flex items-center gap-1.5 text-emerald-400 font-bold border-r border-[#4d4d4d]">
                             <Clapperboard className="w-3 h-3 text-emerald-400" />
                             <span>UV Texture Clips</span>
                           </div>
@@ -1080,7 +1080,7 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
                                     e.stopPropagation();
                                     setCurrentTime(ck.time);
                                   }}
-                                  className="absolute transform -translate-x-1/2 px-1.5 py-0.5 bg-emerald-600 text-white rounded text-[8px] font-bold cursor-pointer hover:bg-emerald-500 transition z-20 shadow-md border border-[#121212] flex items-center gap-1"
+                                  className="absolute transform -translate-x-1/2 px-1.5 py-0.5 bg-emerald-600 text-white rounded text-[8px] font-bold cursor-pointer hover:bg-emerald-500 transition z-20 shadow-md border border-[#1a1a1a] flex items-center gap-1"
                                   title={`UV Clip Trigger '${clipName}' at ${ck.time.toFixed(2)}s`}
                                 >
                                   <Repeat className="w-2.5 h-2.5" />
@@ -1095,12 +1095,12 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
                       {/* UV Frame Index Sub-Track (Mesh targets only) */}
                       {track.targetType === 'mesh' && track.texFrameKeyframes && track.texFrameKeyframes.length > 0 && (
                         <div className="flex h-6 items-center font-mono text-[10px]">
-                          <div className="w-56 pl-8 pr-3 flex items-center gap-1.5 text-cyan-400 font-bold border-r border-[#323232]">
+                          <div className="w-56 pl-8 pr-3 flex items-center gap-1.5 text-cyan-400 font-bold border-r border-[#4d4d4d]">
                             <ImageIcon className="w-3 h-3 text-cyan-400" />
                             <span>UV Frame Index</span>
                           </div>
                           <div className="flex-1 relative h-full flex items-center px-2">
-                            <div className="absolute inset-x-0 h-px bg-cyan-500/20" />
+                            <div className="absolute inset-x-0 h-px bg-[rgba(237,115,0,0.16)]" />
                             {track.texFrameKeyframes.map((kf) => {
                               const pct = (kf.time / activeClip.duration) * 100;
                               return (
@@ -1111,7 +1111,7 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
                                     e.stopPropagation();
                                     setCurrentTime(kf.time);
                                   }}
-                                  className="absolute transform -translate-x-1/2 px-1 py-0.2 bg-cyan-600 text-white rounded text-[8px] font-mono font-bold cursor-pointer hover:bg-cyan-500 transition z-20 border border-[#121212]"
+                                  className="absolute transform -translate-x-1/2 px-1 py-0.2 bg-cyan-600 text-white rounded text-[8px] font-mono font-bold cursor-pointer hover:bg-cyan-500 transition z-20 border border-[#1a1a1a]"
                                   title={`Texture Frame ${kf.value.x} at ${kf.time.toFixed(2)}s`}
                                 >
                                   f{kf.value.x}

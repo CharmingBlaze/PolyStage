@@ -1,29 +1,32 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  GripHorizontal, X, Upload, FileCode, CheckCircle, AlertCircle, Box,
-  Sparkles, Maximize2, Minus, Layers
+  GripHorizontal, X, Upload, CheckCircle, AlertCircle,
+  Maximize2, Minus,
 } from 'lucide-react';
 import type { CADMesh } from '../types/cad';
-import { import3DModelFile } from '../utils/importers';
+import { import3DModelFromFile, SUPPORTED_IMPORT_EXTENSIONS } from '../utils/importers';
 
 interface ImportModelModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onImportMesh: (mesh: CADMesh) => void;
+  onImportMeshes: (meshes: CADMesh[]) => void;
 }
+
+const ACCEPT = SUPPORTED_IMPORT_EXTENSIONS.join(',');
 
 export const ImportModelModal: React.FC<ImportModelModalProps> = ({
   isOpen,
   onClose,
-  onImportMesh,
+  onImportMeshes,
 }) => {
   const [position, setPosition] = useState({ x: Math.max(100, (window.innerWidth - 520) / 2), y: Math.max(80, (window.innerHeight - 420) / 2) });
   const [isDragging, setIsDragging] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [dragOver, setDragOver] = useState(false);
-  const [parsedMesh, setParsedMesh] = useState<CADMesh | null>(null);
+  const [parsedMeshes, setParsedMeshes] = useState<CADMesh[]>([]);
   const [fileName, setFileName] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -60,44 +63,48 @@ export const ImportModelModal: React.FC<ImportModelModalProps> = ({
 
   if (!isOpen) return null;
 
-  const processFile = (file: File) => {
+  const preview = parsedMeshes[0] ?? null;
+  const totalVerts = parsedMeshes.reduce((n, m) => n + m.vertices.length, 0);
+  const totalFaces = parsedMeshes.reduce((n, m) => n + m.faces.length, 0);
+
+  const processFile = async (file: File) => {
     setFileName(file.name);
     setErrorMsg(null);
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const content = e.target?.result as string;
-      if (!content) {
-        setErrorMsg('Failed to read file content.');
-        return;
-      }
-
-      const mesh = import3DModelFile(file.name, content);
-      if (mesh && mesh.vertices.length > 0) {
-        setParsedMesh(mesh);
+    setParsedMeshes([]);
+    setIsLoading(true);
+    try {
+      const result = await import3DModelFromFile(file);
+      if (result.meshes.length > 0) {
+        setParsedMeshes(result.meshes);
       } else {
-        setErrorMsg(`Could not parse 3D geometry from "${file.name}". Make sure it is a valid .obj, .stl, .ply, or .json file.`);
+        setErrorMsg(
+          result.error ||
+            `Could not parse 3D geometry from "${file.name}". Supported: OBJ, STL, PLY, glTF/GLB, JSON, bbmodel.`,
+        );
       }
-    };
-    reader.readAsText(file);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : `Failed to read "${file.name}".`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) processFile(file);
+    if (file) void processFile(file);
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
     const file = e.dataTransfer.files?.[0];
-    if (file) processFile(file);
+    if (file) void processFile(file);
   };
 
   const handleConfirmImport = () => {
-    if (parsedMesh) {
-      onImportMesh(parsedMesh);
-      setParsedMesh(null);
+    if (parsedMeshes.length) {
+      onImportMeshes(parsedMeshes);
+      setParsedMeshes([]);
       setFileName('');
       onClose();
     }
@@ -105,7 +112,7 @@ export const ImportModelModal: React.FC<ImportModelModalProps> = ({
 
   return (
     <div
-      className="fixed z-50 shadow-2xl rounded-xl border border-[#3e3e3e] bg-[#181818]/95 backdrop-blur-lg font-mono text-[11px] select-none text-[#cccccc] flex flex-col overflow-hidden"
+      className="fixed z-50 shadow-2xl rounded-xl border border-[#4d4d4d] bg-[#2a2a2a]/95 backdrop-blur-lg font-mono text-[11px] select-none text-[#cccccc] flex flex-col overflow-hidden"
       style={{
         left: `${position.x}px`,
         top: `${position.y}px`,
@@ -113,15 +120,14 @@ export const ImportModelModal: React.FC<ImportModelModalProps> = ({
         height: isMinimized ? '42px' : '420px',
       }}
     >
-      {/* Title Header */}
       <div
         onMouseDown={handleMouseDown}
-        className="h-10 px-3 flex items-center justify-between border-b border-[#2d2d2d] bg-[#222222] cursor-grab active:cursor-grabbing flex-shrink-0"
+        className="h-10 px-3 flex items-center justify-between border-b border-[#1a1a1a] bg-[#222222] cursor-grab active:cursor-grabbing flex-shrink-0"
       >
-        <div className="flex items-center gap-2 font-bold text-[#02a0e8]">
+        <div className="flex items-center gap-2 font-bold text-[#ff9a3c]">
           <GripHorizontal className="w-4 h-4 text-[#666666]" />
-          <Upload className="w-4 h-4 text-[#1473e6]" />
-          <span>IMPORT 3D MODEL (.OBJ, .STL, .PLY, .JSON)</span>
+          <Upload className="w-4 h-4 text-[#ed7300]" />
+          <span>IMPORT 3D MODEL</span>
         </div>
         <div className="flex items-center gap-1">
           <button
@@ -142,35 +148,40 @@ export const ImportModelModal: React.FC<ImportModelModalProps> = ({
       </div>
 
       {!isMinimized && (
-        <div className="flex-1 p-4 flex flex-col justify-between overflow-hidden bg-[#181818]">
-          {/* Dropzone Area */}
+        <div className="flex-1 p-4 flex flex-col justify-between overflow-hidden bg-[#2a2a2a]">
           <div
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
             onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => !isLoading && fileInputRef.current?.click()}
             className={`flex-1 border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer transition ${
               dragOver
-                ? 'border-[#1473e6] bg-[#1473e6]/10 text-white'
-                : parsedMesh
+                ? 'border-[#ed7300] bg-[#ed7300]/10 text-white'
+                : preview
                   ? 'border-emerald-500/50 bg-emerald-950/20 text-emerald-300'
-                  : 'border-[#383838] hover:border-[#1473e6] bg-[#202020] text-[#888888]'
+                  : 'border-[#4d4d4d] hover:border-[#ed7300] bg-[#2e2e2e] text-[#888888]'
             }`}
           >
             <input
               type="file"
               ref={fileInputRef}
               onChange={handleFileChange}
-              accept=".obj,.stl,.ply,.json,.bbmodel"
+              accept={ACCEPT}
               className="hidden"
             />
 
-            {parsedMesh ? (
+            {isLoading ? (
+              <div className="flex flex-col items-center gap-2 text-center text-[#aaaaaa]">
+                <Upload className="w-10 h-10 text-[#ed7300] animate-pulse" />
+                <div className="font-bold text-white text-sm">Parsing {fileName}…</div>
+              </div>
+            ) : preview ? (
               <div className="flex flex-col items-center gap-2 text-center">
                 <CheckCircle className="w-10 h-10 text-emerald-400 animate-bounce" />
                 <div className="font-bold text-white text-sm">{fileName}</div>
                 <div className="text-[10px] text-emerald-400 bg-emerald-900/40 px-2.5 py-1 rounded-full border border-emerald-700/50">
-                  {parsedMesh.vertices.length} Vertices • {parsedMesh.faces.length} Polygon Faces
+                  {parsedMeshes.length > 1 ? `${parsedMeshes.length} Meshes • ` : ''}
+                  {totalVerts} Vertices • {totalFaces} Faces
                 </div>
                 <div className="text-[9px] text-[#aaaaaa] mt-1">Click to choose a different file</div>
               </div>
@@ -182,19 +193,20 @@ export const ImportModelModal: React.FC<ImportModelModalProps> = ({
               </div>
             ) : (
               <div className="flex flex-col items-center gap-2 text-center">
-                <Upload className="w-10 h-10 text-[#1473e6]" />
+                <Upload className="w-10 h-10 text-[#ed7300]" />
                 <div className="font-bold text-white text-xs">Drag & Drop 3D Model File Here</div>
-                <div className="text-[9px] text-[#888888]">Supports Wavefront .OBJ, .STL, .PLY, and .JSON / .BBMODEL</div>
-                <button className="mt-2 px-3 py-1 bg-[#1473e6] text-white font-bold text-[10px] rounded-lg hover:bg-[#02a0e8] transition shadow">
+                <div className="text-[9px] text-[#888888]">
+                  OBJ, STL, PLY, glTF/GLB, JSON, bbmodel
+                </div>
+                <button className="mt-2 px-3 py-1 bg-[#ed7300] text-white font-bold text-[10px] rounded-lg hover:bg-[#ff9a3c] transition shadow">
                   Browse Files
                 </button>
               </div>
             )}
           </div>
 
-          {/* Action Footer */}
-          <div className="mt-4 flex items-center justify-between flex-shrink-0 pt-3 border-t border-[#2d2d2d]">
-            <span className="text-[9px] text-[#666666]">Formats: .OBJ, .STL, .PLY, .JSON</span>
+          <div className="mt-4 flex items-center justify-between flex-shrink-0 pt-3 border-t border-[#1a1a1a]">
+            <span className="text-[9px] text-[#666666]">Formats: .OBJ .STL .PLY .GLTF .GLB .JSON .BBMODEL</span>
             <div className="flex gap-2">
               <button
                 onClick={onClose}
@@ -203,11 +215,11 @@ export const ImportModelModal: React.FC<ImportModelModalProps> = ({
                 Cancel
               </button>
               <button
-                disabled={!parsedMesh}
+                disabled={!preview}
                 onClick={handleConfirmImport}
                 className={`px-4 py-1.5 rounded-lg font-bold text-xs transition ${
-                  parsedMesh
-                    ? 'bg-[#1473e6] text-white hover:bg-[#02a0e8] shadow-md shadow-[#1473e6]/30'
+                  preview
+                    ? 'bg-[#ed7300] text-white hover:bg-[#ff9a3c] shadow-md shadow-[#ed7300]/30'
                     : 'bg-[#2a2a2a] text-[#555555] cursor-not-allowed'
                 }`}
               >

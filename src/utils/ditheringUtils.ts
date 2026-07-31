@@ -19,7 +19,7 @@ export const PRO_ARTIST_64_PALETTE = [
   // Greens & Teals (8)
   '#064e3b', '#047857', '#059669', '#10b981', '#34d399', '#0d9488', '#14b8a6', '#2dd4bf',
   // Blues & Cyans (8)
-  '#0c4a6e', '#0369a1', '#0284c7', '#02a0e8', '#38bdf8', '#2563eb', '#3b82f6', '#60a5fa',
+  '#0c4a6e', '#0369a1', '#0284c7', '#ff9a3c', '#38bdf8', '#2563eb', '#3b82f6', '#60a5fa',
   // Purples & Violets (8)
   '#3b0764', '#581c87', '#7e22ce', '#9333ea', '#a855f7', '#c084fc', '#d8b4fe', '#f0abfc',
   // Earth Tones & Browns (8)
@@ -59,7 +59,7 @@ export const SNES_PALETTE = [
 ];
 
 export const GENESIS_PALETTE = [
-  '#000000', '#202020', '#404040', '#606060',
+  '#000000', '#2e2e2e', '#404040', '#606060',
   '#0000a0', '#0040ff', '#00a0ff', '#00ffff',
   '#00a000', '#00ff00', '#a0ff00', '#ffff00',
   '#a00000', '#ff0000', '#ff00a0', '#ffffff',

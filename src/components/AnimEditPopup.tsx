@@ -76,8 +76,8 @@ export const AnimEditPopup: React.FC<AnimEditPopupProps> = ({
   if (!isOpen) return null;
 
   const kindIcon = (kind: AnimEditKind) => {
-    if (kind === 'camera') return <Camera className="w-3 h-3 text-[#1473e6]" />;
-    if (kind === 'bone') return <Bone className="w-3 h-3 text-[#2680eb]" />;
+    if (kind === 'camera') return <Camera className="w-3 h-3 text-[#ed7300]" />;
+    if (kind === 'bone') return <Bone className="w-3 h-3 text-[#ed7300]" />;
     if (kind === 'particle') return <Sparkles className="w-3 h-3 text-[#e68619]" />;
     if (kind === 'light') return <Maximize className="w-3 h-3 text-[#f1c40f]" />;
     return <Box className="w-3 h-3 text-[#e68619]" />;
@@ -95,7 +95,7 @@ export const AnimEditPopup: React.FC<AnimEditPopupProps> = ({
 
   return (
     <div
-      className="absolute z-40 shadow-2xl rounded-lg border border-[#3e3e3e] bg-[#1a1a1a]/95 backdrop-blur-md font-mono text-[10px] text-[#cccccc] select-none"
+      className="absolute z-40 shadow-2xl rounded-lg border border-[#4d4d4d] bg-[#1a1a1a]/95 backdrop-blur-md font-mono text-[10px] text-[#cccccc] select-none"
       style={{ left: position.x, top: position.y, width: minimized ? 220 : 268 }}
     >
       <div
@@ -106,7 +106,7 @@ export const AnimEditPopup: React.FC<AnimEditPopupProps> = ({
         }}
         className="h-8 px-2 flex items-center justify-between border-b border-[#333] bg-[#242424] cursor-grab active:cursor-grabbing rounded-t-lg"
       >
-        <div className="flex items-center gap-1.5 font-bold text-[#1473e6]">
+        <div className="flex items-center gap-1.5 font-bold text-[#ed7300]">
           <GripHorizontal className="w-3.5 h-3.5 text-[#6f6f6f]" />
           <Settings2 className="w-3 h-3" />
           <span>ANIM EDIT</span>
@@ -114,7 +114,7 @@ export const AnimEditPopup: React.FC<AnimEditPopupProps> = ({
         <div className="flex items-center gap-0.5">
           <button
             type="button"
-            className="p-1 hover:bg-[#383838] rounded text-[#b3b3b3] hover:text-white"
+            className="p-1 hover:bg-[#4d4d4d] rounded text-[#b3b3b3] hover:text-white"
             title={minimized ? 'Expand' : 'Collapse'}
             onClick={() => setMinimized((v) => !v)}
           >
@@ -170,8 +170,8 @@ export const AnimEditPopup: React.FC<AnimEditPopupProps> = ({
                     type="button"
                     className={`h-7 rounded border flex items-center justify-center gap-1 ${
                       gizmoMode === mode.id
-                        ? 'border-[#1473e6] bg-[#1473e6]/20 text-[#1473e6]'
-                        : 'border-[#323232] text-[#8c8c8c] hover:text-white'
+                        ? 'border-[#ed7300] bg-[#ed7300]/20 text-[#ed7300]'
+                        : 'border-[#4d4d4d] text-[#8c8c8c] hover:text-white'
                     }`}
                     onClick={() => onGizmoMode(mode.id)}
                   >
@@ -235,7 +235,7 @@ export const AnimEditPopup: React.FC<AnimEditPopupProps> = ({
                 <button
                   type="button"
                   className={`w-full h-8 rounded text-white font-bold flex items-center justify-center gap-1 ${
-                    target.kind === 'light' ? 'bg-[#f1c40f] text-black' : 'bg-[#1473e6]'
+                    target.kind === 'light' ? 'bg-[#f1c40f] text-black' : 'bg-[#ed7300]'
                   }`}
                   onClick={onKeyNow}
                 >

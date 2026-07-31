@@ -13,7 +13,7 @@ export const PresetsModal: React.FC<PresetsModalProps> = ({ isOpen, onClose, onS
 
   const presets: { id: PrimitiveType; title: string; desc: string; icon: any; category: string }[] = [
     { id: 'cube', title: 'Low-Poly Cube', desc: 'Standard 6-sided quad box unit.', icon: Box, category: 'Basic' },
-    { id: 'chest', title: 'Treasure Chest', desc: 'Game pickup / loot container starter.', icon: Box, category: 'Game Prop' },
+    { id: 'chest', title: 'Default Box', desc: 'Starter box mesh for modeling.', icon: Box, category: 'Primitive' },
     { id: 'tree', title: 'Low-Poly Pine Tree', desc: 'Trunk cylinder + layered cone foliage.', icon: Triangle, category: 'Environment' },
     { id: 'car', title: 'Retro Cyber Car', desc: 'Sci-Fi low poly vehicle chassis.', icon: Layers, category: 'Vehicle' },
     { id: 'cylinder', title: 'Pillar / Barrel', desc: '8-segment retro cylinder.', icon: Cylinder, category: 'Basic' },

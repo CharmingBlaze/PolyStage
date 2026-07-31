@@ -63,7 +63,7 @@ const PRIMITIVES: { type: PrimitiveType; name: string; is2D?: boolean }[] = [
   { type: 'ring', name: 'Ring Surface', is2D: true },
   { type: 'tube', name: 'Hollow Tube' },
   { type: 'ramp', name: 'Wedge Ramp' },
-  { type: 'chest', name: 'Treasure Chest' },
+  { type: 'chest', name: 'Default Box' },
   { type: 'car', name: 'Low-Poly Car' },
   { type: 'tree', name: 'Pine Tree' },
 ];
@@ -101,7 +101,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
   onMagnetSnap,
   mesh: _mesh,
 }) => {
-  const [position, setPosition] = useState({ x: 48, y: 108 });
+  const [position, setPosition] = useState({ x: 44, y: 44 });
   const [isMinimized, setIsMinimized] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [internalTab, setInternalTab] = useState<ToolWindowTab>('tools');
@@ -213,7 +213,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
 
   return (
     <div
-      className="fixed z-50 shadow-2xl rounded-lg border border-[#3e3e3e] bg-[#1a1a1a]/95 backdrop-blur-md font-mono text-[10px] select-none text-[#cccccc]"
+      className="fixed z-50 border border-[#4d4d4d] bg-[#333333] font-sans text-[10px] select-none text-[#cccccc]"
       style={{
         left: `${position.x}px`,
         top: `${position.y}px`,
@@ -222,17 +222,17 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
     >
       <div
         onMouseDown={handleMouseDown}
-        className="h-8 px-2 flex items-center justify-between border-b border-[#333333] bg-[#242424] cursor-grab active:cursor-grabbing rounded-t-lg"
+        className="h-7 px-2 flex items-center justify-between border-b border-[#1a1a1a] bg-[#2d2d2d] cursor-grab active:cursor-grabbing"
       >
-        <div className="flex items-center gap-1.5 font-bold text-[#02a0e8] min-w-0">
-          <GripHorizontal className="w-3.5 h-3.5 text-[#6f6f6f] shrink-0" />
+        <div className="flex items-center gap-1.5 font-bold text-[#cccccc] min-w-0 uppercase tracking-wide text-[9px]">
+          <GripHorizontal className="w-3.5 h-3.5 text-[#999999] shrink-0" />
           <span className="truncate">{title}</span>
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
             onClick={() => setIsMinimized(!isMinimized)}
-            className="p-1 hover:bg-[#383838] rounded text-[#b3b3b3] hover:text-white"
+            className="p-1 hover:bg-[#4d4d4d] rounded text-[#b3b3b3] hover:text-white"
             title={isMinimized ? 'Expand Panel' : 'Minimize Panel'}
           >
             {isMinimized ? <Maximize2 className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
@@ -249,13 +249,13 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
       </div>
 
       {/* Top-level window tabs */}
-      <div className="grid grid-cols-2 gap-0.5 p-1 bg-[#141414] border-b border-[#2d2d2d]">
+      <div className="grid grid-cols-2 gap-0.5 p-1 bg-[#262626] border-b border-[#1a1a1a]">
         <button
           type="button"
           onClick={() => { setActiveTab('tools'); setIsMinimized(false); }}
           className={`h-7 rounded text-[9px] font-bold uppercase tracking-wide flex items-center justify-center gap-1 transition ${
             activeTab === 'tools'
-              ? 'bg-[#1473e6] text-white shadow'
+              ? 'bg-[#ed7300] text-white shadow'
               : 'text-[#8c8c8c] hover:bg-[#282828] hover:text-white'
           }`}
         >
@@ -266,7 +266,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
           onClick={() => { setActiveTab('primitives'); setIsMinimized(false); }}
           className={`h-7 rounded text-[9px] font-bold uppercase tracking-wide flex items-center justify-center gap-1 transition ${
             activeTab === 'primitives'
-              ? 'bg-[#1473e6] text-white shadow'
+              ? 'bg-[#ed7300] text-white shadow'
               : 'text-[#8c8c8c] hover:bg-[#282828] hover:text-white'
           }`}
         >
@@ -275,7 +275,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
       </div>
 
       {isMinimized ? (
-        <div className="p-1.5 flex gap-1 flex-wrap items-center justify-around bg-[#181818] rounded-b-lg">
+        <div className="p-1.5 flex gap-1 flex-wrap items-center justify-around bg-[#2a2a2a] rounded-b-lg">
           {activeTab === 'tools' ? (
             <>
               <button type="button" onClick={onExtrudeFace} title="Extrude (E)" className="p-1.5 cad-button text-cyan-400">
@@ -296,7 +296,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
             </>
           ) : (
             <>
-              <button type="button" onClick={() => handleSelectPrimitive('cube')} title="Cube" className="p-1.5 cad-button text-[#1473e6]">
+              <button type="button" onClick={() => handleSelectPrimitive('cube')} title="Cube" className="p-1.5 cad-button text-[#ed7300]">
                 <Box className="w-3.5 h-3.5" />
               </button>
               <button type="button" onClick={() => handleSelectPrimitive('sphere')} title="Sphere" className="p-1.5 cad-button text-cyan-400">
@@ -310,7 +310,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
         </div>
       ) : activeTab === 'tools' ? (
         <div className="p-2 space-y-2 max-h-[70vh] overflow-y-auto custom-scrollbar">
-          <div className="grid grid-cols-4 gap-1 p-1 bg-[#141414] rounded border border-[#2d2d2d]">
+          <div className="grid grid-cols-4 gap-1 p-1 bg-[#262626] rounded border border-[#1a1a1a]">
             {(['object', 'vertex', 'edge', 'face'] as const).map((mode) => (
               <button
                 key={mode}
@@ -322,7 +322,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
                   if (mode !== 'face') setSelectedFaceIds([]);
                 }}
                 className={`py-1 text-center rounded uppercase font-bold text-[9px] transition ${
-                  toolState.editMode === mode ? 'bg-[#1473e6] text-white shadow' : 'hover:bg-[#282828] text-[#8c8c8c]'
+                  toolState.editMode === mode ? 'bg-[#ed7300] text-white shadow' : 'hover:bg-[#282828] text-[#8c8c8c]'
                 }`}
               >
                 {mode}
@@ -342,7 +342,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
                 <span className="flex items-center gap-1">
                   <ArrowUpRight className="w-3 h-3" /> Extrude
                 </span>
-                <span className="bg-[#2d2d2d] px-1 rounded text-[8px] text-[#aaaaaa]">E</span>
+                <span className="bg-[#3a3a3a] px-1 rounded text-[8px] text-[#aaaaaa]">E</span>
               </button>
 
               <button
@@ -354,7 +354,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
                 <span className="flex items-center gap-1">
                   <Minimize2 className="w-3 h-3" /> Inset Face
                 </span>
-                <span className="bg-[#2d2d2d] px-1 rounded text-[8px] text-[#aaaaaa]">I</span>
+                <span className="bg-[#3a3a3a] px-1 rounded text-[8px] text-[#aaaaaa]">I</span>
               </button>
 
               <button
@@ -366,7 +366,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
                 <span className="flex items-center gap-1">
                   <Sparkles className="w-3 h-3" /> Subdivide
                 </span>
-                <span className="bg-[#2d2d2d] px-1 rounded text-[8px] text-[#aaaaaa]">W</span>
+                <span className="bg-[#3a3a3a] px-1 rounded text-[8px] text-[#aaaaaa]">W</span>
               </button>
 
               <button
@@ -378,7 +378,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
                 <span className="flex items-center gap-1">
                   <Scissors className="w-3 h-3" /> Loop Cut
                 </span>
-                <span className="bg-[#2d2d2d] px-1 rounded text-[8px] text-[#aaaaaa]">Ctrl+R</span>
+                <span className="bg-[#3a3a3a] px-1 rounded text-[8px] text-[#aaaaaa]">Ctrl+R</span>
               </button>
 
               <button
@@ -390,7 +390,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
                 <span className="flex items-center gap-1">
                   <Pencil className="w-3 h-3" /> Knife
                 </span>
-                <span className="bg-[#2d2d2d] px-1 rounded text-[8px] text-[#aaaaaa]">K</span>
+                <span className="bg-[#3a3a3a] px-1 rounded text-[8px] text-[#aaaaaa]">K</span>
               </button>
 
               <button
@@ -402,7 +402,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
                 <span className="flex items-center gap-1">
                   <Box className="w-3 h-3" /> Fill Face
                 </span>
-                <span className="bg-[#2d2d2d] px-1 rounded text-[8px] text-[#aaaaaa]">F</span>
+                <span className="bg-[#3a3a3a] px-1 rounded text-[8px] text-[#aaaaaa]">F</span>
               </button>
 
               <button
@@ -414,12 +414,12 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
                 <span className="flex items-center gap-1">
                   <CornerDownRight className="w-3 h-3" /> Bevel
                 </span>
-                <span className="bg-[#2d2d2d] px-1 rounded text-[8px] text-[#aaaaaa]">Ctrl+B</span>
+                <span className="bg-[#3a3a3a] px-1 rounded text-[8px] text-[#aaaaaa]">Ctrl+B</span>
               </button>
             </div>
           </section>
 
-          <section className="space-y-1 pt-1 border-t border-[#2d2d2d]">
+          <section className="space-y-1 pt-1 border-t border-[#1a1a1a]">
             <div className="text-[8px] uppercase tracking-wider text-[#8c8c8c] font-bold">Vertices & Symmetry</div>
             <div className="grid grid-cols-2 gap-1">
               <button
@@ -431,7 +431,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
                 <span className="flex items-center gap-1">
                   <Combine className="w-3 h-3" /> Merge Verts
                 </span>
-                <span className="bg-[#2d2d2d] px-1 rounded text-[8px] text-[#aaaaaa]">M</span>
+                <span className="bg-[#3a3a3a] px-1 rounded text-[8px] text-[#aaaaaa]">M</span>
               </button>
 
               <button
@@ -443,7 +443,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
                 <span className="flex items-center gap-1">
                   <Magnet className="w-3 h-3" /> Snap Verts
                 </span>
-                <span className="bg-[#2d2d2d] px-1 rounded text-[8px] text-[#aaaaaa]">Shift+S</span>
+                <span className="bg-[#3a3a3a] px-1 rounded text-[8px] text-[#aaaaaa]">Shift+S</span>
               </button>
             </div>
 
@@ -455,7 +455,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
                   className={`h-6 flex-1 rounded text-[9px] font-bold uppercase ${
                     (toolState.mirrorAxis || 'x') === axis
                       ? 'bg-[#e68619]/25 text-[#e68619] border border-[#e68619]/50'
-                      : 'bg-[#1a1a1a] text-[#888] border border-[#2a2a2a]'
+                      : 'bg-[#1a1a1a] text-[#888] border border-[#1a1a1a]'
                   }`}
                   onClick={() => setToolState((s) => ({ ...s, mirrorAxis: axis }))}
                 >
@@ -499,7 +499,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
                 <span className="flex items-center gap-1">
                   <GitBranch className="w-3 h-3" /> Apply Mirror
                 </span>
-                <span className="bg-[#2d2d2d] px-1 rounded text-[8px] text-[#aaaaaa]">Alt+X</span>
+                <span className="bg-[#3a3a3a] px-1 rounded text-[8px] text-[#aaaaaa]">Alt+X</span>
               </button>
               <button
                 type="button"
@@ -512,7 +512,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
             </div>
           </section>
 
-          <section className="space-y-1 pt-1 border-t border-[#2d2d2d]">
+          <section className="space-y-1 pt-1 border-t border-[#1a1a1a]">
             <div className="text-[8px] uppercase tracking-wider text-[#8c8c8c] font-bold">Subdivision Surface</div>
             <div className="grid grid-cols-4 gap-1">
               {[0, 1, 2, 3].map((lvl) => (
@@ -550,7 +550,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
             <div className="text-[8px] text-[#666]">Ctrl+Shift+D adds SubD · viewport shows levels</div>
           </section>
 
-          <section className="space-y-1 pt-1 border-t border-[#2d2d2d]">
+          <section className="space-y-1 pt-1 border-t border-[#1a1a1a]">
             <div className="text-[8px] uppercase tracking-wider text-[#8c8c8c] font-bold">Normals & Selection</div>
             <div className="grid grid-cols-2 gap-1">
               <button
@@ -598,9 +598,9 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
         </div>
       ) : (
         <div className="flex flex-col max-h-[70vh]">
-          <div className="p-2 bg-[#1e1e1e] border-b border-[#323232] flex items-center justify-between font-mono text-[10px]">
+          <div className="p-2 bg-[#1e1e1e] border-b border-[#4d4d4d] flex items-center justify-between font-mono text-[10px]">
             <span className="text-[#888888] font-bold">MODE:</span>
-            <div className="flex items-center bg-[#121212] p-0.5 rounded border border-[#383838]">
+            <div className="flex items-center bg-[#3a3a3a] p-0.5 rounded border border-[#4d4d4d]">
               <button
                 type="button"
                 onClick={() => {
@@ -609,11 +609,11 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
                 }}
                 className={`px-2 py-0.5 rounded transition font-bold flex items-center gap-1 ${
                   spawnMode === 'draw'
-                    ? 'bg-[#1473e6] text-white shadow-sm'
+                    ? 'bg-[#ed7300] text-white shadow-sm'
                     : 'text-[#888888] hover:text-white'
                 }`}
               >
-                <Pencil className="w-3 h-3 text-[#2680eb]" />
+                <Pencil className="w-3 h-3 text-[#ed7300]" />
                 <span>CAD DRAW</span>
               </button>
 
@@ -625,7 +625,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
                 }}
                 className={`px-2 py-0.5 rounded transition font-bold flex items-center gap-1 ${
                   spawnMode === 'instant'
-                    ? 'bg-[#1473e6] text-white shadow-sm'
+                    ? 'bg-[#ed7300] text-white shadow-sm'
                     : 'text-[#888888] hover:text-white'
                 }`}
               >
@@ -635,7 +635,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
             </div>
           </div>
 
-          <div className="px-2 py-1 bg-[#181818] border-b border-[#323232] text-[9px] text-[#8c8c8c] font-mono">
+          <div className="px-2 py-1 bg-[#2a2a2a] border-b border-[#4d4d4d] text-[9px] text-[#8c8c8c] font-mono">
             {spawnMode === 'draw'
               ? 'CAD: click in any viewport · 2D = 2 clicks · 3D = base + height'
               : toolState.placeOnClick
@@ -643,7 +643,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
                 : 'INSTANT: select a primitive, then click any viewport'}
           </div>
 
-          <div className="p-2 grid grid-cols-2 gap-1.5 overflow-y-auto custom-scrollbar bg-[#1c1c1c] flex-1 min-h-0">
+          <div className="p-2 grid grid-cols-2 gap-1.5 overflow-y-auto custom-scrollbar bg-[#333333] flex-1 min-h-0">
             {PRIMITIVES.map((p) => {
               const isSelected =
                 (toolState.cadDrawPrimitive === p.type && toolState.isCadDrawing) ||
@@ -656,15 +656,15 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
                   onClick={() => handleSelectPrimitive(p.type)}
                   className={`p-2 rounded border flex items-center justify-between text-xs transition text-left font-sans ${
                     isSelected
-                      ? 'bg-[#1473e6]/30 border-[#1473e6] text-white font-bold shadow-sm ring-1 ring-[#1473e6]'
-                      : 'bg-[#262626] border-[#383838] text-[#cccccc] hover:bg-[#323232] hover:text-white hover:border-[#1473e6]'
+                      ? 'bg-[#ed7300]/30 border-[#ed7300] text-white font-bold shadow-sm ring-1 ring-[#ed7300]'
+                      : 'bg-[#262626] border-[#4d4d4d] text-[#cccccc] hover:bg-[#404040] hover:text-white hover:border-[#ed7300]'
                   }`}
                 >
                   <div className="flex items-center gap-2 truncate">
-                    <Box className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-[#1473e6]' : 'text-[#8c8c8c]'}`} />
+                    <Box className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-[#ed7300]' : 'text-[#8c8c8c]'}`} />
                     <span className="truncate text-[11px]">{p.name}</span>
                   </div>
-                  <span className="text-[9px] font-mono text-[#1473e6] font-bold">{isSelected ? '✓' : '+'}</span>
+                  <span className="text-[9px] font-mono text-[#ed7300] font-bold">{isSelected ? '✓' : '+'}</span>
                 </button>
               );
             })}

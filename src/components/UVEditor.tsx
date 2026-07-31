@@ -686,7 +686,7 @@ export const UVEditor: React.FC<UVEditorProps> = ({
       }else ctx.fillStyle=overlap?'rgba(244,63,94,.52)':selected?'rgba(34,211,238,.22)':'rgba(56,189,248,.06)';
       ctx.fill();
       // Perforated (dashed) face borders — stronger dash on selection
-      ctx.strokeStyle=overlap?'#fb7185':selected?'#67e8f9':'#64748b';
+      ctx.strokeStyle=overlap?'#fb7185':selected?'#ed7300':'#666666';
       ctx.lineWidth=selected?2.4:1.25;
       ctx.setLineDash(selected ? [5, 4] : [3, 3]);
       ctx.stroke();
@@ -714,7 +714,7 @@ export const UVEditor: React.FC<UVEditorProps> = ({
       const { minX, minY, maxX, maxY, cx, cy, corners, rotateHandle } = gizmo;
       ctx.save();
       // Perforated selection bounds
-      ctx.strokeStyle = '#67e8f9';
+      ctx.strokeStyle = '#ed7300';
       ctx.lineWidth = 1.5;
       ctx.setLineDash([6, 4]);
       ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
@@ -743,7 +743,7 @@ export const UVEditor: React.FC<UVEditorProps> = ({
 
       // Corner scale handles
       corners.forEach((c) => {
-        ctx.fillStyle = transform === 'scale' ? '#67e8f9' : '#e0f2fe';
+        ctx.fillStyle = transform === 'scale' ? '#ed7300' : '#ffb366';
         ctx.strokeStyle = '#0c4a6e';
         ctx.lineWidth = 1.5;
         ctx.fillRect(c.x - HANDLE_R / 2, c.y - HANDLE_R / 2, HANDLE_R, HANDLE_R);
@@ -757,7 +757,7 @@ export const UVEditor: React.FC<UVEditorProps> = ({
       ctx.lineTo(cx, cy + HANDLE_R);
       ctx.lineTo(cx - HANDLE_R, cy);
       ctx.closePath();
-      ctx.fillStyle = transform === 'move' ? '#22d3ee' : '#a5f3fc';
+      ctx.fillStyle = transform === 'move' ? '#ed7300' : '#ff9a3c';
       ctx.fill();
       ctx.strokeStyle = '#164e63';
       ctx.lineWidth = 1.5;
@@ -765,7 +765,7 @@ export const UVEditor: React.FC<UVEditorProps> = ({
       ctx.restore();
     }
 
-    if(boxRectRef.current){const {a,b}=boxRectRef.current;ctx.fillStyle='#22d3ee1f';ctx.strokeStyle='#67e8f9';ctx.setLineDash([4,3]);ctx.fillRect(a.x,a.y,b.x-a.x,b.y-a.y);ctx.strokeRect(a.x,a.y,b.x-a.x,b.y-a.y);ctx.setLineDash([])}
+    if(boxRectRef.current){const {a,b}=boxRectRef.current;ctx.fillStyle='#ed73001f';ctx.strokeStyle='#ed7300';ctx.setLineDash([4,3]);ctx.fillRect(a.x,a.y,b.x-a.x,b.y-a.y);ctx.strokeRect(a.x,a.y,b.x-a.x,b.y-a.y);ctx.setLineDash([])}
   };
   drawRef.current=draw;
 

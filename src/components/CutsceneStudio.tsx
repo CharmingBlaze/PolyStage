@@ -1844,7 +1844,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
           style={{ left: timeVal * pxPerSec }}
           className="absolute top-0 bottom-0 flex flex-col items-center pointer-events-none"
         >
-          <div className={`w-px ${isMajor ? 'h-3 bg-[#1473e6]' : 'h-1.5 bg-[#3a3a3a]'}`} />
+          <div className={`w-px ${isMajor ? 'h-3 bg-[#ed7300]' : 'h-1.5 bg-[#3a3a3a]'}`} />
           {isMajor && (
             <span className="text-[8px] font-mono text-[#6a9fd8] mt-0.5 whitespace-nowrap">
               {timeVal.toFixed(timeVal % 1 === 0 ? 0 : 1)}s
@@ -2737,7 +2737,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
 
   const rowCls = (active: boolean, tone: 'blue' | 'orange' | 'teal' = 'blue') => {
     const tones = {
-      blue: active ? 'bg-[#1473e6]/20 text-white' : 'text-[#a8a8a8] hover:bg-[#252525] hover:text-[#e8e8e8]',
+      blue: active ? 'bg-[#ed7300]/20 text-white' : 'text-[#a8a8a8] hover:bg-[#252525] hover:text-[#e8e8e8]',
       orange: active ? 'bg-[#e68619]/18 text-white' : 'text-[#a8a8a8] hover:bg-[#252525] hover:text-[#e8e8e8]',
       teal: active ? 'bg-[#2d9d78]/20 text-white' : 'text-[#a8a8a8] hover:bg-[#252525] hover:text-[#e8e8e8]',
     };
@@ -2747,11 +2747,11 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
   const chipCls = (active: boolean) =>
     `h-6 px-1.5 rounded text-[9px] font-medium border transition-colors ${
       active
-        ? 'border-[#1473e6] bg-[#1473e6]/20 text-white'
-        : 'border-[#2d2d2d] bg-[#1a1a1a] text-[#9a9a9a] hover:border-[#3e3e3e] hover:text-[#d0d0d0]'
+        ? 'border-[#ed7300] bg-[#ed7300]/20 text-white'
+        : 'border-[#1a1a1a] bg-[#1a1a1a] text-[#9a9a9a] hover:border-[#4d4d4d] hover:text-[#d0d0d0]'
     }`;
 
-  const miniBtn = 'h-6 px-1.5 rounded border border-[#2d2d2d] bg-[#1a1a1a] text-[9px] text-[#b0b0b0] hover:border-[#3e3e3e] hover:text-white disabled:opacity-40 inline-flex items-center justify-center gap-1';
+  const miniBtn = 'h-6 px-1.5 rounded border border-[#1a1a1a] bg-[#1a1a1a] text-[9px] text-[#b0b0b0] hover:border-[#4d4d4d] hover:text-white disabled:opacity-40 inline-flex items-center justify-center gap-1';
   const primaryBtn = (color: string) =>
     `w-full h-6 rounded text-[9px] font-semibold text-white inline-flex items-center justify-center gap-1 ${color}`;
 
@@ -2770,7 +2770,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
       <div className="text-[8px] uppercase tracking-wider text-[#6e6e6e]">{label}</div>
       <div className="grid grid-cols-3 gap-0.5">
         {(['x', 'y', 'z'] as const).map((axis) => (
-          <label key={axis} className="flex items-center gap-0.5 h-6 rounded bg-[#141414] border border-[#2a2a2a] px-1">
+          <label key={axis} className="flex items-center gap-0.5 h-6 rounded bg-[#262626] border border-[#1a1a1a] px-1">
             <span className="text-[8px] text-[#5a5a5a] uppercase">{axis}</span>
             <input
               type="number"
@@ -2831,7 +2831,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
           <div key={bone.id}>
             <div
               className={`group flex items-center h-5.5 min-h-[22px] rounded ${
-                active ? 'bg-[#2680eb]/18 text-white' : 'text-[#a0a0a0] hover:bg-[#222] hover:text-[#e4e4e4]'
+                active ? 'bg-[#ed7300]/18 text-white' : 'text-[#a0a0a0] hover:bg-[#222] hover:text-[#e4e4e4]'
               }`}
               style={{ paddingLeft: 2 + depth * 10 }}
             >
@@ -2847,12 +2847,12 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                 className="flex-1 min-w-0 flex items-center gap-1 text-left h-full pr-1"
                 onClick={() => selectEditTarget('bone', bone.id)}
               >
-                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: bone.color || '#2680eb' }} />
+                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: bone.color || '#ed7300' }} />
                 <span className="truncate text-[10px]">{bone.name}</span>
               </button>
               <button
                 type="button"
-                className="opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center text-[#666] hover:text-[#2680eb]"
+                className="opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center text-[#666] hover:text-[#ed7300]"
                 title="Key bone"
                 onClick={(e) => { e.stopPropagation(); handleAddKeyframe('all', bone.id); }}
               >
@@ -2884,11 +2884,11 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
   }, [viewMenuOpen, toolsMenuOpen, fxMenuOpen]);
 
   return (
-    <div ref={layoutRootRef} className="flex flex-col h-full w-full bg-[#161616] text-[#e0e0e0] font-sans select-none overflow-hidden">
+    <div ref={layoutRootRef} className="flex flex-col h-full w-full bg-[#2b2b2b] text-[#e0e0e0] font-sans select-none overflow-hidden">
       {/* Top toolbar — hidden in focus/enlarge mode */}
       {!focusPlayback && (
-      <div className="h-9 shrink-0 bg-[#141414] border-b border-[#323232] px-2 flex items-center gap-2 text-[10px] font-mono z-20">
-        <div className="flex items-center gap-1.5 bg-[#0f0f0f] px-2 py-0.5 rounded border border-[#2d2d2d] shrink-0">
+      <div className="h-9 shrink-0 bg-[#262626] border-b border-[#4d4d4d] px-2 flex items-center gap-2 text-[10px] font-mono z-20">
+        <div className="flex items-center gap-1.5 bg-[#0f0f0f] px-2 py-0.5 rounded border border-[#1a1a1a] shrink-0">
           <Layers className="w-3.5 h-3.5 text-[#e68619]" />
           {scenes.length > 1 && setActiveSceneId && activeSceneId ? (
             <select
@@ -2898,7 +2898,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
               title="Active scene"
             >
               {scenes.map((scene) => (
-                <option key={scene.id} value={scene.id} className="bg-[#141414] text-[#e68619]">
+                <option key={scene.id} value={scene.id} className="bg-[#262626] text-[#e68619]">
                   {scene.name} ({scene.meshCount} objects)
                 </option>
               ))}
@@ -2910,50 +2910,50 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
           )}
         </div>
 
-        <div className="h-4 w-px bg-[#323232] shrink-0" />
+        <div className="h-4 w-px bg-[#1a1a1a] shrink-0" />
 
-        <button type="button" className="h-6 px-1.5 rounded border border-[#2a2a2a] bg-[#1a1a1a] text-[9px] text-[#b8b8b8] hover:text-white hover:border-[#3a3a3a] inline-flex items-center gap-1" onClick={() => setLeftCollapsed((v) => !v)} title="Toggle tools panel">
+        <button type="button" className="h-6 px-1.5 rounded border border-[#1a1a1a] bg-[#1a1a1a] text-[9px] text-[#b8b8b8] hover:text-white hover:border-[#1a1a1a] inline-flex items-center gap-1" onClick={() => setLeftCollapsed((v) => !v)} title="Toggle tools panel">
           {leftCollapsed ? <PanelLeft className="w-3 h-3" /> : <PanelLeftClose className="w-3 h-3" />}
           Tools
         </button>
-        <button type="button" className="h-6 px-1.5 rounded border border-[#2a2a2a] bg-[#1a1a1a] text-[9px] text-[#b8b8b8] hover:text-white hover:border-[#3a3a3a] inline-flex items-center gap-1" onClick={() => setTimelineCollapsed((v) => !v)} title="Toggle timeline">
+        <button type="button" className="h-6 px-1.5 rounded border border-[#1a1a1a] bg-[#1a1a1a] text-[9px] text-[#b8b8b8] hover:text-white hover:border-[#1a1a1a] inline-flex items-center gap-1" onClick={() => setTimelineCollapsed((v) => !v)} title="Toggle timeline">
           <ChevronsDownUp className="w-3 h-3" />
           Timeline
         </button>
 
         <div className="relative" onPointerDown={(e) => e.stopPropagation()}>
-          <button type="button" className={`h-6 px-1.5 rounded border border-[#2a2a2a] bg-[#1a1a1a] text-[9px] inline-flex items-center gap-1 ${viewMenuOpen ? 'text-[#1473e6] border-[#1473e6]/40' : 'text-[#b8b8b8] hover:text-white'}`} onClick={() => { setViewMenuOpen((v) => !v); setToolsMenuOpen(false); }}>
+          <button type="button" className={`h-6 px-1.5 rounded border border-[#1a1a1a] bg-[#1a1a1a] text-[9px] inline-flex items-center gap-1 ${viewMenuOpen ? 'text-[#ed7300] border-[#ed7300]/40' : 'text-[#b8b8b8] hover:text-white'}`} onClick={() => { setViewMenuOpen((v) => !v); setToolsMenuOpen(false); }}>
             <Eye className="w-3 h-3" /> View
           </button>
           {viewMenuOpen && (
-            <div className="absolute left-0 top-full mt-1 z-50 min-w-[180px] py-1 rounded border border-[#3e3e3e] bg-[#2a2a2a] shadow-xl text-[10px]">
-              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#383838]" onClick={() => { setCameraView(true); setViewMenuOpen(false); }}>Camera View</button>
-              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#383838]" onClick={() => { setCameraView(false); setViewMenuOpen(false); }}>Free Orbit (edit)</button>
-              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#383838]" onClick={() => { setShowBones((v) => !v); setViewMenuOpen(false); }}>{showBones ? 'Hide Bones' : 'Show Bones'}</button>
-              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#383838]" onClick={() => { setShowLightwaveTools((v) => !v); setViewMenuOpen(false); }}>{showLightwaveTools ? 'Hide LightWave Tools' : 'Show LightWave Tools'}</button>
-              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#383838]" onClick={() => { enterFocusPlayback(); setViewMenuOpen(false); }}>Enlarge Viewport (Shift+F)</button>
-              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#383838]" onClick={() => { maximizeTimelineEditor(); setViewMenuOpen(false); }}>Maximize Timeline / Dope (Shift+T)</button>
-              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#383838]" onClick={() => { applyTimelineHeight(320); setViewMenuOpen(false); }}>Comfortable Timeline</button>
-              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#383838]" onClick={() => { setEditPopupOpen(true); setViewMenuOpen(false); }}>Show Anim Edit Popup</button>
-              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#383838]" onClick={() => { setLeftCollapsed(false); setViewMenuOpen(false); }}>Show Tools Panel</button>
-              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#383838]" onClick={() => { applyTimelineHeight(300); setViewMenuOpen(false); }}>Show Timeline</button>
+            <div className="absolute left-0 top-full mt-1 z-50 min-w-[180px] py-1 rounded border border-[#4d4d4d] bg-[#2a2a2a] shadow-xl text-[10px]">
+              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#4d4d4d]" onClick={() => { setCameraView(true); setViewMenuOpen(false); }}>Camera View</button>
+              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#4d4d4d]" onClick={() => { setCameraView(false); setViewMenuOpen(false); }}>Free Orbit (edit)</button>
+              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#4d4d4d]" onClick={() => { setShowBones((v) => !v); setViewMenuOpen(false); }}>{showBones ? 'Hide Bones' : 'Show Bones'}</button>
+              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#4d4d4d]" onClick={() => { setShowLightwaveTools((v) => !v); setViewMenuOpen(false); }}>{showLightwaveTools ? 'Hide LightWave Tools' : 'Show LightWave Tools'}</button>
+              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#4d4d4d]" onClick={() => { enterFocusPlayback(); setViewMenuOpen(false); }}>Enlarge Viewport (Shift+F)</button>
+              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#4d4d4d]" onClick={() => { maximizeTimelineEditor(); setViewMenuOpen(false); }}>Maximize Timeline / Dope (Shift+T)</button>
+              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#4d4d4d]" onClick={() => { applyTimelineHeight(320); setViewMenuOpen(false); }}>Comfortable Timeline</button>
+              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#4d4d4d]" onClick={() => { setEditPopupOpen(true); setViewMenuOpen(false); }}>Show Anim Edit Popup</button>
+              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#4d4d4d]" onClick={() => { setLeftCollapsed(false); setViewMenuOpen(false); }}>Show Tools Panel</button>
+              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#4d4d4d]" onClick={() => { applyTimelineHeight(300); setViewMenuOpen(false); }}>Show Timeline</button>
             </div>
           )}
         </div>
 
         <div className="relative" onPointerDown={(e) => e.stopPropagation()}>
-          <button type="button" className={`h-6 px-1.5 rounded border border-[#2a2a2a] bg-[#1a1a1a] text-[9px] inline-flex items-center gap-1 ${toolsMenuOpen ? 'text-[#e68619] border-[#e68619]/40' : 'text-[#b8b8b8] hover:text-white'}`} onClick={() => { setToolsMenuOpen((v) => !v); setViewMenuOpen(false); }}>
+          <button type="button" className={`h-6 px-1.5 rounded border border-[#1a1a1a] bg-[#1a1a1a] text-[9px] inline-flex items-center gap-1 ${toolsMenuOpen ? 'text-[#e68619] border-[#e68619]/40' : 'text-[#b8b8b8] hover:text-white'}`} onClick={() => { setToolsMenuOpen((v) => !v); setViewMenuOpen(false); }}>
             <Settings2 className="w-3 h-3" /> Animate
           </button>
           {toolsMenuOpen && (
-            <div className="absolute left-0 top-full mt-1 z-50 min-w-[220px] py-1 rounded border border-[#3e3e3e] bg-[#2a2a2a] shadow-xl text-[10px]">
-              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#383838]" onClick={() => { animationTargets.forEach((t) => handleAddTrack(t.id)); setToolsMenuOpen(false); }}>Add All Tracks</button>
-              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#383838]" onClick={() => { handleAddKeyframe('all'); setToolsMenuOpen(false); }}>Key Selected (+ ALL)</button>
-              <div className="border-t border-[#3e3e3e] my-1" />
+            <div className="absolute left-0 top-full mt-1 z-50 min-w-[220px] py-1 rounded border border-[#4d4d4d] bg-[#2a2a2a] shadow-xl text-[10px]">
+              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#4d4d4d]" onClick={() => { animationTargets.forEach((t) => handleAddTrack(t.id)); setToolsMenuOpen(false); }}>Add All Tracks</button>
+              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#4d4d4d]" onClick={() => { handleAddKeyframe('all'); setToolsMenuOpen(false); }}>Key Selected (+ ALL)</button>
+              <div className="border-t border-[#4d4d4d] my-1" />
               <div className="px-3 py-1 text-[8px] uppercase tracking-wider text-[#8c8c8c] font-bold">UV & Character Dialog</div>
               <button
                 type="button"
-                className="w-full text-left px-3 py-1.5 hover:bg-[#383838] text-emerald-400 font-semibold flex items-center justify-between"
+                className="w-full text-left px-3 py-1.5 hover:bg-[#4d4d4d] text-emerald-400 font-semibold flex items-center justify-between"
                 onClick={() => {
                   if (activeMeshId) {
                     const selMesh = meshes.find((m) => m.id === activeMeshId);
@@ -2971,7 +2971,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
               </button>
               <button
                 type="button"
-                className="w-full text-left px-3 py-1.5 hover:bg-[#383838] text-cyan-400 font-semibold flex items-center justify-between"
+                className="w-full text-left px-3 py-1.5 hover:bg-[#4d4d4d] text-cyan-400 font-semibold flex items-center justify-between"
                 onClick={() => {
                   if (activeMeshId) {
                     const selMesh = meshes.find((m) => m.id === activeMeshId);
@@ -2987,21 +2987,21 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                 <span>Trigger Blink Loop</span>
                 <span className="text-[8px] opacity-60">Eyes</span>
               </button>
-              <div className="border-t border-[#3e3e3e] my-1" />
-              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#383838]" onClick={() => { setAutoKey((v) => !v); setToolsMenuOpen(false); }}>{autoKey ? 'Disable' : 'Enable'} Auto-Key</button>
-              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#383838]" onClick={() => { addParticleEffect(); setToolsMenuOpen(false); }}>Add Custom Particle…</button>
-              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#383838]" onClick={() => { setLeftTab('particles'); setLeftCollapsed(false); setToolsMenuOpen(false); }}>Open FX / Effects Panel</button>
-              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#383838]" onClick={() => { setEnvModalOpen(true); setToolsMenuOpen(false); }}>Environment Settings…</button>
-              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#383838]" onClick={() => { setLeftTab('outliner'); setLeftCollapsed(false); setToolsMenuOpen(false); }}>Open Outliner Tree</button>
-              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#383838]" onClick={() => { setLeftTab('bones'); setLeftCollapsed(false); setToolsMenuOpen(false); }}>Edit Bones</button>
-              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#383838]" onClick={() => { setLeftTab('cameras'); setLeftCollapsed(false); setToolsMenuOpen(false); }}>Edit Cameras</button>
+              <div className="border-t border-[#4d4d4d] my-1" />
+              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#4d4d4d]" onClick={() => { setAutoKey((v) => !v); setToolsMenuOpen(false); }}>{autoKey ? 'Disable' : 'Enable'} Auto-Key</button>
+              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#4d4d4d]" onClick={() => { addParticleEffect(); setToolsMenuOpen(false); }}>Add Custom Particle…</button>
+              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#4d4d4d]" onClick={() => { setLeftTab('particles'); setLeftCollapsed(false); setToolsMenuOpen(false); }}>Open FX / Effects Panel</button>
+              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#4d4d4d]" onClick={() => { setEnvModalOpen(true); setToolsMenuOpen(false); }}>Environment Settings…</button>
+              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#4d4d4d]" onClick={() => { setLeftTab('outliner'); setLeftCollapsed(false); setToolsMenuOpen(false); }}>Open Outliner Tree</button>
+              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#4d4d4d]" onClick={() => { setLeftTab('bones'); setLeftCollapsed(false); setToolsMenuOpen(false); }}>Edit Bones</button>
+              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-[#4d4d4d]" onClick={() => { setLeftTab('cameras'); setLeftCollapsed(false); setToolsMenuOpen(false); }}>Edit Cameras</button>
             </div>
           )}
         </div>
 
         <button
           type="button"
-          className={`h-6 px-1.5 rounded border text-[9px] font-bold inline-flex items-center gap-1 ${autoKey ? 'border-[#e68619]/50 bg-[#e68619]/15 text-[#e68619]' : 'border-[#2a2a2a] text-[#8c8c8c]'}`}
+          className={`h-6 px-1.5 rounded border text-[9px] font-bold inline-flex items-center gap-1 ${autoKey ? 'border-[#e68619]/50 bg-[#e68619]/15 text-[#e68619]' : 'border-[#1a1a1a] text-[#8c8c8c]'}`}
           onClick={() => setAutoKey((v) => !v)}
           title="When on, changing transforms inserts keys at the playhead"
         >
@@ -3011,7 +3011,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
 
         <button
           type="button"
-          className={`h-6 px-1.5 rounded border text-[9px] inline-flex items-center gap-1 ${showBones ? 'border-[#2680eb]/40 text-[#6a9fd8]' : 'border-[#2a2a2a] text-[#666]'}`}
+          className={`h-6 px-1.5 rounded border text-[9px] inline-flex items-center gap-1 ${showBones ? 'border-[#ed7300]/40 text-[#6a9fd8]' : 'border-[#1a1a1a] text-[#666]'}`}
           title="Show / hide bone markers"
           onClick={() => setShowBones((v) => !v)}
         >
@@ -3021,7 +3021,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
 
         <button
           type="button"
-          className="h-6 px-1.5 rounded border border-[#2a2a2a] bg-[#1a1a1a] text-[9px] text-[#e68619] hover:border-[#e68619]/40 inline-flex items-center gap-1"
+          className="h-6 px-1.5 rounded border border-[#1a1a1a] bg-[#1a1a1a] text-[9px] text-[#e68619] hover:border-[#e68619]/40 inline-flex items-center gap-1"
           title="Add particles & effects"
           onClick={() => { setLeftTab('particles'); setLeftCollapsed(false); }}
         >
@@ -3031,29 +3031,29 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
         <div className="relative" onPointerDown={(e) => e.stopPropagation()}>
           <button
             type="button"
-            className={`h-6 px-1.5 rounded border border-[#2a2a2a] bg-[#1a1a1a] text-[9px] inline-flex items-center gap-1 ${fxMenuOpen ? 'text-[#e68619] border-[#e68619]/40' : 'text-[#b8b8b8] hover:text-white'}`}
+            className={`h-6 px-1.5 rounded border border-[#1a1a1a] bg-[#1a1a1a] text-[9px] inline-flex items-center gap-1 ${fxMenuOpen ? 'text-[#e68619] border-[#e68619]/40' : 'text-[#b8b8b8] hover:text-white'}`}
             title="Quick-add particle effect"
             onClick={() => { setFxMenuOpen((v) => !v); setViewMenuOpen(false); setToolsMenuOpen(false); }}
           >
             <Plus className="w-3 h-3" /> Effect
           </button>
           {fxMenuOpen && (
-            <div className="absolute left-0 top-full mt-1 z-50 min-w-[180px] py-1 rounded border border-[#3e3e3e] bg-[#2a2a2a] shadow-xl text-[10px]">
+            <div className="absolute left-0 top-full mt-1 z-50 min-w-[180px] py-1 rounded border border-[#4d4d4d] bg-[#2a2a2a] shadow-xl text-[10px]">
               {PARTICLE_PRESETS.map((preset) => (
                 <button
                   key={preset.id}
                   type="button"
-                  className="w-full text-left px-3 py-1.5 hover:bg-[#383838]"
+                  className="w-full text-left px-3 py-1.5 hover:bg-[#4d4d4d]"
                   title={preset.hint}
                   onClick={() => { addParticleEffect(preset.id); setFxMenuOpen(false); }}
                 >
                   {preset.label}
                 </button>
               ))}
-              <div className="border-t border-[#3e3e3e] my-1" />
+              <div className="border-t border-[#4d4d4d] my-1" />
               <button
                 type="button"
-                className="w-full text-left px-3 py-1.5 hover:bg-[#383838] text-[#e68619]"
+                className="w-full text-left px-3 py-1.5 hover:bg-[#4d4d4d] text-[#e68619]"
                 onClick={() => { addParticleEffect(); setFxMenuOpen(false); }}
               >
                 Custom Particle Studio…
@@ -3064,7 +3064,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
 
         <button
           type="button"
-          className={`h-6 px-1.5 rounded border text-[9px] inline-flex items-center gap-1 ${envModalOpen ? 'border-[#6a9fd8]/50 text-[#6a9fd8]' : 'border-[#2a2a2a] text-[#b8b8b8] hover:text-white'}`}
+          className={`h-6 px-1.5 rounded border text-[9px] inline-flex items-center gap-1 ${envModalOpen ? 'border-[#6a9fd8]/50 text-[#6a9fd8]' : 'border-[#1a1a1a] text-[#b8b8b8] hover:text-white'}`}
           title="Environment settings"
           onClick={() => setEnvModalOpen(true)}
         >
@@ -3076,7 +3076,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
           className={`h-6 px-1.5 rounded border text-[9px] inline-flex items-center gap-1 ${
             litPreview
               ? 'border-[#f1c40f]/60 bg-[#f1c40f]/18 text-[#f1c40f]'
-              : 'border-[#2a2a2a] bg-[#1a1a1a] text-[#b8b8b8] hover:text-white'
+              : 'border-[#1a1a1a] bg-[#1a1a1a] text-[#b8b8b8] hover:text-white'
           }`}
           title="Cinematic mode — only scene lights (Key/Fill/…). Studio fill off. Zero lights = pitch black."
           onClick={() => {
@@ -3105,8 +3105,8 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
           type="button"
           className={`h-6 px-1.5 rounded border text-[9px] inline-flex items-center gap-1 ${
             showLightHelpers
-              ? 'border-[#1473e6]/50 bg-[#1473e6]/15 text-[#6ec8ff]'
-              : 'border-[#2a2a2a] bg-[#1a1a1a] text-[#8c8c8c] hover:text-white'
+              ? 'border-[#ed7300]/50 bg-[#ed7300]/15 text-[#6ec8ff]'
+              : 'border-[#1a1a1a] bg-[#1a1a1a] text-[#8c8c8c] hover:text-white'
           }`}
           title="Show / hide light gizmos in the viewport"
           onClick={() => setShowLightHelpers((v) => !v)}
@@ -3117,7 +3117,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
 
         <button
           type="button"
-          className={`h-6 px-1.5 rounded border border-[#2a2a2a] bg-[#1a1a1a] text-[9px] inline-flex items-center gap-1 ${editPopupOpen ? 'text-[#1473e6] border-[#1473e6]/40' : 'text-[#b8b8b8] hover:text-white'}`}
+          className={`h-6 px-1.5 rounded border border-[#1a1a1a] bg-[#1a1a1a] text-[9px] inline-flex items-center gap-1 ${editPopupOpen ? 'text-[#ed7300] border-[#ed7300]/40' : 'text-[#b8b8b8] hover:text-white'}`}
           onClick={() => setEditPopupOpen((v) => !v)}
           title="Transform editor popup"
         >
@@ -3129,8 +3129,8 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
           type="button"
           className={`h-6 px-1.5 rounded border text-[9px] inline-flex items-center gap-1 ${
             showLightwaveTools
-              ? 'border-[#1473e6]/50 bg-[#1473e6]/15 text-[#6ec8ff]'
-              : 'border-[#2a2a2a] bg-[#1a1a1a] text-[#8c8c8c] hover:text-white'
+              ? 'border-[#ed7300]/50 bg-[#ed7300]/15 text-[#6ec8ff]'
+              : 'border-[#1a1a1a] bg-[#1a1a1a] text-[#8c8c8c] hover:text-white'
           }`}
           title="Show / hide LightWave move · orbit · zoom tools"
           onClick={() => setShowLightwaveTools((v) => !v)}
@@ -3149,7 +3149,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
           Enlarge
         </button>
 
-        <div className="flex bg-[#161616] p-0.5 rounded border border-[#2a2a2a]">
+        <div className="flex bg-[#2b2b2b] p-0.5 rounded border border-[#1a1a1a]">
           {([
             { id: 'translate' as const, icon: <Move className="w-3 h-3" />, title: 'Move (G)' },
             { id: 'rotate' as const, icon: <RotateCw className="w-3 h-3" />, title: 'Rotate (R)' },
@@ -3159,7 +3159,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
               key={mode.id}
               type="button"
               title={mode.title}
-              className={`h-5 w-6 flex items-center justify-center rounded ${gizmoMode === mode.id ? 'bg-[#1473e6] text-white' : 'text-[#8c8c8c] hover:text-white'}`}
+              className={`h-5 w-6 flex items-center justify-center rounded ${gizmoMode === mode.id ? 'bg-[#ed7300] text-white' : 'text-[#8c8c8c] hover:text-white'}`}
               onClick={() => { setGizmoMode(mode.id); setCameraView(false); setEditPopupOpen(true); setModalTransform(null); }}
             >
               {mode.icon}
@@ -3169,7 +3169,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
 
         <div className="ml-auto flex items-center gap-2 text-[#8c8c8c]">
           <span ref={(el) => { timeLabelElsRef.current[0] = el; }}>{currentTime.toFixed(2)}s / {(activeClip?.duration || 0).toFixed(2)}s</span>
-          <button type="button" className={`h-6 px-1.5 rounded border border-[#2a2a2a] bg-[#1a1a1a] text-[9px] inline-flex items-center gap-1 ${cameraView ? 'text-[#1473e6] border-[#1473e6]/40' : 'text-[#b8b8b8] hover:text-white'}`} onClick={() => setCameraView((v) => !v)}>
+          <button type="button" className={`h-6 px-1.5 rounded border border-[#1a1a1a] bg-[#1a1a1a] text-[9px] inline-flex items-center gap-1 ${cameraView ? 'text-[#ed7300] border-[#ed7300]/40' : 'text-[#b8b8b8] hover:text-white'}`} onClick={() => setCameraView((v) => !v)}>
             {cameraView ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
             {cameraView ? 'Camera' : 'Orbit'}
           </button>
@@ -3184,9 +3184,9 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
             <aside
               ref={(el) => { leftPanelRef.current = el; }}
               style={{ width: leftWidth }}
-              className="shrink-0 bg-[#181818] border-r border-[#2a2a2a] flex flex-col text-[10px] font-mono min-w-0"
+              className="shrink-0 bg-[#2a2a2a] border-r border-[#1a1a1a] flex flex-col text-[10px] font-mono min-w-0"
             >
-              <div className="flex border-b border-[#2a2a2a] overflow-x-auto custom-scrollbar shrink-0 bg-[#141414]">
+              <div className="flex border-b border-[#1a1a1a] overflow-x-auto custom-scrollbar shrink-0 bg-[#262626]">
                 {leftTabs.map((tab) => (
                   <button
                     key={tab.id}
@@ -3195,7 +3195,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                     title={tab.label}
                     className={`h-7 px-2 shrink-0 flex items-center gap-1 border-b text-[9px] ${
                       leftTab === tab.id
-                        ? 'border-[#1473e6] text-white bg-[#1c1c1c]'
+                        ? 'border-[#ed7300] text-white bg-[#333333]'
                         : 'border-transparent text-[#7a7a7a] hover:text-[#c8c8c8]'
                     }`}
                   >
@@ -3209,7 +3209,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                   onClick={() => setEnvModalOpen(true)}
                   className={`h-7 px-2 shrink-0 flex items-center gap-1 border-b text-[9px] ${
                     envModalOpen
-                      ? 'border-[#6a9fd8] text-[#6a9fd8] bg-[#1c1c1c]'
+                      ? 'border-[#6a9fd8] text-[#6a9fd8] bg-[#333333]'
                       : 'border-transparent text-[#7a7a7a] hover:text-[#c8c8c8]'
                   }`}
                 >
@@ -3229,7 +3229,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                       value={outlinerQuery}
                       onChange={(e) => setOutlinerQuery(e.target.value)}
                       placeholder="Filter…"
-                      className="w-full h-6 px-2 rounded bg-[#121212] border border-[#2a2a2a] text-[10px] outline-none focus:border-[#1473e6]"
+                      className="w-full h-6 px-2 rounded bg-[#3a3a3a] border border-[#1a1a1a] text-[10px] outline-none focus:border-[#ed7300]"
                     />
                     <Section label="Meshes">
                       <div className="space-y-0.5">
@@ -3258,7 +3258,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                         </div>
                       )}
                     >
-                      <div className="rounded bg-[#121212] border border-[#242424] p-0.5 max-h-[46vh] overflow-y-auto custom-scrollbar">
+                      <div className="rounded bg-[#3a3a3a] border border-[#242424] p-0.5 max-h-[46vh] overflow-y-auto custom-scrollbar">
                         {bones.length ? renderBoneTree(null) : (
                           <div className="text-[9px] text-[#555] px-2 py-3 text-center">No skeleton yet</div>
                         )}
@@ -3272,7 +3272,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                         <div className="space-y-1.5">
                           <Vec3Fields label="Position" value={selectedBone.position} onChange={(position) => patchBone(selectedBone.id, { position })} />
                           <Vec3Fields label="Rotation" value={selectedBone.rotation} onChange={(rotation) => patchBone(selectedBone.id, { rotation })} step={0.05} />
-                          <button type="button" className={primaryBtn('bg-[#2680eb] hover:bg-[#3a8ef0]')} onClick={() => handleAddKeyframe('all', selectedBone.id)}>
+                          <button type="button" className={primaryBtn('bg-[#ed7300] hover:bg-[#3a8ef0]')} onClick={() => handleAddKeyframe('all', selectedBone.id)}>
                             <Key className="w-3 h-3" /> Key
                           </button>
                         </div>
@@ -3304,7 +3304,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                           onClick={() => { setActiveClipId(clip.id); setCurrentTime(0); }}
                           className={rowCls(clip.id === activeClip?.id)}
                         >
-                          <Film className="w-3 h-3 text-[#2680eb] shrink-0" />
+                          <Film className="w-3 h-3 text-[#ed7300] shrink-0" />
                           <span className="truncate flex-1">{clip.name}</span>
                           <span className="text-[8px] text-[#555]">{clip.duration}s</span>
                         </button>
@@ -3348,7 +3348,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                     <div className="space-y-0.5">
                       {cameras.map((cam) => (
                         <button key={cam.id} type="button" onClick={() => selectEditTarget('camera', cam.id)} className={rowCls(cam.id === activeCamera?.id)}>
-                          <Camera className="w-3 h-3 text-[#1473e6] shrink-0" />
+                          <Camera className="w-3 h-3 text-[#ed7300] shrink-0" />
                           <span className="truncate flex-1">{cam.name}</span>
                           <span className="text-[8px] text-[#555]">{cam.fov}°</span>
                         </button>
@@ -3376,7 +3376,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                           <button type="button" className={miniBtn} onClick={() => { setCameraView(false); setGizmoMode('translate'); selectEditTarget('camera', activeCamera.id); }}>
                             <Move className="w-3 h-3" /> Move
                           </button>
-                          <button type="button" className={primaryBtn('bg-[#1473e6] hover:bg-[#2680eb]')} onClick={() => handleAddKeyframe('all', activeCamera.id)}>
+                          <button type="button" className={primaryBtn('bg-[#ed7300] hover:bg-[#ed7300]')} onClick={() => handleAddKeyframe('all', activeCamera.id)}>
                             <Key className="w-3 h-3" /> Key
                           </button>
                         </div>
@@ -3446,7 +3446,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                     </Section>
                     <Section label="Procedural">
                       <select
-                        className="w-full h-6 px-1.5 rounded bg-[#121212] border border-[#2a2a2a] text-[10px] outline-none"
+                        className="w-full h-6 px-1.5 rounded bg-[#3a3a3a] border border-[#1a1a1a] text-[10px] outline-none"
                         value={procAnimId || ''}
                         onChange={(e) => setProcAnimId((e.target.value || null) as ProcAnimId | null)}
                       >
@@ -3463,7 +3463,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                           step={0.05}
                           value={procSpeed}
                           onChange={setProcSpeed}
-                          accent="#1473e6"
+                          accent="#ed7300"
                         />
                         <span className="w-7 text-right text-white">{procSpeed.toFixed(1)}×</span>
                       </label>
@@ -3477,7 +3477,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                         </div>
                       )}
                     >
-                      <div className="rounded bg-[#121212] border border-[#242424] p-0.5 max-h-40 overflow-y-auto custom-scrollbar">
+                      <div className="rounded bg-[#3a3a3a] border border-[#242424] p-0.5 max-h-40 overflow-y-auto custom-scrollbar">
                         {bones.length ? renderBoneTree(null) : (
                           <div className="text-[9px] text-[#555] px-2 py-2 text-center">Apply a preset</div>
                         )}
@@ -3489,7 +3489,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                           <Vec3Fields label="Position" value={selectedBone.position} onChange={(position) => patchBone(selectedBone.id, { position })} />
                           <Vec3Fields label="Rotation" value={selectedBone.rotation} onChange={(rotation) => patchBone(selectedBone.id, { rotation })} step={0.05} />
                           <Vec3Fields label="Scale" value={selectedBone.scale} onChange={(scale) => patchBone(selectedBone.id, { scale })} />
-                          <button type="button" className={primaryBtn('bg-[#2680eb] hover:bg-[#3a8ef0]')} onClick={() => handleAddKeyframe('all', selectedBone.id)}>
+                          <button type="button" className={primaryBtn('bg-[#ed7300] hover:bg-[#3a8ef0]')} onClick={() => handleAddKeyframe('all', selectedBone.id)}>
                             <Key className="w-3 h-3" /> Key
                           </button>
                         </div>
@@ -3577,13 +3577,13 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                           <Vec3Fields label="Position" value={selectedParticle.position} onChange={(position) => { patchParticle(selectedParticle.id, { position }); selectEditTarget('particle', selectedParticle.id); }} />
                           <Vec3Fields label="Rotation" value={selectedParticle.rotation} onChange={(rotation) => patchParticle(selectedParticle.id, { rotation })} step={0.05} />
                           <div className="grid grid-cols-2 gap-0.5">
-                            <label className="flex items-center gap-1 h-6 px-1.5 rounded bg-[#141414] border border-[#2a2a2a] text-[8px] text-[#666]">
+                            <label className="flex items-center gap-1 h-6 px-1.5 rounded bg-[#262626] border border-[#1a1a1a] text-[8px] text-[#666]">
                               Start
                               <input type="number" step={0.1} className="w-full bg-transparent outline-none text-right text-[10px] text-[#d8d8d8]"
                                 value={selectedParticle.emitStart ?? 0}
                                 onChange={(e) => patchParticle(selectedParticle.id, { emitStart: Number(e.target.value) })} />
                             </label>
-                            <label className="flex items-center gap-1 h-6 px-1.5 rounded bg-[#141414] border border-[#2a2a2a] text-[8px] text-[#666]">
+                            <label className="flex items-center gap-1 h-6 px-1.5 rounded bg-[#262626] border border-[#1a1a1a] text-[8px] text-[#666]">
                               End
                               <input type="number" step={0.1} className="w-full bg-transparent outline-none text-right text-[10px] text-[#d8d8d8]"
                                 value={selectedParticle.emitEnd ?? 999}
@@ -4077,7 +4077,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
               role="separator"
               onPointerDown={startResizeLeft}
               onDoubleClick={() => setLeftWidth(280)}
-              className="w-1.5 shrink-0 cursor-col-resize bg-[#1a1a1a] hover:bg-[#1473e6]/50 border-r border-[#323232]"
+              className="w-1.5 shrink-0 cursor-col-resize bg-[#1a1a1a] hover:bg-[#ed7300]/50 border-r border-[#4d4d4d]"
               title="Drag to resize tools · Double-click reset"
             />
           </>
@@ -4099,7 +4099,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
             <span className="cad-card px-2 py-1 text-[#e68619] font-bold font-mono text-[10px] flex items-center gap-1">
               <Layers className="w-3 h-3" /> {sceneName}
             </span>
-            <span className="cad-card px-2 py-1 text-[#2680eb] font-bold font-mono text-[10px] flex items-center gap-1">
+            <span className="cad-card px-2 py-1 text-[#ed7300] font-bold font-mono text-[10px] flex items-center gap-1">
               <Film className="w-3 h-3" /> {focusPlayback ? 'FOCUS PLAYBACK' : 'CUTSCENE VIEW'}
             </span>
             <span
@@ -4135,7 +4135,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
               <button
                 type="button"
                 className={`h-8 w-8 rounded-md border flex items-center justify-center shadow-xl ${
-                  isPlaying ? 'border-[#e68619] bg-[#e68619] text-white' : 'border-[#1473e6]/50 bg-[#0f1620]/95 text-[#6ec8ff]'
+                  isPlaying ? 'border-[#e68619] bg-[#e68619] text-white' : 'border-[#ed7300]/50 bg-[#0f1620]/95 text-[#6ec8ff]'
                 }`}
                 title="Play / Pause (Space)"
                 onClick={() => setIsPlaying((p) => !p)}
@@ -4146,8 +4146,8 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                 type="button"
                 className={`h-8 px-2 rounded-md border text-[10px] font-mono inline-flex items-center gap-1 shadow-xl ${
                   showLightwaveTools
-                    ? 'border-[#1473e6]/50 bg-[#0f1620]/95 text-[#6ec8ff]'
-                    : 'border-[#333] bg-[#121212]/90 text-[#777]'
+                    ? 'border-[#ed7300]/50 bg-[#0f1620]/95 text-[#6ec8ff]'
+                    : 'border-[#333] bg-[#3a3a3a]/90 text-[#777]'
                 }`}
                 title="Toggle LightWave tools"
                 onClick={() => setShowLightwaveTools((v) => !v)}
@@ -4199,10 +4199,10 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
             e.preventDefault();
             cycleTimelineHeight();
           }}
-          className="h-2 shrink-0 cursor-row-resize bg-[#1a1a1a] hover:bg-[#1473e6]/60 border-t border-[#323232] flex items-center justify-center group relative"
+          className="h-2 shrink-0 cursor-row-resize bg-[#1a1a1a] hover:bg-[#ed7300]/60 border-t border-[#4d4d4d] flex items-center justify-center group relative"
           title="Drag to resize · Double-click cycle size · Shift+T maximize"
         >
-          <div className="w-16 h-0.5 rounded-full bg-[#3a3a3a] group-hover:bg-[#1473e6] transition" />
+          <div className="w-16 h-0.5 rounded-full bg-[#3a3a3a] group-hover:bg-[#ed7300] transition" />
           <div className="absolute right-2 opacity-0 group-hover:opacity-100 transition flex items-center gap-0.5 pointer-events-auto">
             {[
               { label: 'S', h: 200 },
@@ -4213,7 +4213,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
               <button
                 key={preset.label}
                 type="button"
-                className="h-5 min-w-[22px] px-1 rounded bg-[#222] border border-[#3a3a3a] text-[8px] font-mono font-bold text-[#9a9a9a] hover:text-white hover:border-[#1473e6]"
+                className="h-5 min-w-[22px] px-1 rounded bg-[#222] border border-[#1a1a1a] text-[8px] font-mono font-bold text-[#9a9a9a] hover:text-white hover:border-[#ed7300]"
                 title={preset.label === 'Max' ? 'Maximize timeline (Shift+T)' : `Timeline height ${preset.h}px`}
                 onPointerDown={(ev) => ev.stopPropagation()}
                 onClick={(ev) => {
@@ -4232,7 +4232,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
       {timelineCollapsed && !focusPlayback && (
         <button
           type="button"
-          className="h-8 shrink-0 border-t border-[#323232] bg-[#1c1c1c] text-[10px] font-mono text-[#8c8c8c] hover:text-[#1473e6] flex items-center justify-center gap-2"
+          className="h-8 shrink-0 border-t border-[#4d4d4d] bg-[#333333] text-[10px] font-mono text-[#8c8c8c] hover:text-[#ed7300] flex items-center justify-center gap-2"
           onClick={() => applyTimelineHeight(320)}
         >
           <ChevronsDownUp className="w-3.5 h-3.5" /> Show Timeline · {currentTime.toFixed(2)}s / {(activeClip?.duration || 0).toFixed(2)}s
@@ -4244,13 +4244,13 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
         <div
           ref={timelinePanelRef}
           style={{ height: timelineHeight }}
-          className="shrink-0 bg-[#0b0d12] border-t border-[#2a2a2a] flex flex-col select-none"
+          className="shrink-0 bg-[#0b0d12] border-t border-[#1a1a1a] flex flex-col select-none"
           onPointerEnter={() => setTimelineFocus(true)}
           onPointerLeave={() => setTimelineFocus(false)}
           tabIndex={0}
         >
           {/* Transport toolbar */}
-          <div className="h-9 bg-[#161616] border-b border-[#2a2a2a] px-2 flex items-center gap-1.5 font-mono text-[10px] shrink-0 overflow-x-auto custom-scrollbar">
+          <div className="h-9 bg-[#2b2b2b] border-b border-[#1a1a1a] px-2 flex items-center gap-1.5 font-mono text-[10px] shrink-0 overflow-x-auto custom-scrollbar">
             <div className="flex items-center gap-0.5 shrink-0">
               <button type="button" className="p-1 rounded hover:bg-[#2a2a2a] text-[#8c8c8c]" title="Start (Home)" onClick={() => setPlayhead(0)}>
                 <SkipBack className="w-3.5 h-3.5" />
@@ -4260,7 +4260,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
               </button>
               <button
                 type="button"
-                className={`p-1.5 rounded-full text-white ${isPlaying ? 'bg-[#e68619]' : 'bg-[#1473e6]'}`}
+                className={`p-1.5 rounded-full text-white ${isPlaying ? 'bg-[#e68619]' : 'bg-[#ed7300]'}`}
                 title="Play / Pause (Space)"
                 onClick={() => setIsPlaying((p) => !p)}
               >
@@ -4274,7 +4274,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
               </button>
             </div>
 
-            <label className="flex items-center gap-1 h-6 px-1.5 rounded bg-[#121212] border border-[#2a2a2a] shrink-0" title="Jump to time">
+            <label className="flex items-center gap-1 h-6 px-1.5 rounded bg-[#3a3a3a] border border-[#1a1a1a] shrink-0" title="Jump to time">
               <span className="text-[#555]">T</span>
               <input
                 type="number"
@@ -4306,7 +4306,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
 
             <button
               type="button"
-              className={`h-6 px-1.5 rounded border text-[9px] ${snapToFrames ? 'border-[#1473e6] bg-[#1473e6]/20 text-white' : 'border-[#2a2a2a] text-[#888]'}`}
+              className={`h-6 px-1.5 rounded border text-[9px] ${snapToFrames ? 'border-[#ed7300] bg-[#ed7300]/20 text-white' : 'border-[#1a1a1a] text-[#888]'}`}
               title="Snap playhead & keys to frames"
               onClick={() => setSnapToFrames((v) => !v)}
             >
@@ -4315,7 +4315,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
 
             {activeClip && (
               <select
-                className="h-6 px-1 rounded bg-[#121212] border border-[#2a2a2a] text-[9px] outline-none"
+                className="h-6 px-1 rounded bg-[#3a3a3a] border border-[#1a1a1a] text-[9px] outline-none"
                 value={activeClip.loopMode}
                 onChange={(e) => setClips((prev) => prev.map((c) => c.id === activeClip.id ? { ...c, loopMode: e.target.value as typeof c.loopMode } : c))}
                 title="Loop mode"
@@ -4326,7 +4326,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
               </select>
             )}
 
-            <div className="flex items-center gap-0.5 bg-[#121212] p-0.5 rounded border border-[#2a2a2a] shrink-0">
+            <div className="flex items-center gap-0.5 bg-[#3a3a3a] p-0.5 rounded border border-[#1a1a1a] shrink-0">
               <button type="button" className="p-1 rounded hover:bg-[#2a2a2a] text-[#8c8c8c]" title="Zoom out (−)" onClick={() => zoomTimeline(1 / 1.25)}>
                 <ZoomOut className="w-3.5 h-3.5" />
               </button>
@@ -4345,7 +4345,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
               <span className="text-[8px] text-[#555] w-10 text-right">{pxPerSec}px</span>
             </div>
 
-            <div className="flex items-center gap-0.5 bg-[#121212] p-0.5 rounded border border-[#2a2a2a] shrink-0" title="Timeline / dope sheet height">
+            <div className="flex items-center gap-0.5 bg-[#3a3a3a] p-0.5 rounded border border-[#1a1a1a] shrink-0" title="Timeline / dope sheet height">
               <button type="button" className="h-5 px-1.5 rounded text-[8px] font-bold text-[#8c8c8c] hover:text-white hover:bg-[#2a2a2a]" onClick={() => applyTimelineHeight(Math.max(160, timelineHeight - 80))} title="Shorter">
                 −H
               </button>
@@ -4358,7 +4358,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                   key={preset.label}
                   type="button"
                   className={`h-5 min-w-[18px] px-1 rounded text-[8px] font-bold ${
-                    Math.abs(timelineHeight - preset.h) < 20 ? 'bg-[#1473e6] text-white' : 'text-[#8c8c8c] hover:text-white hover:bg-[#2a2a2a]'
+                    Math.abs(timelineHeight - preset.h) < 20 ? 'bg-[#ed7300] text-white' : 'text-[#8c8c8c] hover:text-white hover:bg-[#2a2a2a]'
                   }`}
                   onClick={() => applyTimelineHeight(preset.h)}
                 >
@@ -4381,7 +4381,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
             </div>
 
             {activeClip && timelineTab !== 'seq' && (
-              <div className="flex items-center gap-0.5 bg-[#121212] p-0.5 rounded border border-[#2a2a2a] shrink-0" title="Extend clip length">
+              <div className="flex items-center gap-0.5 bg-[#3a3a3a] p-0.5 rounded border border-[#1a1a1a] shrink-0" title="Extend clip length">
                 <span className="text-[8px] text-[#666] px-1">Len</span>
                 <button type="button" className="h-5 px-1 rounded text-[8px] font-bold text-[#8c8c8c] hover:text-white hover:bg-[#2a2a2a]" onClick={() => extendClipDuration(-1)} title="−1s">
                   −1s
@@ -4395,9 +4395,9 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
               </div>
             )}
 
-            <div className="flex bg-[#121212] p-0.5 rounded border border-[#2a2a2a] shrink-0">
-              <button type="button" className={`px-2 py-0.5 rounded text-[9px] font-bold ${timelineTab === 'dope' ? 'bg-[#1473e6] text-white' : 'text-[#8c8c8c]'}`} onClick={() => setTimelineTab('dope')}>DOPE</button>
-              <button type="button" className={`px-2 py-0.5 rounded text-[9px] font-bold ${timelineTab === 'graph' ? 'bg-[#1473e6] text-white' : 'text-[#8c8c8c]'}`} onClick={() => setTimelineTab('graph')}>GRAPH</button>
+            <div className="flex bg-[#3a3a3a] p-0.5 rounded border border-[#1a1a1a] shrink-0">
+              <button type="button" className={`px-2 py-0.5 rounded text-[9px] font-bold ${timelineTab === 'dope' ? 'bg-[#ed7300] text-white' : 'text-[#8c8c8c]'}`} onClick={() => setTimelineTab('dope')}>DOPE</button>
+              <button type="button" className={`px-2 py-0.5 rounded text-[9px] font-bold ${timelineTab === 'graph' ? 'bg-[#ed7300] text-white' : 'text-[#8c8c8c]'}`} onClick={() => setTimelineTab('graph')}>GRAPH</button>
               <button type="button" className={`px-2 py-0.5 rounded text-[9px] font-bold ${timelineTab === 'seq' ? 'bg-[#e68619] text-white' : 'text-[#8c8c8c]'}`} onClick={() => {
                 setSequence((prev) => ensureMovieSequenceTracks(
                   prev || createEmptySequence('Cutscene', Math.max(8, activeClip?.duration || 8), clipFps),
@@ -4411,10 +4411,10 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
 
             {timelineTab === 'seq' && (
               <>
-                <div className="h-4 w-px bg-[#2a2a2a] shrink-0" />
+                <div className="h-4 w-px bg-[#1a1a1a] shrink-0" />
                 <button
                   type="button"
-                  className="h-6 px-1.5 rounded border border-[#1473e6]/40 text-[9px] text-[#6a9fd8] shrink-0"
+                  className="h-6 px-1.5 rounded border border-[#ed7300]/40 text-[9px] text-[#6a9fd8] shrink-0"
                   title="Drop active anim clip on Video track"
                   onClick={() => {
                     if (!activeClip) return;
@@ -4436,7 +4436,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                   + Anim
                 </button>
                 <select
-                  className="h-6 max-w-[88px] px-1 rounded border border-[#e68619]/40 bg-[#121212] text-[9px] text-[#e68619] shrink-0"
+                  className="h-6 max-w-[88px] px-1 rounded border border-[#e68619]/40 bg-[#3a3a3a] text-[9px] text-[#e68619] shrink-0"
                   title="Add particle FX cue"
                   defaultValue=""
                   onChange={(e) => {
@@ -4460,7 +4460,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                   {particles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
                 <select
-                  className="h-6 max-w-[100px] px-1 rounded border border-[#6a9fd8]/40 bg-[#121212] text-[9px] text-[#6a9fd8] shrink-0"
+                  className="h-6 max-w-[100px] px-1 rounded border border-[#6a9fd8]/40 bg-[#3a3a3a] text-[9px] text-[#6a9fd8] shrink-0"
                   title="Add weather cue"
                   defaultValue=""
                   onChange={(e) => {
@@ -4485,7 +4485,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                   ))}
                 </select>
                 <select
-                  className="h-6 max-w-[100px] px-1 rounded border border-[#9b59b6]/40 bg-[#121212] text-[9px] text-[#c39bd3] shrink-0"
+                  className="h-6 max-w-[100px] px-1 rounded border border-[#9b59b6]/40 bg-[#3a3a3a] text-[9px] text-[#c39bd3] shrink-0"
                   title="Add camera shot (set transition in inspector)"
                   defaultValue=""
                   onChange={(e) => {
@@ -4509,7 +4509,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                   {cameras.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
                 <select
-                  className="h-6 max-w-[100px] px-1 rounded border border-[#f1c40f]/40 bg-[#121212] text-[9px] text-[#f1c40f] shrink-0"
+                  className="h-6 max-w-[100px] px-1 rounded border border-[#f1c40f]/40 bg-[#3a3a3a] text-[9px] text-[#f1c40f] shrink-0"
                   title="Add light cue"
                   defaultValue=""
                   onChange={(e) => {
@@ -4610,17 +4610,17 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
 
             {timelineTab !== 'seq' && (
               <>
-            <div className="h-4 w-px bg-[#2a2a2a] shrink-0" />
+            <div className="h-4 w-px bg-[#1a1a1a] shrink-0" />
 
-            <button type="button" className="h-6 px-1.5 rounded bg-[#1473e6] text-white text-[9px] font-bold flex items-center gap-1 shrink-0" title="Key selected (K)" onClick={() => handleAddKeyframe('all')}>
+            <button type="button" className="h-6 px-1.5 rounded bg-[#ed7300] text-white text-[9px] font-bold flex items-center gap-1 shrink-0" title="Key selected (K)" onClick={() => handleAddKeyframe('all')}>
               <Key className="w-3 h-3" /> Key
             </button>
-            <button type="button" className="h-6 px-1.5 rounded border border-[#2a2a2a] text-[9px] text-[#b0b0b0] hover:text-white shrink-0" title="Key all tracks at playhead" onClick={keyAllVisibleTracks}>
+            <button type="button" className="h-6 px-1.5 rounded border border-[#1a1a1a] text-[9px] text-[#b0b0b0] hover:text-white shrink-0" title="Key all tracks at playhead" onClick={keyAllVisibleTracks}>
               Column
             </button>
-            <button type="button" className="h-6 px-1.5 rounded border border-[#2a2a2a] text-[9px] text-[#6a9fd8] shrink-0" onClick={() => handleAddKeyframe('pos')}>Pos</button>
-            <button type="button" className="h-6 px-1.5 rounded border border-[#2a2a2a] text-[9px] text-[#ec5b62] shrink-0" onClick={() => handleAddKeyframe('rot')}>Rot</button>
-            <button type="button" className="h-6 px-1.5 rounded border border-[#2a2a2a] text-[9px] text-[#e68619] shrink-0" onClick={() => handleAddKeyframe('scl')}>Scl</button>
+            <button type="button" className="h-6 px-1.5 rounded border border-[#1a1a1a] text-[9px] text-[#6a9fd8] shrink-0" onClick={() => handleAddKeyframe('pos')}>Pos</button>
+            <button type="button" className="h-6 px-1.5 rounded border border-[#1a1a1a] text-[9px] text-[#ec5b62] shrink-0" onClick={() => handleAddKeyframe('rot')}>Rot</button>
+            <button type="button" className="h-6 px-1.5 rounded border border-[#1a1a1a] text-[9px] text-[#e68619] shrink-0" onClick={() => handleAddKeyframe('scl')}>Scl</button>
             {selectedKeyframeId && (
               <button type="button" className="h-6 px-1.5 rounded bg-[#ec5b62] text-white text-[9px] font-bold flex items-center gap-1 shrink-0" onClick={handleDeleteKeyframe}>
                 <Trash2 className="w-3 h-3" /> Del
@@ -4642,7 +4642,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
             <div className="flex items-center gap-1 ml-auto shrink-0">
               {timelineTab === 'seq' && (
                 <select
-                  className="h-6 px-1 rounded border border-[#2a2a2a] bg-[#121212] text-[9px] text-[#888]"
+                  className="h-6 px-1 rounded border border-[#1a1a1a] bg-[#3a3a3a] text-[9px] text-[#888]"
                   title="Record capture frame rate"
                   value={recordFps}
                   onChange={(e) => setRecordFps(Number(e.target.value))}
@@ -4663,7 +4663,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
               )}
               <button
                 type="button"
-                className="h-6 px-1.5 rounded border border-[#2a2a2a] text-[8px] font-bold text-[#8c8c8c] hover:text-[#1473e6] hover:border-[#1473e6]/40"
+                className="h-6 px-1.5 rounded border border-[#1a1a1a] text-[8px] font-bold text-[#8c8c8c] hover:text-[#ed7300] hover:border-[#ed7300]/40"
                 title="Cycle timeline size"
                 onClick={cycleTimelineHeight}
               >
@@ -4718,9 +4718,9 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
             ) : (
               <div className="flex-1 min-h-0 flex">
                 {/* Fixed track labels */}
-                <div className="w-44 shrink-0 border-r border-[#2a2a2a] bg-[#121212] flex flex-col min-h-0">
-                  <div className="h-7 px-2 border-b border-[#2a2a2a] text-[8px] uppercase tracking-wider text-[#666] flex items-center gap-1 shrink-0">
-                    <Layers className="w-3 h-3 text-[#2680eb]" /> Tracks
+                <div className="w-44 shrink-0 border-r border-[#1a1a1a] bg-[#3a3a3a] flex flex-col min-h-0">
+                  <div className="h-7 px-2 border-b border-[#1a1a1a] text-[8px] uppercase tracking-wider text-[#666] flex items-center gap-1 shrink-0">
+                    <Layers className="w-3 h-3 text-[#ed7300]" /> Tracks
                   </div>
                   <div
                     ref={trackLabelScrollRef}
@@ -4732,7 +4732,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                     {!activeClip || activeClip.tracks.length === 0 ? (
                       <div className="p-3 text-[9px] text-[#555] space-y-2">
                         <div>No tracks yet.</div>
-                        <button type="button" className="h-6 px-2 rounded bg-[#1473e6] text-white text-[9px] font-bold" onClick={() => animationTargets.forEach((t) => handleAddTrack(t.id))}>
+                        <button type="button" className="h-6 px-2 rounded bg-[#ed7300] text-white text-[9px] font-bold" onClick={() => animationTargets.forEach((t) => handleAddTrack(t.id))}>
                           Add all tracks
                         </button>
                       </div>
@@ -4743,7 +4743,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                         return (
                           <div key={`label_${track.targetType}_${track.targetId}`} className="border-b border-[#1a1a1a]">
                             <div
-                              className={`h-7 px-1.5 flex items-center gap-1 cursor-pointer ${isSelected ? 'bg-[#1473e6]/18' : 'hover:bg-[#1a1a1a]'}`}
+                              className={`h-7 px-1.5 flex items-center gap-1 cursor-pointer ${isSelected ? 'bg-[#ed7300]/18' : 'hover:bg-[#1a1a1a]'}`}
                               onClick={() => setSelectedTrackId(track.targetId)}
                             >
                               <button
@@ -4756,8 +4756,8 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                               >
                                 {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
                               </button>
-                              {track.targetType === 'bone' && <Bone className="w-3 h-3 text-[#2680eb] shrink-0" />}
-                              {track.targetType === 'camera' && <Camera className="w-3 h-3 text-[#1473e6] shrink-0" />}
+                              {track.targetType === 'bone' && <Bone className="w-3 h-3 text-[#ed7300] shrink-0" />}
+                              {track.targetType === 'camera' && <Camera className="w-3 h-3 text-[#ed7300] shrink-0" />}
                               {track.targetType === 'mesh' && <Box className="w-3 h-3 text-[#e68619] shrink-0" />}
                               {track.targetType === 'particle' && <Sparkles className="w-3 h-3 text-[#e68619] shrink-0" />}
                               <span className="truncate flex-1 text-[10px] text-[#d0d0d0]">{track.targetName}</span>
@@ -4767,7 +4767,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                               <button type="button" className="p-0.5 text-[#555] hover:text-white" title="Move down" onClick={(e) => { e.stopPropagation(); handleReorderDopeTrack(track.targetId, 'down'); }}>
                                 <ChevronDown className="w-3 h-3" />
                               </button>
-                              <button type="button" className="p-0.5 text-[#555] hover:text-[#2680eb]" onClick={(e) => { e.stopPropagation(); handleAddKeyframe('all', track.targetId); }}>
+                              <button type="button" className="p-0.5 text-[#555] hover:text-[#ed7300]" onClick={(e) => { e.stopPropagation(); handleAddKeyframe('all', track.targetId); }}>
                                 <Key className="w-3 h-3" />
                               </button>
                               <button type="button" className="p-0.5 text-[#555] hover:text-[#ec5b62]" onClick={(e) => { e.stopPropagation(); handleRemoveTrack(track.targetId); }}>
@@ -4785,7 +4785,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                                       <span>Tex Frame</span>
                                       <button
                                         type="button"
-                                        className="h-4 px-1 rounded bg-[#1473e6]/30 text-[#94e2ff]"
+                                        className="h-4 px-1 rounded bg-[#ed7300]/30 text-[#94e2ff]"
                                         title="Key current texture frame index at playhead"
                                         onClick={(e) => {
                                           e.stopPropagation();
@@ -4805,7 +4805,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                                         <button
                                           key={tc.id}
                                           type="button"
-                                          className="w-full h-5 px-1 rounded text-left hover:bg-[#1473e6]/25 text-[#e68619]"
+                                          className="w-full h-5 px-1 rounded text-left hover:bg-[#ed7300]/25 text-[#e68619]"
                                           title={`Trigger ${tc.name} at playhead`}
                                           onClick={(e) => {
                                             e.stopPropagation();
@@ -4841,7 +4841,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                   <div style={{ width: timelineWidthPx }} className="min-h-full relative">
                     {/* Ruler */}
                     <div
-                      className="h-7 sticky top-0 z-20 bg-[#111823] border-b border-[#2a2a2a] relative cursor-ew-resize"
+                      className="h-7 sticky top-0 z-20 bg-[#2d2d2d] border-b border-[#1a1a1a] relative cursor-ew-resize"
                       onPointerDown={startScrub}
                       title="Drag to scrub"
                     >
@@ -4899,7 +4899,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                         return (
                           <div key={`lane_${track.targetType}_${track.targetId}`} className="border-b border-[#1a1f2a]">
                             <div
-                              className={`h-7 relative cursor-crosshair ${isSelected ? 'bg-[#1473e6]/10' : 'hover:bg-[#151a24]'}`}
+                              className={`h-7 relative cursor-crosshair ${isSelected ? 'bg-[#ed7300]/10' : 'hover:bg-[#151a24]'}`}
                               onPointerDown={startScrub}
                               onDoubleClick={(e) => {
                                 const t = timeFromPointer(e.clientX, e.currentTarget);
@@ -4911,14 +4911,14 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                               {/* frame grid */}
                               {Array.from({ length: Math.floor(clipDuration * clipFps) + 1 }).map((_, i) => (
                                 i % Math.max(1, Math.round(clipFps / (pxPerSec >= 120 ? 4 : 2))) === 0 ? (
-                                  <div key={i} style={{ left: (i / clipFps) * pxPerSec }} className="absolute top-0 bottom-0 w-px bg-[#1a2030] pointer-events-none" />
+                                  <div key={i} style={{ left: (i / clipFps) * pxPerSec }} className="absolute top-0 bottom-0 w-px bg-[#1a1a1a] pointer-events-none" />
                                 ) : null
                               ))}
                               {allTimes.map((t) => (
                                 <div
                                   key={t}
                                   style={{ left: t * pxPerSec }}
-                                  className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 bg-[#1473e6] rotate-45 border border-[#0e1016] z-20 cursor-ew-resize hover:bg-[#5aa0ff]"
+                                  className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 bg-[#ed7300] rotate-45 border border-[#0e1016] z-20 cursor-ew-resize hover:bg-[#5aa0ff]"
                                   onPointerDown={(e) => {
                                     e.stopPropagation();
                                     // find any keyframe at this time to drag
@@ -4932,7 +4932,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                             {isExpanded && (
                               <div>
                                 {([
-                                  { key: 'posKeyframes' as const, color: 'bg-[#2680eb]' },
+                                  { key: 'posKeyframes' as const, color: 'bg-[#ed7300]' },
                                   { key: 'rotKeyframes' as const, color: 'bg-[#ec5b62]' },
                                   { key: 'sclKeyframes' as const, color: 'bg-[#e68619]' },
                                 ]).map((row) => (
@@ -5005,7 +5005,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
             )}
           </div>
 
-          <div className="h-5 shrink-0 border-t border-[#2a2a2a] bg-[#121212] px-2 flex items-center justify-between text-[8px] font-mono text-[#555]">
+          <div className="h-5 shrink-0 border-t border-[#1a1a1a] bg-[#3a3a3a] px-2 flex items-center justify-between text-[8px] font-mono text-[#555]">
             <span>Space play · ←→ frame · Len drag orange end · K key · Del remove · SEQ: +Track / Sub / reorder</span>
             <span>{timelineFocus ? 'Timeline focused · Shift+T max · drag bar to resize' : 'Hover timeline · Shift+T maximize · S/M/L/Max sizes'}</span>
           </div>

@@ -105,13 +105,13 @@ export const AnimationPanel: React.FC<AnimationPanelProps> = ({ meshes, setMeshe
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#1c1c1c] text-[#e8e8e8] font-sans text-xs select-none p-2 space-y-3">
+    <div className="flex flex-col h-full bg-[#333333] text-[#e8e8e8] font-sans text-xs select-none p-2 space-y-3">
       <div className="flex items-center justify-between">
-        <span className="font-bold font-mono text-[#2680eb] text-xs uppercase flex items-center gap-1.5">
-          <Film className="w-4 h-4 text-[#2680eb]" />
+        <span className="font-bold font-mono text-[#ed7300] text-xs uppercase flex items-center gap-1.5">
+          <Film className="w-4 h-4 text-[#ed7300]" />
           KEYFRAME TIMELINE
         </span>
-        <button onClick={handleCreateClip} className="px-2 py-0.5 cad-button text-[10px] text-[#2680eb] font-bold">
+        <button onClick={handleCreateClip} className="px-2 py-0.5 cad-button text-[10px] text-[#ed7300] font-bold">
           + New Clip
         </button>
       </div>
@@ -124,10 +124,10 @@ export const AnimationPanel: React.FC<AnimationPanelProps> = ({ meshes, setMeshe
             setActiveClipId(e.target.value);
             setCurrentTime(0);
           }}
-          className="w-full cad-input p-1 font-mono text-xs text-[#2680eb]"
+          className="w-full cad-input p-1 font-mono text-xs text-[#ed7300]"
         >
           {clips.map((clip) => (
-            <option key={clip.id} value={clip.id} className="bg-[#1c1c1c]">
+            <option key={clip.id} value={clip.id} className="bg-[#333333]">
               {clip.name} ({clip.duration}s)
             </option>
           ))}
@@ -139,7 +139,7 @@ export const AnimationPanel: React.FC<AnimationPanelProps> = ({ meshes, setMeshe
           <button
             onClick={() => setIsPlaying(!isPlaying)}
             className={`px-3 py-1 cad-button flex items-center gap-1 font-mono font-bold ${
-              isPlaying ? 'cad-button-active' : 'text-[#2680eb]'
+              isPlaying ? 'cad-button-active' : 'text-[#ed7300]'
             }`}
           >
             {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
@@ -156,7 +156,7 @@ export const AnimationPanel: React.FC<AnimationPanelProps> = ({ meshes, setMeshe
         </div>
 
         <div className="flex items-center gap-2 cad-input p-1.5">
-          <Clock className="w-3.5 h-3.5 text-[#2680eb]" />
+          <Clock className="w-3.5 h-3.5 text-[#ed7300]" />
           <input
             type="range"
             min={0}
@@ -164,9 +164,9 @@ export const AnimationPanel: React.FC<AnimationPanelProps> = ({ meshes, setMeshe
             step={0.05}
             value={currentTime}
             onChange={(e) => setCurrentTime(parseFloat(e.target.value))}
-            className="flex-1 accent-[#1473e6] cursor-pointer h-2"
+            className="flex-1 accent-[#ed7300] cursor-pointer h-2"
           />
-          <span className="font-mono text-xs text-[#2680eb] font-bold min-w-[36px]">
+          <span className="font-mono text-xs text-[#ed7300] font-bold min-w-[36px]">
             {currentTime.toFixed(2)}s
           </span>
         </div>
