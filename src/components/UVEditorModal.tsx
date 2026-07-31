@@ -238,7 +238,7 @@ export const UVEditorModal: React.FC<UVEditorModalProps> = ({
       <div className={`adobe-workspace flex flex-col overflow-hidden rounded-md border border-[#4d4d4d] shadow-2xl ${maximized ? 'w-full h-full' : 'w-[1100px] h-[760px]'}`}>
         <header className="adobe-panel-header h-12 shrink-0 px-4 justify-between">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-8 h-8 rounded bg-[rgba(20,115,230,.18)] text-[#ed7300] flex items-center justify-center shrink-0"><Box size={17} /></div>
+            <div className="w-8 h-8 rounded bg-[rgba(237,115,0,.18)] text-[#ed7300] flex items-center justify-center shrink-0"><Box size={17} /></div>
             <div className="min-w-0">
               <div className="font-semibold text-sm">UV Atlas Studio</div>
               <div className="text-[10px] text-[#999999] truncate">{mesh.name} · precision unwrap, inspect and pack</div>
@@ -363,12 +363,12 @@ export const UVEditorModal: React.FC<UVEditorModalProps> = ({
                 onPointerMove={onPointerMove}
                 onPointerUp={endDrag}
                 onPointerCancel={endDrag}
-                className="relative pointer-events-auto w-[min(72vh,72vw)] aspect-square border-2 border-[#53657d] shadow-[0_25px_80px_#000] origin-center touch-none"
+                className="relative pointer-events-auto w-[min(72vh,72vw)] aspect-square border-2 border-[#ed7300] shadow-[0_25px_80px_#000] origin-center touch-none"
                 style={{
                   transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-                  backgroundColor: '#111827',
+                  backgroundColor: '#2b2b2b',
                   backgroundImage: showGrid
-                    ? 'linear-gradient(#33415566 1px,transparent 1px),linear-gradient(90deg,#33415566 1px,transparent 1px),linear-gradient(45deg,#172033 25%,transparent 25%,transparent 75%,#172033 75%),linear-gradient(45deg,#172033 25%,#101722 25%,#101722 75%,#172033 75%)'
+                    ? 'linear-gradient(rgba(237,115,0,0.12) 1px,transparent 1px),linear-gradient(90deg,rgba(237,115,0,0.12) 1px,transparent 1px),linear-gradient(45deg,#303030 25%,transparent 25%,transparent 75%,#303030 75%),linear-gradient(45deg,#303030 25%,#262626 25%,#262626 75%,#303030 75%)'
                     : undefined,
                   backgroundSize: showGrid ? `${100 / Math.max(1, snapDivisions)}% ${100 / Math.max(1, snapDivisions)}%,${100 / Math.max(1, snapDivisions)}% ${100 / Math.max(1, snapDivisions)}%,24px 24px,24px 24px` : undefined,
                   backgroundPosition: showGrid ? '0 0,0 0,0 0,12px 12px' : undefined,
@@ -381,9 +381,9 @@ export const UVEditorModal: React.FC<UVEditorModalProps> = ({
                     const isOverlap = showOverlap && overlaps.has(face.id);
                     const points = face.uvs.map((p) => `${p.u * 1000},${(1 - p.v) * 1000}`).join(' ');
                     return <g key={face.id}>
-                      <polygon points={points} fill={isOverlap ? '#ef44443d' : isSelected ? '#ed730038' : '#4d4d4d22'} stroke={isOverlap ? '#fb7185' : isSelected ? '#ed7300' : '#666666'} strokeWidth={isSelected ? 4 : 2}/>
-                      {isSelected && <text x={getFaceUVBounds(face.uvs).cu * 1000} y={(1 - getFaceUVBounds(face.uvs).cv) * 1000} textAnchor="middle" fill="#dff9ff" fontSize="22" className="pointer-events-none">{index + 1}</text>}
-                      {mode === 'vertex' && face.uvs.map((p, i) => <circle key={i} cx={p.u * 1000} cy={(1-p.v)*1000} r={activeVertex?.faceId === face.id && activeVertex.index === i ? 11 : 7} fill={activeVertex?.faceId === face.id && activeVertex.index === i ? '#fb7185' : '#f8fafc'} stroke="#0f172a" strokeWidth="3"/>)}
+                      <polygon points={points} fill={isOverlap ? '#ec5b623d' : isSelected ? '#ed730038' : '#ffffff0a'} stroke={isOverlap ? '#ec5b62' : isSelected ? '#ed7300' : '#7a7a7a'} strokeWidth={isSelected ? 4 : 2}/>
+                      {isSelected && <text x={getFaceUVBounds(face.uvs).cu * 1000} y={(1 - getFaceUVBounds(face.uvs).cv) * 1000} textAnchor="middle" fill="#ffffff" fontSize="22" className="pointer-events-none">{index + 1}</text>}
+                      {mode === 'vertex' && face.uvs.map((p, i) => <circle key={i} cx={p.u * 1000} cy={(1-p.v)*1000} r={activeVertex?.faceId === face.id && activeVertex.index === i ? 11 : 7} fill={activeVertex?.faceId === face.id && activeVertex.index === i ? '#ed7300' : '#e6e6e6'} stroke="#1a1a1a" strokeWidth="3"/>)}
                     </g>;
                   })}
                 </svg>

@@ -32,6 +32,7 @@ interface FloatingOutlinerProps {
   onSpawnPrimitive: (type: any) => void;
   onDeleteMesh: (id: string) => void;
   onDuplicateMesh?: (id: string) => void;
+  onSeparateMesh?: (id: string) => void;
   cameras: CADCamera[];
   setCameras: React.Dispatch<React.SetStateAction<CADCamera[]>>;
   lights: CADLight[];
@@ -65,6 +66,7 @@ export const FloatingOutliner: React.FC<FloatingOutlinerProps> = ({
   onSpawnPrimitive,
   onDeleteMesh,
   onDuplicateMesh,
+  onSeparateMesh,
   cameras,
   setCameras,
   lights,
@@ -206,6 +208,7 @@ export const FloatingOutliner: React.FC<FloatingOutlinerProps> = ({
             onSpawnPrimitive={onSpawnPrimitive}
             onDeleteMesh={onDeleteMesh}
             onDuplicateMesh={onDuplicateMesh}
+            onSeparateMesh={onSeparateMesh}
             cameras={cameras}
             setCameras={setCameras}
             lights={lights}

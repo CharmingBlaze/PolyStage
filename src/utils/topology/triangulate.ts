@@ -32,6 +32,17 @@ function polygonNormal(verts: Vertex[]): { x: number; y: number; z: number } {
   return { x: nx / len, y: ny / len, z: nz / len };
 }
 
+function colorFromFace(
+  color: string | undefined,
+  fallback: [number, number, number]
+): [number, number, number] {
+  if (!color) return fallback;
+  const hex = color.startsWith('#') ? color.slice(1) : color;
+  if (!/^[0-9a-fA-F]{6}$/.test(hex)) return fallback;
+  const n = Number.parseInt(hex, 16);
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
+
 /**
  * Fan-triangulate convex polygons for rendering.
  * All triangles from one face share the same polygon normal (no lighting seam on quads).
@@ -58,6 +69,7 @@ export function triangulateFaces(
 
     const n = polygonNormal(faceVerts);
     const faceTris: number[] = [];
+    const [cr, cg, cb] = colorFromFace(face.color, defaultColor);
 
     for (let i = 1; i < vIds.length - 1; i++) {
       const cornerIndices: [number, number, number] = [0, i, i + 1];
@@ -74,7 +86,7 @@ export function triangulateFaces(
 
         const uv: UVCoord = face.uvs[vi] || { u: 0, v: 0 };
         uvs.push(uv.u, uv.v);
-        colors.push(defaultColor[0], defaultColor[1], defaultColor[2]);
+        colors.push(cr, cg, cb);
       }
 
       triangleToFaceId.push(face.id);

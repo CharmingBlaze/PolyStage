@@ -2,8 +2,8 @@ export type EditMode = 'object' | 'vertex' | 'edge' | 'face' | 'bone';
 export type TransformMode = 'move' | 'rotate' | 'scale' | 'pivot';
 export type ViewMode = 'textured' | 'flat' | 'wireframe' | 'lit' | 'polygon-wire';
 /** Top-level app workspaces (Header chips). Brush/UV are overlays on modeling. */
-export type WorkspaceMode = 'modeling' | 'animation' | 'paint' | 'rigging';
-export type HeaderWorkspace = 'modeling' | 'paint' | 'brush' | 'rig' | 'animation' | 'uv';
+export type WorkspaceMode = 'modeling' | 'animation' | 'paint' | 'rigging' | 'blockout';
+export type HeaderWorkspace = 'modeling' | 'paint' | 'brush' | 'rig' | 'animation' | 'uv' | 'blockout';
 export type RigMode = 'edit' | 'pose' | 'skin';
 
 export type PrimitiveType =
@@ -417,6 +417,8 @@ export interface ToolState {
   weightPaintMode?: 'add' | 'subtract' | 'smooth' | 'replace';
   /** Explicit toggle for showing bones overlay in 3D viewport (defaults to auto based on active mode). */
   showBones?: boolean;
+  /** Blender-style X-Ray: see-through mesh surfaces (toggle with Alt+Z). */
+  xray?: boolean;
   /** Look through the active scene camera instead of the free orbit camera. */
   cameraViewActive?: boolean;
   /** Selected scene camera for tools / look-through. */

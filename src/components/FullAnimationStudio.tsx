@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { applyStandardOrbitMouseButtons, bindBlockbenchOrbitModifiers } from '../utils/viewportNav';
+import { applyThemedTransformGizmo, VIEWPORT_THEME } from '../utils/viewportTheme';
 import {
   Play,
   Pause,
@@ -171,6 +172,7 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
     controlsRef.current = controls;
 
     const tControls = new TransformControls(camera, renderer.domElement);
+    applyThemedTransformGizmo(tControls);
     scene.add(tControls.getHelper());
     transformControlsRef.current = tControls;
 
@@ -178,7 +180,7 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
       controls.enabled = !event.value;
     });
 
-    const gridHelper = new THREE.GridHelper(10, 20, 0x3e3e3e, 0x262626);
+    const gridHelper = new THREE.GridHelper(10, 20, VIEWPORT_THEME.gridMajor, VIEWPORT_THEME.gridMinor);
     gridHelper.position.y = -0.001;
     scene.add(gridHelper);
 
@@ -297,7 +299,7 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
 
       const wireGeo = buildLogicalEdgeGeometry(skinnedMesh);
       const wireMat = new THREE.LineBasicMaterial({
-        color: isSelected ? 0xec5b62 : 0x1473e6,
+        color: isSelected ? VIEWPORT_THEME.hover : VIEWPORT_THEME.idleHandle,
       });
       const wireframe = new THREE.LineSegments(wireGeo, wireMat);
       wireframe.position.copy(meshObj.position);

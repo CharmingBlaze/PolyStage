@@ -19,13 +19,22 @@ import { AssetBrowserModal } from './components/AssetBrowserModal';
 import { ImportModelModal } from './components/ImportModelModal';
 import { SpriteSheetModal } from './components/SpriteSheetModal';
 import { PixelPaintStudio, type Paint3DBridge, type PaintTool as StudioPaintTool } from './components/PixelPaintStudio';
+import { PaintBridgeHost } from './components/PaintBridgeHost';
+import { notifyTexturePreview } from './utils/texturePreviewBus';
+import { VectorPanel } from './components/VectorPanel';
 import { floodFill, hexToRgba } from './utils/pixelPaint';
+import { useVectorStore } from './store/useVectorStore';
+import {
+  vectorPathsToMesh,
+  vectorSnapshotToCADMesh,
+} from './utils/vectorBlockout';
 import type {
   CADMesh, SceneGroup, CADBone, ToolState, RenderSettings, PrimitiveType, CADScene, AnimationClip,
   CADCamera, CADLight, ParticleEmitter, EnvironmentSettings, SceneSelection,
   WorkspaceMode, HeaderWorkspace, RigMode,
 } from './types/cad';
 import { generateId, generatePrimitive, extrudeFaces, insetFaces, createEdgesFromFaces } from './utils/meshUtils';
+import { separateSelectedFaces, separateLooseParts } from './utils/meshSeparate';
 import { import3DModelFromFile } from './utils/importers';
 import { finalizeEditableMesh } from './utils/topology/validate';
 import { edgeKey } from './utils/topology/ids';
@@ -113,6 +122,9 @@ export const App: React.FC = () => {
   });
   const [activeSceneId, setActiveSceneId] = useState<string>('scene_main');
   const [activeWorkspaceMode, setActiveWorkspaceMode] = useState<WorkspaceMode>('modeling');
+  const [blockoutStatus, setBlockoutStatus] = useState(
+    'Close a Front or Side silhouette for height. Top is optional and shapes the XZ cross-section.'
+  );
   const [activeMeshId, setActiveMeshId] = useState<string>('');
 
   const activeScene = scenes.find((s) => s.id === activeSceneId) || scenes[0];
@@ -384,6 +396,7 @@ export const App: React.FC = () => {
     mirrorClip: true,
     mirrorMergeThreshold: 0.001,
     mirrorBones: false,
+    xray: false,
   });
 
   const [renderSettings, setRenderSettings] = useState<RenderSettings>({
@@ -453,21 +466,16 @@ export const App: React.FC = () => {
   const loadedTextureRef = useRef<{ meshId: string; dataUrl?: string }>({ meshId: '' });
   const lastPaintUvRef = useRef<{ u: number; v: number; px: number; py: number; faceId: string | null } | null>(null);
   const paintBridgeRef = useRef<Paint3DBridge | null>(null);
-  const livePaintRafRef = useRef(0);
 
   const flushLivePaintPreview = () => {
-    if (livePaintRafRef.current) return;
-    livePaintRafRef.current = requestAnimationFrame(() => {
-      livePaintRafRef.current = 0;
-      // Bump revision so CanvasTexture.needsUpdate runs — must NOT rebuild mesh geometry
-      // (Viewport strips textureRevision from the mesh rebuild deps for this reason).
-      setTextureRevision((revision) => revision + 1);
-      setToolState((state) => (state.viewMode === 'textured' ? state : { ...state, viewMode: 'textured' }));
-    });
+    // Viewport listens via texturePreviewBus — no App setState on every stamp.
+    notifyTexturePreview();
   };
 
   useEffect(() => {
-    if (!toolState.isPainting3D || textureCanvasRef.current) return;
+    if (!toolState.isPainting3D) return;
+    // Keep any texture already on the mesh / canvas — never replace a UV image with blank.
+    if (textureCanvasRef.current || activeMesh.textureCanvasDataUrl) return;
     const canvas = document.createElement('canvas');
     canvas.width = 64;
     canvas.height = 64;
@@ -477,8 +485,10 @@ export const App: React.FC = () => {
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     textureCanvasRef.current = canvas;
-    handleTextureUpdated(canvas);
-  }, [toolState.isPainting3D]);
+    // Deferred: handleTextureUpdated defined below; use direct live canvas for now.
+    notifyTexturePreview();
+    setTextureRevision((r) => r + 1);
+  }, [toolState.isPainting3D, activeMesh.id, activeMesh.textureCanvasDataUrl]);
 
   useEffect(() => {
     if (toolState.isPainting3D) setIsToolWindowOpen(false);
@@ -711,6 +721,35 @@ export const App: React.FC = () => {
       if (workspaceModeRef.current === 'animation') return;
       // Paint workspace owns G (fill), E (eraser), I (eyedropper), etc. — don't steal for grab/extrude.
       const inPaintWorkspace = workspaceModeRef.current === 'paint';
+      const inBlockout = workspaceModeRef.current === 'blockout';
+
+      if (inBlockout) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          useVectorStore.getState().setSelected(null);
+          return;
+        }
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+          e.preventDefault();
+          useVectorStore.getState().undo();
+          return;
+        }
+        if (
+          ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y')
+          || ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'z')
+        ) {
+          e.preventDefault();
+          useVectorStore.getState().redo();
+          return;
+        }
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+          e.preventDefault();
+          useVectorStore.getState().deleteSelected();
+          return;
+        }
+        // Blockout owns drawing — skip modeling/edit-mode hotkeys.
+        if (!e.ctrlKey && !e.metaKey && !e.altKey) return;
+      }
 
       if (e.key === 'Escape') {
         // Blender: Esc cancels modal ops first (viewport restores via capture).
@@ -733,6 +772,9 @@ export const App: React.FC = () => {
       } else if (e.altKey && e.key.toLowerCase() === 'a') {
         e.preventDefault();
         handleUnselectAll();
+      } else if (e.altKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        setToolState((s) => ({ ...s, xray: !s.xray }));
       } else if (e.key.toLowerCase() === 'a' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
         handleToggleSelectAll();
       } else if (e.key === '1') {
@@ -855,6 +897,11 @@ export const App: React.FC = () => {
       } else if (e.shiftKey && e.key.toLowerCase() === 'd' && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         handleDuplicateSelected();
+      } else if (!inPaintWorkspace && e.key.toLowerCase() === 'p' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
+        e.preventDefault();
+        handleSeparateSelected();
       } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'd') {
         e.preventDefault();
         handleAddSubdivision();
@@ -1075,6 +1122,76 @@ export const App: React.FC = () => {
     setSelectedFaceIds([]);
   };
 
+  const handleVectorBuildAll = (built: CADMesh[]) => {
+    if (!built.length) return;
+    commitHistory();
+    setMeshes(built);
+    setActiveMeshId(built[0].id);
+    setSelectedMeshIds([built[0].id]);
+    setSceneSelection({ kind: 'mesh', id: built[0].id });
+    setSelectedVertexIds([]);
+    setSelectedEdgeIds([]);
+    setSelectedFaceIds([]);
+    setToolState((s) => ({
+      ...s,
+      editMode: 'object',
+      // Shaded solid like reference blockout after Build.
+      viewMode: 'lit',
+      isPainting3D: false,
+    }));
+  };
+
+  /** Commit current Blockout curves into the scene — one mesh object per part. */
+  const commitBlockoutMeshFromStore = (): CADMesh[] | null => {
+    const store = useVectorStore.getState();
+    const buildParts = store.parts.map((part) =>
+      part.id === store.activePartId ? { ...part, paths: store.paths } : part
+    );
+    const generated = buildParts
+      .map((part) => ({
+        name: part.name,
+        mesh: vectorPathsToMesh(
+          part.paths.front.closed ? part.paths.front : null,
+          part.paths.side.closed ? part.paths.side : null,
+          store.verticalSegments,
+          store.radialSegments,
+          part.paths.top.closed ? part.paths.top : null,
+          {
+            thickness: store.thickness,
+            gameTopology: true,
+            capStyle: store.capStyle,
+            taperThickness: true,
+            roundness: store.roundness,
+          }
+        ),
+      }))
+      .filter((item): item is { name: string; mesh: NonNullable<typeof item.mesh> } => !!item.mesh);
+    if (!generated.length) return null;
+    const built = generated.map((item) =>
+      vectorSnapshotToCADMesh(item.mesh, item.name, { seedTexture: '#d2b48c' })
+    );
+    handleVectorBuildAll(built);
+    store.markBuilt();
+    const totalVerts = built.reduce((n, m) => n + m.vertices.length, 0);
+    setBlockoutStatus(
+      `Blockout in scene as ${built.length} object${built.length === 1 ? '' : 's'} (${totalVerts} verts). MODEL / Mat / UV / Paint ready.`
+    );
+    return built;
+  };
+
+  const handleVectorAddActive = (mesh: CADMesh) => {
+    commitHistory();
+    // Always append as a separate object (do not merge into the active mesh).
+    updateMeshesWithHistory([...meshes, mesh]);
+    setActiveMeshId(mesh.id);
+    setSelectedMeshIds([mesh.id]);
+    setSceneSelection({ kind: 'mesh', id: mesh.id });
+    setSelectedVertexIds([]);
+    setSelectedEdgeIds([]);
+    setSelectedFaceIds([]);
+    setToolState((s) => ({ ...s, editMode: 'object', viewMode: 'lit', isPainting3D: false }));
+  };
+
   const handleImportMeshes = (imported: CADMesh[]) => {
     if (!imported.length) return;
     updateMeshesWithHistory([...meshes, ...imported]);
@@ -1245,6 +1362,45 @@ export const App: React.FC = () => {
     setSelectedFaceIds([]);
   };
 
+  /**
+   * Separate into a new object (Blender-style P):
+   * - Face mode + faces selected → peel selection into a new mesh
+   * - Otherwise (object mode / outliner) → split loose connected parts
+   */
+  const handleSeparateSelected = (meshId?: string) => {
+    const targetId = meshId || activeMeshId;
+    const mesh = meshes.find((m) => m.id === targetId);
+    if (!mesh || mesh.locked) return;
+
+    const preferFaces =
+      !meshId &&
+      toolState.editMode === 'face' &&
+      selectedFaceIds.length > 0;
+
+    const result = preferFaces
+      ? separateSelectedFaces(mesh, selectedFaceIds)
+      : separateLooseParts(mesh);
+    if (!result || !result.separated.length) return;
+
+    const next = meshes.flatMap((m) => {
+      if (m.id !== mesh.id) return [m];
+      const out: CADMesh[] = [];
+      if (result.remaining) out.push(result.remaining);
+      out.push(...result.separated);
+      return out;
+    });
+    if (!next.length) return;
+
+    updateMeshesWithHistory(next);
+    setActiveMeshId(result.separated[0].id);
+    setSelectedMeshIds([result.separated[0].id]);
+    setSceneSelection({ kind: 'mesh', id: result.separated[0].id });
+    setSelectedVertexIds([]);
+    setSelectedEdgeIds([]);
+    setSelectedFaceIds([]);
+    setToolState((s) => ({ ...s, editMode: 'object' }));
+  };
+
   const handleKeyPoseToClip = () => {
     let clipId = activeClipId;
     setClips((prev) => {
@@ -1299,16 +1455,91 @@ export const App: React.FC = () => {
     if (!selectedBoneId && bones[0]) setSelectedBoneId(bones[0].id);
   };
 
-  const handleTextureUpdated = (canvas: HTMLCanvasElement) => {
-    const dataUrl = canvas.toDataURL();
-    textureCanvasRef.current = canvas;
-    loadedTextureRef.current = { meshId: activeMesh.id, dataUrl };
-    setTextureRevision((revision) => revision + 1);
-    setToolState((state) => ({ ...state, viewMode: 'textured' }));
-    updateActiveMesh((prev) => ({ ...prev, textureCanvasDataUrl: dataUrl }));
-  };
+  const textureEncodeTimerRef = useRef(0);
 
   useEffect(() => {
+    return () => {
+      if (textureEncodeTimerRef.current) {
+        window.clearTimeout(textureEncodeTimerRef.current);
+        textureEncodeTimerRef.current = 0;
+      }
+    };
+  }, []);
+
+  const handleTextureUpdated = (
+    canvas: HTMLCanvasElement,
+    opts?: { clearAnimation?: boolean; immediate?: boolean; encode?: boolean },
+  ) => {
+    textureCanvasRef.current = canvas;
+    setToolState((state) => (state.viewMode === 'textured' ? state : { ...state, viewMode: 'textured' }));
+
+    const isLarge = Math.max(canvas.width, canvas.height) >= 256;
+    const wantEncode = opts?.encode === true || opts?.immediate === true || opts?.clearAnimation === true;
+
+    // Large stills during live paint: preview only — encode on leave Paint / explicit encode.
+    if (!wantEncode && isLarge) {
+      notifyTexturePreview();
+      return;
+    }
+
+    setTextureRevision((revision) => revision + 1);
+    notifyTexturePreview();
+
+    const commitDataUrl = () => {
+      textureEncodeTimerRef.current = 0;
+      let dataUrl: string;
+      try {
+        dataUrl = canvas.toDataURL('image/png');
+      } catch {
+        return;
+      }
+      loadedTextureRef.current = { meshId: activeMesh.id, dataUrl };
+      updateActiveMesh((prev) => ({
+        ...prev,
+        textureCanvasDataUrl: dataUrl,
+        ...(opts?.clearAnimation ? { textureAnimation: undefined } : {}),
+      }));
+    };
+
+    if (textureEncodeTimerRef.current) {
+      window.clearTimeout(textureEncodeTimerRef.current);
+      textureEncodeTimerRef.current = 0;
+    }
+
+    if (wantEncode || opts?.immediate || opts?.clearAnimation) {
+      textureEncodeTimerRef.current = window.setTimeout(commitDataUrl, 0);
+    } else if (!isLarge) {
+      // Small pixel canvases: debounced encode is cheap enough.
+      textureEncodeTimerRef.current = window.setTimeout(commitDataUrl, 1000);
+    }
+  };
+
+  /** UV / Load Image — replace any stale paint animation strip. */
+  const handleUvTextureLoaded = (canvas: HTMLCanvasElement) => {
+    handleTextureUpdated(canvas, { clearAnimation: true, immediate: true, encode: true });
+  };
+
+  const commitLiveTextureEncode = (opts?: { clearAnimation?: boolean }) => {
+    const canvas = textureCanvasRef.current;
+    if (!canvas) return;
+    handleTextureUpdated(canvas, { encode: true, immediate: true, clearAnimation: opts?.clearAnimation });
+  };
+
+  // Encode large stills when leaving Paint (strokes stay on the live canvas until then).
+  const prevWorkspaceRef = useRef(activeWorkspaceMode);
+  useEffect(() => {
+    const prev = prevWorkspaceRef.current;
+    prevWorkspaceRef.current = activeWorkspaceMode;
+    if (prev === 'paint' && activeWorkspaceMode !== 'paint') {
+      commitLiveTextureEncode();
+    }
+  }, [activeWorkspaceMode]);
+
+  useEffect(() => {
+    // Paint studio owns the live canvas — rebuilding from dataUrl steals the ref and
+    // makes strokes look like they "don't draw" (edits go to a detached layer).
+    if (activeWorkspaceMode === 'paint') return;
+
     const dataUrl = activeMesh.textureCanvasDataUrl;
     if (loadedTextureRef.current.meshId === activeMesh.id && loadedTextureRef.current.dataUrl === dataUrl) return;
     if (!dataUrl) {
@@ -1335,7 +1566,7 @@ export const App: React.FC = () => {
     };
     image.src = dataUrl;
     return () => { cancelled = true; };
-  }, [activeMesh.id, activeMesh.textureCanvasDataUrl]);
+  }, [activeMesh.id, activeMesh.textureCanvasDataUrl, activeWorkspaceMode]);
 
   const handleDirect3DPaintPixel = (uvU: number, uvV: number, isFinal = false, faceId: string | null = null) => {
     const bridge = paintBridgeRef.current;
@@ -1367,7 +1598,9 @@ export const App: React.FC = () => {
 
     if (isFinal) {
       lastPaintUvRef.current = null;
-      handleTextureUpdated(canvas);
+      const large = Math.max(canvas.width, canvas.height) >= 256;
+      if (large) flushLivePaintPreview();
+      else handleTextureUpdated(canvas);
       return;
     }
 
@@ -1417,8 +1650,9 @@ export const App: React.FC = () => {
 
     if (tool === 'fill') {
       floodFillCanvas(ctx, x, y, color);
-      // Commit immediately so fill isn't lost if the stroke ends without further moves.
-      handleTextureUpdated(canvas);
+      const large = Math.max(canvas.width, canvas.height) >= 256;
+      if (large) flushLivePaintPreview();
+      else handleTextureUpdated(canvas);
       lastPaintUvRef.current = { u: uvU, v: uvV, px: x, py: y, faceId };
       return;
     } else {
@@ -1523,6 +1757,16 @@ export const App: React.FC = () => {
   };
 
   const selectWorkspace = (workspace: HeaderWorkspace) => {
+    // Ghost preview is not a scene mesh — commit Blockout curves before leaving.
+    if (activeWorkspaceMode === 'blockout' && workspace !== 'blockout') {
+      const committed = commitBlockoutMeshFromStore();
+      if (!committed) {
+        setBlockoutStatus(
+          'No closed Front/Side silhouette to send. Scene mesh unchanged — finish the blockout or Build first.'
+        );
+      }
+    }
+
     if (workspace === 'modeling') {
       setActiveWorkspaceMode('modeling');
       setUvSplitOpen(false);
@@ -1533,6 +1777,32 @@ export const App: React.FC = () => {
         editMode: 'object',
         viewMode: 'lit',
         viewportLayout: 'single',
+        isCadDrawing: false,
+        placeOnClick: false,
+        showBones: false,
+      }));
+      return;
+    }
+    if (workspace === 'blockout') {
+      setActiveWorkspaceMode('blockout');
+      setUvSplitOpen(false);
+      setIsToolWindowOpen(false);
+      leaveRigOverlay();
+      setSelectedMeshIds([]);
+      setSelectedVertexIds([]);
+      setSelectedEdgeIds([]);
+      setSelectedFaceIds([]);
+      setSceneSelection(null);
+      useVectorStore.getState().setActivePlane('side');
+      setBlockoutStatus(
+        'Close a Front or Side silhouette for height. Top is optional and shapes the XZ cross-section.'
+      );
+      setToolState((state) => ({
+        ...state,
+        isPainting3D: false,
+        editMode: 'object',
+        viewMode: 'lit',
+        viewportLayout: 'quad',
         isCadDrawing: false,
         placeOnClick: false,
         showBones: false,
@@ -1662,6 +1932,7 @@ export const App: React.FC = () => {
       />
 
       <div className="flex-1 flex overflow-hidden relative">
+        {activeWorkspaceMode !== 'blockout' && (
         <Toolbar
           toolState={toolState}
           setToolState={setToolState}
@@ -1678,6 +1949,7 @@ export const App: React.FC = () => {
           paintWorkspace={activeWorkspaceMode === 'paint'}
           rigWorkspace={activeWorkspaceMode === 'rigging'}
         />
+        )}
 
         <main ref={splitWorkspaceRef} className="flex-1 h-full relative overflow-hidden bg-[#252525] flex">
           <section
@@ -1714,7 +1986,7 @@ export const App: React.FC = () => {
                 textureRevision={textureRevision}
                 activeMeshId={activeMeshId}
               />
-          ) : toolState.viewportLayout === 'single' ? (
+          ) : toolState.viewportLayout === 'single' && activeWorkspaceMode !== 'blockout' ? (
             <Viewport3D
               meshes={meshes}
               bones={bones}
@@ -1795,6 +2067,32 @@ export const App: React.FC = () => {
               setEnvironment={setEnvironment}
               sceneSelection={sceneSelection}
               setSceneSelection={setSceneSelection}
+              activeWorkspaceMode={activeWorkspaceMode}
+              layout={activeWorkspaceMode === 'blockout' ? 'blockout' : 'quad'}
+            />
+          )}
+
+          {activeWorkspaceMode === 'blockout' && (
+            <VectorPanel
+              onBuildAll={handleVectorBuildAll}
+              onAddActive={handleVectorAddActive}
+              onBuildAndEdit={() => {
+                // Mesh already committed via onBuildAll — just open MODEL.
+                setActiveWorkspaceMode('modeling');
+                setUvSplitOpen(false);
+                leaveRigOverlay();
+                setToolState((state) => ({
+                  ...state,
+                  isPainting3D: false,
+                  editMode: 'object',
+                  viewMode: 'lit',
+                  viewportLayout: 'single',
+                  isCadDrawing: false,
+                  placeOnClick: false,
+                  showBones: false,
+                }));
+              }}
+              onStatus={setBlockoutStatus}
             />
           )}
 
@@ -1844,12 +2142,15 @@ export const App: React.FC = () => {
                     toolState={toolState}
                     setToolState={setToolState}
                     onTextureUpdated={handleTextureUpdated}
+                    onLiveTextureFlush={flushLivePaintPreview}
                     textureCanvasRef={textureCanvasRef}
                     initialDataUrl={activeMesh.textureCanvasDataUrl}
                     paintBridgeRef={paintBridgeRef}
                     mesh={activeMesh}
                     selectedFaceIds={selectedFaceIds}
                     onTextureAnimationChange={(anim) => {
+                      // Skip stuffing multi‑MB frame PNGs into React state for large stills.
+                      if (anim.width >= 256 && anim.frames.length <= 1) return;
                       updateActiveMesh((prev) => ({
                         ...prev,
                         textureAnimation: anim,
@@ -1876,7 +2177,7 @@ export const App: React.FC = () => {
                     selectedFaceIds={selectedFaceIds}
                     setSelectedFaceIds={setSelectedFaceIds}
                     textureCanvas={textureCanvasRef.current}
-                    onTextureUpdated={handleTextureUpdated}
+                    onTextureUpdated={handleUvTextureLoaded}
                     onOpenUVModal={() => setIsUVModalOpen(true)}
                   />
                 )}
@@ -1888,25 +2189,23 @@ export const App: React.FC = () => {
         {/* Brush / 3D-paint outside the Paint workspace still needs the texture bridge
             (layers + UV-correct stamping). Keep it mounted but invisible. */}
         {toolState.isPainting3D && activeWorkspaceMode !== 'paint' && activeWorkspaceMode !== 'animation' && (
-          <div
-            className="pointer-events-none fixed -left-[9999px] top-0 h-px w-px overflow-hidden opacity-0"
-            aria-hidden
-          >
-            <PixelPaintStudio
-              key={`paint-bridge-${activeMesh.id}`}
-              toolState={toolState}
-              setToolState={setToolState}
-              onTextureUpdated={handleTextureUpdated}
-              textureCanvasRef={textureCanvasRef}
-              initialDataUrl={activeMesh.textureCanvasDataUrl}
-              paintBridgeRef={paintBridgeRef}
-              mesh={activeMesh}
-              selectedFaceIds={selectedFaceIds}
-            />
-          </div>
+          <PaintBridgeHost
+            toolState={toolState}
+            setToolState={setToolState}
+            textureCanvasRef={textureCanvasRef}
+            paintBridgeRef={paintBridgeRef}
+            onStrokeEnd={(canvas) => {
+              const large = Math.max(canvas.width, canvas.height) >= 256;
+              if (large) {
+                flushLivePaintPreview();
+                return;
+              }
+              handleTextureUpdated(canvas);
+            }}
+          />
         )}
 
-        {!editorSplitOpen && activeWorkspaceMode !== 'animation' && <aside className="w-80 bg-[#333333] border-l border-[#1a1a1a] flex flex-col z-20 panel-surface">
+        {!editorSplitOpen && activeWorkspaceMode !== 'animation' && activeWorkspaceMode !== 'blockout' && <aside className="w-80 bg-[#333333] border-l border-[#1a1a1a] flex flex-col z-20 panel-surface">
           {activeWorkspaceMode === 'rigging' ? (
             <div className="flex-1 overflow-hidden bg-[#333333]">
               <RiggingPanel
@@ -2016,6 +2315,7 @@ export const App: React.FC = () => {
                 onSpawnPrimitive={handleSpawnPrimitive}
                 onDeleteMesh={handleDeleteMesh}
                 onDuplicateMesh={handleDuplicateSelected}
+                onSeparateMesh={handleSeparateSelected}
                 cameras={cameras}
                 setCameras={setCameras}
                 lights={lights}
@@ -2061,6 +2361,7 @@ export const App: React.FC = () => {
                 toolState={toolState}
                 setToolState={setToolState}
                 textureCanvas={textureCanvasRef.current}
+                onOpenPaintWorkspace={() => selectWorkspace('paint')}
               />
             )}
 
@@ -2123,6 +2424,15 @@ export const App: React.FC = () => {
               <span>[Edit / Pose / Skin]</span>
               <span>Shift=Sub · Alt=Smooth weights</span>
             </>
+          ) : activeWorkspaceMode === 'blockout' ? (
+            <>
+              <span className="text-[#5b9bd5] font-bold">Blockout</span>
+              <span>{blockoutStatus}</span>
+              <span>RMB/MMB pan · Wheel zoom · Space+LMB pan</span>
+              <span>[Ctrl+Z] Undo path</span>
+              <span>[Ctrl+drag] Box-select points</span>
+              <span>[Del] Delete points</span>
+            </>
           ) : (
             <>
               <button onClick={() => setIsUVModalOpen(true)} className="text-[#ff9a3c] font-bold hover:underline">
@@ -2135,7 +2445,7 @@ export const App: React.FC = () => {
                 }}
                 className="text-amber-400 font-bold hover:underline"
               >
-                [P] Primitives
+                Primitives
               </button>
               <span>[Esc] Cancel Draw</span>
               <span>[Ctrl+Z] Undo</span>
@@ -2147,6 +2457,7 @@ export const App: React.FC = () => {
               <span>[E] Extrude</span>
               <span>[I] Inset</span>
               <span>[Shift+D] Dup</span>
+              <span>[P] Separate</span>
               <span>[Alt+X] Mirror</span>
             </>
           )}
@@ -2209,6 +2520,7 @@ export const App: React.FC = () => {
         onSpawnPrimitive={handleSpawnPrimitive}
         onDeleteMesh={handleDeleteMesh}
         onDuplicateMesh={handleDuplicateSelected}
+        onSeparateMesh={handleSeparateSelected}
         cameras={cameras}
         setCameras={setCameras}
         lights={lights}
@@ -2251,6 +2563,7 @@ export const App: React.FC = () => {
         onKnife={handleKnife}
         onDeleteSelected={handleDeleteSelected}
         onDuplicateSelected={handleDuplicateSelected}
+        onSeparateSelected={handleSeparateSelected}
         onMergeVertices={handleMergeVertices}
         onMirrorSymmetry={handleMirrorSymmetry}
         onAddMirrorModifier={handleAddMirrorModifier}

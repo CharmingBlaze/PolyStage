@@ -40,8 +40,62 @@ export function bindBlockbenchOrbitModifiers(
   return () => {};
 }
 
+/**
+ * 3D Brush / paint: keep default camera mouse map.
+ * LMB on the mesh is stolen by the paint handler; empty LMB still orbits.
+ *   LMB   — orbit (empty space) / paint (mesh hit)
+ *   MMB   — dolly
+ *   RMB   — pan
+ *   Wheel — zoom
+ */
+export function applyPaintOrbitMouseButtons(controls: OrbitControls | null | undefined) {
+  applyStandardOrbitMouseButtons(controls);
+}
+
+/**
+ * Blockout pen / modes where LMB is always a draw tool (never orbit).
+ * Ortho drafting views also map MMB → pan (CAD-style); wheel still zooms.
+ */
+export function applyDrawToolOrbitMouseButtons(
+  controls: OrbitControls | null | undefined,
+  opts?: { ortho?: boolean },
+) {
+  if (!controls) return;
+  controls.mouseButtons = {
+    LEFT: -1 as unknown as THREE.MOUSE,
+    MIDDLE: opts?.ortho ? THREE.MOUSE.PAN : THREE.MOUSE.DOLLY,
+    RIGHT: THREE.MOUSE.PAN,
+  };
+  controls.enableZoom = true;
+  controls.enablePan = true;
+  controls.screenSpacePanning = true;
+}
+
+/** Clear a stuck OrbitControls gesture (pointer list desync after conflicting capture). */
+export function resetOrbitPointerState(controls: OrbitControls | null | undefined) {
+  if (!controls) return;
+  const c = controls as OrbitControls & {
+    _pointers?: number[];
+    _pointerPositions?: Record<string, unknown>;
+    state?: number;
+  };
+  if (c._pointers?.length) {
+    c._pointers.length = 0;
+  }
+  if (c._pointerPositions) {
+    for (const key of Object.keys(c._pointerPositions)) {
+      delete c._pointerPositions[key];
+    }
+  }
+  if (typeof c.state === 'number') c.state = 0; // NONE
+  controls.enabled = true;
+}
+
+
 /** Short HUD / status hint shared by 3D views */
 export const STANDARD_NAV_HINT = 'LMB orbit · RMB pan · MMB/Wheel zoom';
+
+export const PAINT_NAV_HINT = 'LMB paint · empty LMB orbit · RMB pan · MMB/Wheel zoom';
 
 /** @deprecated alias */
 export const BLOCKBENCH_NAV_HINT = STANDARD_NAV_HINT;

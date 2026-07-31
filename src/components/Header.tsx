@@ -25,6 +25,7 @@ import {
   Bone,
   ChevronDown,
   PanelTopClose,
+  PenLine,
 } from 'lucide-react';
 import type { ToolState, CADMesh, ViewMode, CADScene, EditMode, WorkspaceMode, HeaderWorkspace, RigMode } from '../types/cad';
 import {
@@ -440,6 +441,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   const windowMenu: MenuItem[] = [
     { type: 'item', label: 'Modeling Workspace', onClick: () => onSelectWorkspace('modeling') },
+    { type: 'item', label: 'Blockout Workspace', onClick: () => onSelectWorkspace('blockout') },
     { type: 'item', label: 'Paint Workspace', onClick: () => onSelectWorkspace('paint') },
     { type: 'item', label: 'Easy Rig Workspace', onClick: () => onSelectWorkspace('rig') },
     { type: 'item', label: 'Animation Workspace', onClick: () => onSelectWorkspace('animation') },
@@ -462,6 +464,13 @@ export const Header: React.FC<HeaderProps> = ({
           viewportLayout: s.viewportLayout === 'single' ? 'quad' : 'single',
         }));
       },
+    },
+    {
+      type: 'item',
+      label: `X-Ray${toolState.xray ? ' ✓' : ''}`,
+      shortcut: 'Alt+Z',
+      active: !!toolState.xray,
+      onClick: () => setToolState((s) => ({ ...s, xray: !s.xray })),
     },
     ...viewModes.map(
       (mode): MenuItem => ({
@@ -530,6 +539,15 @@ export const Header: React.FC<HeaderProps> = ({
               }
             >
               Model
+            </button>
+            <button
+              type="button"
+              onClick={() => onSelectWorkspace('blockout')}
+              className={`inline-flex items-center gap-0.5 ${activeWorkspaceMode === 'blockout' ? 'is-active' : ''}`}
+              title="Vector Blockout — draw Front/Side/Top silhouettes and build 3D"
+            >
+              <PenLine className="w-3 h-3" />
+              <span>Blockout</span>
             </button>
             <button
               type="button"
@@ -680,6 +698,18 @@ export const Header: React.FC<HeaderProps> = ({
                 </option>
               ))}
             </select>
+            <button
+              type="button"
+              onClick={() => setToolState((s) => ({ ...s, xray: !s.xray }))}
+              className={`ml-0.5 px-1.5 py-0.5 rounded border text-[9px] font-bold transition ${
+                toolState.xray
+                  ? 'border-[#ed7300]/50 bg-[#ed7300]/20 text-[#ff9a3c]'
+                  : 'border-transparent text-[#8c8c8c] hover:text-white'
+              }`}
+              title="X-Ray (Alt+Z) — see through meshes"
+            >
+              X-Ray
+            </button>
           </div>
 
           {/* Quick docks — icon buttons */}

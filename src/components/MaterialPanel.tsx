@@ -148,51 +148,51 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
   ) => {
     const ids = new Set(targetMeshIds());
     if (ids.size === 0) return;
+    const matId = activeMaterial?.id;
+
+    const patchFaces = (faces: typeof mesh.faces, faceScoped: boolean) => {
+      if (!colorHex && !matId) return faces;
+      if (faceScoped && selectedFaceIds.length > 0) {
+        return faces.map((f) =>
+          selectedFaceIds.includes(f.id)
+            ? {
+                ...f,
+                ...(colorHex ? { color: colorHex } : {}),
+                ...(matId ? { materialId: matId } : {}),
+              }
+            : f
+        );
+      }
+      return faces.map((f) => ({
+        ...f,
+        ...(colorHex ? { color: colorHex } : {}),
+        ...(matId ? { materialId: matId } : {}),
+      }));
+    };
 
     if (setMeshes) {
       setMeshes((prev) =>
         prev.map((m) => {
           if (!ids.has(m.id)) return m;
-          let updatedFaces = m.faces;
-          if (colorHex) {
-            if (toolState.editMode === 'face' && selectedFaceIds.length > 0 && m.id === mesh.id) {
-              updatedFaces = m.faces.map((f) =>
-                selectedFaceIds.includes(f.id) ? { ...f, color: colorHex } : f
-              );
-            } else {
-              updatedFaces = m.faces.map((f) => ({ ...f, color: colorHex }));
-            }
-          }
+          const faceScoped = toolState.editMode === 'face' && m.id === mesh.id;
           return {
             ...m,
             textureCanvasDataUrl: dataUrl,
             ...(doubleSided != null ? { doubleSided } : {}),
-            faces: updatedFaces,
+            faces: patchFaces(m.faces, faceScoped),
             revision: (m.revision || 0) + 1,
           };
         })
       );
       setToolState((s) => ({ ...s, viewMode: 'textured' }));
     } else if (ids.has(mesh.id)) {
-      setMesh((prev) => {
-        let updatedFaces = prev.faces;
-        if (colorHex) {
-          if (toolState.editMode === 'face' && selectedFaceIds.length > 0) {
-            updatedFaces = prev.faces.map((f) =>
-              selectedFaceIds.includes(f.id) ? { ...f, color: colorHex } : f
-            );
-          } else {
-            updatedFaces = prev.faces.map((f) => ({ ...f, color: colorHex }));
-          }
-        }
-        return {
-          ...prev,
-          textureCanvasDataUrl: dataUrl,
-          ...(doubleSided != null ? { doubleSided } : {}),
-          faces: updatedFaces,
-          revision: (prev.revision || 0) + 1,
-        };
-      });
+      setMesh((prev) => ({
+        ...prev,
+        textureCanvasDataUrl: dataUrl,
+        ...(doubleSided != null ? { doubleSided } : {}),
+        faces: patchFaces(prev.faces, toolState.editMode === 'face'),
+        revision: (prev.revision || 0) + 1,
+      }));
       setToolState((s) => ({ ...s, viewMode: 'textured' }));
     }
   };

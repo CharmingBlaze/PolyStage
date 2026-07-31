@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { applyStandardOrbitMouseButtons, bindBlockbenchOrbitModifiers } from '../utils/viewportNav';
+import { VIEWPORT_THEME } from '../utils/viewportTheme';
 import { Download, Sparkles, X, Play, Pause } from 'lucide-react';
 import type { ParticleEmitter } from '../types/cad';
 import { createParticleEmitter, createParticleFromPreset, exportParticleGameJson, PARTICLE_PRESETS } from '../utils/cutsceneEnv';
@@ -47,7 +48,7 @@ export const ParticleStudioModal: React.FC<ParticleStudioModalProps> = ({
     applyStandardOrbitMouseButtons(controls);
     const unbindNavMods = bindBlockbenchOrbitModifiers(controls, renderer.domElement);
     scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-    const grid = new THREE.GridHelper(4, 8, 0x2680eb, 0x2a3140);
+    const grid = new THREE.GridHelper(4, 8, VIEWPORT_THEME.gridMajor, VIEWPORT_THEME.gridMinor);
     scene.add(grid);
 
     const system = new ParticleSystem(draft);

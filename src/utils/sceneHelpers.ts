@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { CADCamera, CADLight, EnvironmentSettings, ParticleEmitter, SceneObjectKind, Vector3D } from '../types/cad';
+import { VIEWPORT_THEME } from './viewportTheme';
 
 const v3 = (v: Vector3D) => new THREE.Vector3(v.x, v.y, v.z);
 
@@ -34,7 +35,10 @@ export function createCameraHelper(cam: CADCamera, selected: boolean): THREE.Gro
   const helper = new THREE.Group();
   const body = new THREE.Mesh(
     new THREE.BoxGeometry(0.28, 0.2, 0.38),
-    new THREE.MeshBasicMaterial({ color: selected ? 0x1473e6 : 0x888888, depthTest: false }),
+    new THREE.MeshBasicMaterial({
+      color: selected ? VIEWPORT_THEME.cameraSelected : VIEWPORT_THEME.cameraIdle,
+      depthTest: false,
+    }),
   );
   const lens = new THREE.Mesh(
     new THREE.CylinderGeometry(0.06, 0.09, 0.14, 10),
@@ -53,7 +57,7 @@ export function createLightHelper(light: CADLight, selected: boolean): THREE.Gro
   const helper = new THREE.Group();
   const color = new THREE.Color(light.color || '#fff5e6');
   const mat = new THREE.MeshBasicMaterial({
-    color: selected ? 0xe68619 : color.getHex(),
+    color: selected ? VIEWPORT_THEME.lightSelected : color.getHex(),
     depthTest: false,
     transparent: true,
     opacity: 0.95,
@@ -73,7 +77,7 @@ export function createLightHelper(light: CADLight, selected: boolean): THREE.Gro
     mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(w, h),
       new THREE.MeshBasicMaterial({
-        color: selected ? 0xe68619 : color.getHex(),
+        color: selected ? VIEWPORT_THEME.lightSelected : color.getHex(),
         side: THREE.DoubleSide,
         depthTest: false,
         transparent: true,
@@ -87,7 +91,10 @@ export function createLightHelper(light: CADLight, selected: boolean): THREE.Gro
   if (light.type === 'directional' || light.type === 'spot') {
     const shaft = new THREE.Mesh(
       new THREE.CylinderGeometry(0.02, 0.02, 0.55, 6),
-      new THREE.MeshBasicMaterial({ color: selected ? 0xe68619 : 0xffcc66, depthTest: false }),
+      new THREE.MeshBasicMaterial({
+        color: selected ? VIEWPORT_THEME.lightSelected : VIEWPORT_THEME.lightShaft,
+        depthTest: false,
+      }),
     );
     shaft.position.y = -0.35;
     helper.add(shaft);
@@ -103,14 +110,17 @@ export function createParticleHelper(p: ParticleEmitter, selected: boolean): THR
   const core = new THREE.Mesh(
     new THREE.OctahedronGeometry(0.18),
     new THREE.MeshBasicMaterial({
-      color: selected ? 0xe68619 : 0x02a0e8,
+      color: selected ? VIEWPORT_THEME.particleSelected : VIEWPORT_THEME.particleIdle,
       depthTest: false,
       wireframe: true,
     }),
   );
   const ring = new THREE.Mesh(
     new THREE.TorusGeometry(0.28, 0.02, 6, 16),
-    new THREE.MeshBasicMaterial({ color: selected ? 0xe68619 : 0x1473e6, depthTest: false }),
+    new THREE.MeshBasicMaterial({
+      color: selected ? VIEWPORT_THEME.particleSelected : VIEWPORT_THEME.accentSoft,
+      depthTest: false,
+    }),
   );
   ring.rotation.x = Math.PI / 2;
   helper.add(core, ring);
@@ -126,7 +136,7 @@ export function createWeatherHelper(env: EnvironmentSettings, selected: boolean)
   const cloud = new THREE.Mesh(
     new THREE.SphereGeometry(0.35, 10, 8),
     new THREE.MeshBasicMaterial({
-      color: selected ? 0xe68619 : 0x8aa0b8,
+      color: selected ? VIEWPORT_THEME.warning : 0x8aa0b8,
       depthTest: false,
       transparent: true,
       opacity: 0.85,
@@ -134,7 +144,10 @@ export function createWeatherHelper(env: EnvironmentSettings, selected: boolean)
   );
   const drop = new THREE.Mesh(
     new THREE.ConeGeometry(0.06, 0.2, 6),
-    new THREE.MeshBasicMaterial({ color: selected ? 0x1473e6 : 0x6ec8ff, depthTest: false }),
+    new THREE.MeshBasicMaterial({
+      color: selected ? VIEWPORT_THEME.accent : 0x6ec8ff,
+      depthTest: false,
+    }),
   );
   drop.position.y = -0.35;
   drop.rotation.x = Math.PI;
@@ -148,14 +161,39 @@ export function createWeatherHelper(env: EnvironmentSettings, selected: boolean)
   return helper;
 }
 
-export function disposeObject3D(root: THREE.Object3D) {
+export function disposeObject3D(root: THREE.Object3D, opts?: { disposeTextures?: boolean }) {
   root.traverse((obj) => {
-    const mesh = obj as THREE.Mesh;
-    mesh.geometry?.dispose?.();
-    const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
-    if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
-    else mat?.dispose?.();
+    const anyObj = obj as THREE.Mesh;
+    anyObj.geometry?.dispose?.();
+    const mat = anyObj.material as THREE.Material | THREE.Material[] | undefined;
+    const mats = Array.isArray(mat) ? mat : mat ? [mat] : [];
+    mats.forEach((m) => {
+      if (opts?.disposeTextures && m) {
+        const std = m as THREE.MeshStandardMaterial;
+        const maps = [
+          std.map,
+          std.normalMap,
+          std.roughnessMap,
+          std.metalnessMap,
+          std.emissiveMap,
+          std.aoMap,
+          (std as unknown as { alphaMap?: THREE.Texture }).alphaMap,
+        ];
+        maps.forEach((tex) => tex?.dispose?.());
+      }
+      m.dispose();
+    });
   });
+}
+
+/** Remove and dispose every child of a group (geometry + materials; keep shared textures). */
+export function clearAndDisposeGroup(group: THREE.Object3D | null | undefined) {
+  if (!group) return;
+  while (group.children.length > 0) {
+    const child = group.children[0];
+    group.remove(child);
+    disposeObject3D(child);
+  }
 }
 
 /** Map light gizmo scale → distance for point/spot falloff feedback. */

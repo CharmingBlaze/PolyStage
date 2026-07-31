@@ -35,6 +35,7 @@ interface FloatingToolWindowProps {
   onKnife?: () => void;
   onDeleteSelected: () => void;
   onDuplicateSelected: () => void;
+  onSeparateSelected?: () => void;
   onMergeVertices: () => void;
   onMirrorSymmetry: () => void;
   onAddMirrorModifier?: () => void;
@@ -90,6 +91,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
   onKnife,
   onDeleteSelected,
   onDuplicateSelected,
+  onSeparateSelected,
   onMergeVertices,
   onMirrorSymmetry,
   onAddMirrorModifier,
@@ -568,6 +570,14 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
                 title="Duplicate (Shift+D)"
               >
                 <Layers className="w-3 h-3 text-emerald-400" /> Duplicate
+              </button>
+              <button
+                type="button"
+                onClick={onSeparateSelected}
+                className="cad-button h-7 px-2 flex items-center gap-1 font-bold text-[#b3b3b3]"
+                title="Separate selection / loose parts into a new object (P)"
+              >
+                <Scissors className="w-3 h-3 text-amber-400" /> Separate
               </button>
               <button
                 type="button"

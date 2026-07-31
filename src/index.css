@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./styles/vector-blockout.css";
 
 /* Substance Painter–inspired tokens (Qt SP 8.x chrome + brand orange) */
 :root {
@@ -40,6 +41,11 @@
   --color-success: var(--adobe-green);
   --color-warning: var(--adobe-amber);
   --color-viewport: var(--adobe-viewport);
+  --color-axis-x: #ec5b62;
+  --color-axis-y: #2d9d78;
+  --color-axis-z: #6a9ec4;
+  --color-gizmo-active: #ed7300;
+  --color-grid: #323232;
 }
 
 @theme {
@@ -54,6 +60,42 @@
 @layer base {
   * {
     border-color: var(--adobe-border);
+  }
+
+  /* App-wide scrollbars (vertical + horizontal) — dark chrome, orange hover */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--adobe-border-strong) var(--adobe-bg);
+  }
+
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: var(--adobe-bg);
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: var(--adobe-border-strong);
+    border-radius: var(--adobe-radius);
+    border: 2px solid var(--adobe-bg);
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--color-accent);
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: var(--adobe-bg);
+  }
+
+  /* Kill native white arrow buttons (Windows) */
+  *::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
   }
 
   html,
@@ -283,6 +325,16 @@
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: var(--color-accent);
+}
+
+.custom-scrollbar::-webkit-scrollbar-corner {
+  background: var(--adobe-bg);
+}
+
+.custom-scrollbar::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .custom-scrollbar {
@@ -614,6 +666,7 @@ summary::-webkit-details-marker {
 
 .sp-mat__stack::-webkit-scrollbar {
   width: 8px;
+  height: 8px;
 }
 
 .sp-mat__stack::-webkit-scrollbar-track {
@@ -1699,7 +1752,19 @@ summary::-webkit-details-marker {
   position: relative;
   border: 1px solid #4d4d4d;
   box-shadow: 0 0 0 1px #1a1a1a;
-  background: #1e1e1e;
+  /* CSS checkerboard — never draw this per-texel in JS (kills 1024² canvases). */
+  background-color: #1a1a1a;
+  background-image:
+    linear-gradient(45deg, #2a2a2a 25%, transparent 25%),
+    linear-gradient(-45deg, #2a2a2a 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #2a2a2a 75%),
+    linear-gradient(-45deg, transparent 75%, #2a2a2a 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+.pixel-paint__canvas-frame canvas {
+  background: transparent;
 }
 
 .pixel-paint__hud {
@@ -2263,7 +2328,7 @@ summary::-webkit-details-marker {
 }
 
 .uv-stage {
-  background: #252525;
+  background: #2b2b2b;
 }
 
 .uv-hud-top {

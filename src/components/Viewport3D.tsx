@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { applyStandardOrbitMouseButtons, bindBlockbenchOrbitModifiers, STANDARD_NAV_HINT } from '../utils/viewportNav';
+import { applyStandardOrbitMouseButtons, applyPaintOrbitMouseButtons, applyDrawToolOrbitMouseButtons, bindBlockbenchOrbitModifiers, STANDARD_NAV_HINT, PAINT_NAV_HINT } from '../utils/viewportNav';
+import { applyThemedTransformGizmo, VIEWPORT_THEME } from '../utils/viewportTheme';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import type { CADMesh, CADBone, CADCamera, CADLight, ParticleEmitter, EnvironmentSettings, ToolState, RenderSettings, PrimitiveType, SceneSelection, Vector3D, WorkspaceMode } from '../types/cad';
 import { buildThreeGeometry, generatePrimitive, snapToGrid } from '../utils/meshUtils';
@@ -19,6 +20,7 @@ import {
   type KnifeHit,
 } from '../utils/meshCutTools';
 import { samplePaintStrokeUvs } from '../utils/bvh/picking';
+import { subscribeTexturePreview, cancelTexturePreviewNotify } from '../utils/texturePreviewBus';
 import { LightwaveNavToolbar } from './LightwaveNavToolbar';
 import { deformMeshWithBones, getBoneWorldMatrices, paintVertexWeight } from '../utils/rigging';
 import { evaluateConstraints } from '../utils/ik';
@@ -28,9 +30,30 @@ import {
   createParticleHelper,
   createWeatherHelper,
   disposeObject3D,
+  clearAndDisposeGroup,
   lightDistanceFromScale,
   readObjectPRS,
 } from '../utils/sceneHelpers';
+import { VectorOverlay } from './VectorOverlay';
+import { BlockoutRefToolbar } from './BlockoutRefToolbar';
+import { BlockoutSilhouetteToolbar } from './BlockoutSilhouetteToolbar';
+import {
+  registerVectorViewport,
+  unregisterVectorViewport,
+  type VectorViewportKind,
+} from '../utils/vectorViewportRegistry';
+import { useVectorStore } from '../store/useVectorStore';
+import {
+  combineVectorMeshes,
+  vectorPathsToMesh,
+  vectorSnapshotToCADMesh,
+} from '../utils/vectorBlockout';
+import {
+  applyVectorRefTransform,
+  createVectorRefMesh,
+  setVectorRefActive,
+  type VectorRefPlaneId,
+} from '../utils/vectorRefPlanes';
 
 interface Viewport3DProps {
   meshes: CADMesh[];
@@ -142,6 +165,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const facesHighlightGroupRef = useRef<THREE.Group | null>(null);
   const hoverHighlightGroupRef = useRef<THREE.Group | null>(null);
   const cutPreviewGroupRef = useRef<THREE.Group | null>(null);
+  const vectorGhostRef = useRef<THREE.Group | null>(null);
+  const vectorRefGroupRef = useRef<THREE.Group | null>(null);
+  const vectorRefTexturesRef = useRef<Map<string, THREE.Texture>>(new Map());
   /** Per-mesh textures — never share one CanvasTexture across all objects. */
   const meshTexturesRef = useRef<Map<string, { key: string; texture: THREE.Texture }>>(new Map());
   const [meshTextureTick, setMeshTextureTick] = useState(0);
@@ -330,6 +356,17 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const paintStrokeFaceIdRef = useRef<string | null>(null);
   const paintStrokeLastUvRef = useRef<{ u: number; v: number } | null>(null);
   const [paintCursor, setPaintCursor] = useState<{ x: number; y: number; u: number; v: number } | null>(null);
+  const paintCursorRafRef = useRef(0);
+  const pendingPaintCursorRef = useRef<{ x: number; y: number; u: number; v: number } | null>(null);
+
+  const schedulePaintCursor = (next: { x: number; y: number; u: number; v: number } | null) => {
+    pendingPaintCursorRef.current = next;
+    if (paintCursorRafRef.current) return;
+    paintCursorRafRef.current = requestAnimationFrame(() => {
+      paintCursorRafRef.current = 0;
+      setPaintCursor(pendingPaintCursorRef.current);
+    });
+  };
   const [hoveredVertexId, setHoveredVertexId] = useState<string | null>(null);
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
   const [hoveredFaceId, setHoveredFaceId] = useState<string | null>(null);
@@ -371,6 +408,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     return type === 'plane' || type === 'circle' || type === 'ring';
   };
 
+  const vectorMode = useVectorStore((s) => s.mode);
+  const vectorRefTool = useVectorStore((s) => s.refTool);
+
   useEffect(() => {
     if (!controlsRef.current) return;
     const blocked =
@@ -382,6 +422,19 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       isPainting3DActive;
     controlsRef.current.enabled = !blocked;
     applyStandardOrbitMouseButtons(controlsRef.current);
+
+    // 3D paint: keep default LMB orbit (empty space). Mesh hits steal LMB in the pointer handler.
+    // Blockout pen: LMB is always for drawing — disable orbit on left button.
+    const penBlockout = activeWorkspaceMode === 'blockout' && vectorMode === 'pen';
+    const refEditing = activeWorkspaceMode === 'blockout' && vectorRefTool !== 'none';
+    if (refEditing || penBlockout) {
+      // LMB reserved for drawing / reference move-scale.
+      applyDrawToolOrbitMouseButtons(controlsRef.current, {
+        ortho: cameraType !== 'perspective',
+      });
+    } else if (toolState.isPainting3D) {
+      applyPaintOrbitMouseButtons(controlsRef.current);
+    }
   }, [
     toolState.isCadDrawing,
     toolState.placeOnClick,
@@ -389,7 +442,68 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     toolState.modalTransform,
     toolState.modalMeshOp,
     isPainting3DActive,
+    activeWorkspaceMode,
+    cameraType,
+    vectorMode,
+    vectorRefTool,
   ]);
+
+  // Re-apply orbit buttons when Vector Draw/Edit mode toggles.
+  useEffect(() => {
+    if (!controlsRef.current || activeWorkspaceMode !== 'blockout') return;
+    if (vectorRefTool !== 'none' || vectorMode === 'pen') {
+      applyDrawToolOrbitMouseButtons(controlsRef.current, {
+        ortho: cameraType !== 'perspective',
+      });
+    } else {
+      applyStandardOrbitMouseButtons(controlsRef.current);
+    }
+  }, [vectorMode, vectorRefTool, activeWorkspaceMode, cameraType]);
+
+  // Space+drag pans in Blockout Draw (ortho Front/Side muscle memory) without placing points.
+  useEffect(() => {
+    if (activeWorkspaceMode !== 'blockout' || vectorMode !== 'pen') return;
+    const isOrtho = cameraType !== 'perspective';
+
+    const applySpacePan = (spaceDown: boolean) => {
+      const controls = controlsRef.current;
+      if (!controls) return;
+      if (spaceDown) {
+        controls.mouseButtons = {
+          LEFT: THREE.MOUSE.PAN,
+          MIDDLE: THREE.MOUSE.PAN,
+          RIGHT: THREE.MOUSE.PAN,
+        };
+        controls.enablePan = true;
+        controls.screenSpacePanning = true;
+      } else {
+        applyDrawToolOrbitMouseButtons(controls, { ortho: isOrtho });
+      }
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' || e.repeat) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      e.preventDefault();
+      applySpacePan(true);
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code !== 'Space') return;
+      applySpacePan(false);
+    };
+    const onBlur = () => applySpacePan(false);
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+      applySpacePan(false);
+    };
+  }, [activeWorkspaceMode, vectorMode, cameraType]);
 
   // Esc / mode switch clears isCadDrawing in App, but CAD step is local — reset it or orbit stays dead.
   useEffect(() => {
@@ -435,7 +549,13 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     camera.lookAt(0, 0, 0);
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      // false saves GPU memory per viewport (quad view ×4). Screenshots use separate paths.
+      preserveDrawingBuffer: false,
+      powerPreference: 'high-performance',
+    });
     renderer.setSize(width, height);
     renderer.setPixelRatio(window.devicePixelRatio || 1);
     renderer.shadowMap.enabled = true;
@@ -448,11 +568,16 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     controls.enableRotate = cameraType === 'perspective';
+    controls.screenSpacePanning = true;
     applyStandardOrbitMouseButtons(controls);
+    // Block RMB context menu so pan gestures aren't eaten after 1–2 uses.
+    const onCanvasContextMenu = (e: Event) => e.preventDefault();
+    renderer.domElement.addEventListener('contextmenu', onCanvasContextMenu);
     const unbindNavMods = bindBlockbenchOrbitModifiers(controls, renderer.domElement);
     controlsRef.current = controls;
 
     const tControls = new TransformControls(camera, renderer.domElement);
+    applyThemedTransformGizmo(tControls);
     scene.add(tControls.getHelper());
     transformControlsRef.current = tControls;
 
@@ -477,12 +602,12 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     });
 
     if (cameraType === 'perspective') {
-      const gridHelper = new THREE.GridHelper(10, 20, 0x02a0e8, 0x323232);
+      const gridHelper = new THREE.GridHelper(10, 20, VIEWPORT_THEME.gridMajor, VIEWPORT_THEME.gridMinor);
       gridHelper.position.y = -0.001;
       scene.add(gridHelper);
     } else {
       // 2D Orthographic Drafting Grid (aligned to the orthographic projection plane)
-      const orthoGrid = new THREE.GridHelper(12, 24, 0x00ffff, 0x383838);
+      const orthoGrid = new THREE.GridHelper(12, 24, VIEWPORT_THEME.gridOrthoMajor, VIEWPORT_THEME.gridOrthoMinor);
       if (cameraType === 'front') {
         orthoGrid.rotation.x = Math.PI / 2;
       } else if (cameraType === 'side') {
@@ -522,6 +647,18 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const cutPreviewGroup = new THREE.Group();
     scene.add(cutPreviewGroup);
     cutPreviewGroupRef.current = cutPreviewGroup;
+
+    const vectorGhostGroup = new THREE.Group();
+    vectorGhostGroup.name = 'vectorGhost';
+    scene.add(vectorGhostGroup);
+    vectorGhostRef.current = vectorGhostGroup;
+
+    const vectorRefGroup = new THREE.Group();
+    vectorRefGroup.name = 'vectorRefs';
+    vectorRefGroup.add(createVectorRefMesh('front'), createVectorRefMesh('side'));
+    vectorRefGroup.visible = false;
+    scene.add(vectorRefGroup);
+    vectorRefGroupRef.current = vectorRefGroup;
 
     const ambientLight = new THREE.AmbientLight(0xffffff, renderSettings.ambientIntensity || 0.8);
     ambientLightRef.current = ambientLight;
@@ -567,19 +704,398 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     window.addEventListener('resize', handleResize);
     handleResize();
 
+    const vectorKind = cameraType as VectorViewportKind;
+    registerVectorViewport({
+      kind: vectorKind,
+      camera,
+      container: containerRef.current,
+    });
+
     return () => {
+      unregisterVectorViewport(vectorKind);
       unbindNavMods();
+      renderer.domElement.removeEventListener('contextmenu', onCanvasContextMenu);
       resizeObserver.disconnect();
       window.removeEventListener('resize', handleResize);
       cancelAnimationFrame(animationFrameId);
       tControls.dispose();
       controls.dispose();
+      clearAndDisposeGroup(meshesGroupRef.current);
+      clearAndDisposeGroup(verticesGroupRef.current);
+      clearAndDisposeGroup(edgesGroupRef.current);
+      clearAndDisposeGroup(bonesGroupRef.current);
+      clearAndDisposeGroup(facesHighlightGroupRef.current);
+      clearAndDisposeGroup(hoverHighlightGroupRef.current);
+      clearAndDisposeGroup(vectorGhostRef.current);
+      if (vectorRefGroupRef.current) {
+        vectorRefGroupRef.current.traverse((obj) => {
+          if ((obj as THREE.Mesh).isMesh) {
+            const mat = (obj as THREE.Mesh).material as THREE.MeshBasicMaterial;
+            if (mat?.map) mat.map = null;
+          }
+        });
+        scene.remove(vectorRefGroupRef.current);
+        disposeObject3D(vectorRefGroupRef.current, { disposeTextures: false });
+        vectorRefGroupRef.current = null;
+      }
+      vectorRefTexturesRef.current.forEach((tex) => tex.dispose());
+      vectorRefTexturesRef.current.clear();
+      meshTexturesRef.current.forEach((entry) => entry.texture.dispose());
+      meshTexturesRef.current.clear();
       if (renderer.domElement.parentNode) {
         renderer.domElement.parentNode.removeChild(renderer.domElement);
       }
       renderer.dispose();
     };
   }, [cameraType]);
+
+  // Live translucent vector blockout preview (updates as silhouettes close / edit)
+  const vectorRevision = useVectorStore((s) => s.revision);
+  const vectorBuiltRevision = useVectorStore((s) => s.builtRevision);
+  useEffect(() => {
+    const group = vectorGhostRef.current;
+    if (!group) return;
+
+    let cancelled = false;
+    let raf = 0;
+
+    const rebuild = () => {
+      if (cancelled || !vectorGhostRef.current) return;
+      const g = vectorGhostRef.current;
+
+      if (activeWorkspaceMode !== 'blockout') {
+        while (g.children.length) {
+          const child = g.children[0];
+          g.remove(child);
+          disposeObject3D(child);
+        }
+        g.visible = false;
+        return;
+      }
+
+      const store = useVectorStore.getState();
+      const hasClosed = store.parts.some((part) => {
+        const paths = part.id === store.activePartId ? store.paths : part.paths;
+        return paths.front.closed || paths.side.closed || paths.top.closed;
+      });
+
+      // Drawing open curves: skip clear/rebuild thrash on every pointer move.
+      if (!hasClosed) {
+        if (g.children.length === 0) {
+          g.visible = false;
+          return;
+        }
+        while (g.children.length) {
+          const child = g.children[0];
+          g.remove(child);
+          disposeObject3D(child);
+        }
+        g.visible = false;
+        return;
+      }
+
+      // Solid mesh already matches current curves — don't double-draw ghost.
+      if (store.builtRevision === store.revision) {
+        while (g.children.length) {
+          const child = g.children[0];
+          g.remove(child);
+          disposeObject3D(child);
+        }
+        g.visible = false;
+        return;
+      }
+
+      const buildParts = store.parts.map((part) =>
+        part.id === store.activePartId ? { ...part, paths: store.paths } : part
+      );
+      const generated = buildParts
+        .map((part) =>
+          vectorPathsToMesh(
+            part.paths.front.closed ? part.paths.front : null,
+            part.paths.side.closed ? part.paths.side : null,
+            store.verticalSegments,
+            store.radialSegments,
+            part.paths.top.closed ? part.paths.top : null,
+            { thickness: store.thickness, gameTopology: true, capStyle: store.capStyle, taperThickness: true, roundness: store.roundness }
+          )
+        )
+        .filter((mesh): mesh is NonNullable<typeof mesh> => !!mesh);
+
+      while (g.children.length) {
+        const child = g.children[0];
+        g.remove(child);
+        disposeObject3D(child);
+      }
+
+      if (!generated.length) {
+        g.visible = false;
+        return;
+      }
+
+      const snapshot =
+        generated.length === 1 ? generated[0] : combineVectorMeshes(generated);
+      const cad = vectorSnapshotToCADMesh(snapshot, 'Vector Ghost');
+      const geo = buildThreeGeometry(cad);
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0xd2b48c,
+        transparent: true,
+        opacity: 0.55,
+        side: THREE.DoubleSide,
+        flatShading: true,
+        roughness: 0.82,
+        metalness: 0.04,
+        depthWrite: false,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.renderOrder = 1;
+      g.add(mesh);
+
+      const wireMat = new THREE.LineBasicMaterial({
+        color: 0xe8d090,
+        transparent: true,
+        opacity: 0.85,
+        depthWrite: false,
+      });
+      const wire = new THREE.LineSegments(buildLogicalEdgeGeometry(cad), wireMat);
+      wire.renderOrder = 2;
+      g.add(wire);
+      g.visible = true;
+    };
+
+    // Coalesce rapid revision bumps (handle drag) to one rebuild per frame.
+    raf = requestAnimationFrame(rebuild);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
+  }, [activeWorkspaceMode, vectorRevision, vectorBuiltRevision]);
+
+  // Front + Side reference planes (3D sheets, same UVs both sides) in every blockout view.
+  const vectorRefFront = useVectorStore((s) => s.refImages.front);
+  const vectorRefSide = useVectorStore((s) => s.refImages.side);
+  const vectorRefEditPlane = useVectorStore((s) => s.refEditPlane);
+  useEffect(() => {
+    const group = vectorRefGroupRef.current;
+    if (!group) return;
+
+    if (activeWorkspaceMode !== 'blockout') {
+      group.visible = false;
+      return;
+    }
+    group.visible = true;
+
+    const syncPlane = (plane: VectorRefPlaneId, ref: typeof vectorRefFront) => {
+      const mesh = group.getObjectByName(`vectorRef-${plane}`) as THREE.Mesh | undefined;
+      if (!mesh) return;
+      const mat = mesh.material as THREE.MeshBasicMaterial;
+
+      if (!ref?.dataUrl) {
+        mesh.visible = false;
+        if (mat.map) {
+          mat.map = null;
+          mat.needsUpdate = true;
+        }
+        return;
+      }
+
+      applyVectorRefTransform(mesh, plane, ref);
+      setVectorRefActive(
+        mesh,
+        vectorRefEditPlane === plane && vectorRefTool !== 'none' && !ref.locked
+      );
+
+      const cacheKey = `${plane}:${ref.dataUrl}`;
+      const cached = vectorRefTexturesRef.current.get(cacheKey);
+      if (cached) {
+        if (mat.map !== cached) {
+          mat.map = cached;
+          mat.needsUpdate = true;
+        }
+        return;
+      }
+
+      let cancelled = false;
+      const loader = new THREE.TextureLoader();
+      loader.load(
+        ref.dataUrl,
+        (texture) => {
+          if (cancelled || !vectorRefGroupRef.current) {
+            texture.dispose();
+            return;
+          }
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.needsUpdate = true;
+          // Drop previous textures for this plane only.
+          for (const [key, tex] of [...vectorRefTexturesRef.current.entries()]) {
+            if (key.startsWith(`${plane}:`) && key !== cacheKey) {
+              tex.dispose();
+              vectorRefTexturesRef.current.delete(key);
+            }
+          }
+          vectorRefTexturesRef.current.set(cacheKey, texture);
+          mat.map = texture;
+          mat.needsUpdate = true;
+        },
+        undefined,
+        () => {
+          mesh.visible = false;
+        }
+      );
+      return () => {
+        cancelled = true;
+      };
+    };
+
+    const cleanFront = syncPlane('front', vectorRefFront);
+    const cleanSide = syncPlane('side', vectorRefSide);
+    return () => {
+      cleanFront?.();
+      cleanSide?.();
+    };
+  }, [
+    activeWorkspaceMode,
+    vectorRefFront,
+    vectorRefSide,
+    vectorRefTool,
+    vectorRefEditPlane,
+  ]);
+
+  // Move / scale the active reference plane with LMB drag (scroll scales in Scale mode).
+  useEffect(() => {
+    if (activeWorkspaceMode !== 'blockout') return;
+    if (vectorRefTool === 'none' || !vectorRefEditPlane) return;
+    // Only the matching Front/Side viewport owns the gesture (avoids triple-listeners).
+    if (cameraType !== vectorRefEditPlane) return;
+
+    const container = containerRef.current;
+    const camera = cameraRef.current;
+    if (!container || !camera) return;
+
+    const planeId = vectorRefEditPlane;
+    const scratchHit = new THREE.Vector3();
+    const scratchNdc = new THREE.Vector2();
+    const raycaster = new THREE.Raycaster();
+    const worldPlane =
+      planeId === 'front'
+        ? new THREE.Plane(new THREE.Vector3(0, 0, 1), 0.02)
+        : new THREE.Plane(new THREE.Vector3(1, 0, 0), 0.02);
+
+    const hitUV = (clientX: number, clientY: number) => {
+      const rect = container.getBoundingClientRect();
+      scratchNdc.set(
+        ((clientX - rect.left) / Math.max(rect.width, 1)) * 2 - 1,
+        -(((clientY - rect.top) / Math.max(rect.height, 1)) * 2 - 1)
+      );
+      raycaster.setFromCamera(scratchNdc, camera);
+      if (!raycaster.ray.intersectPlane(worldPlane, scratchHit)) return null;
+      return planeId === 'front'
+        ? { u: scratchHit.x, v: scratchHit.y }
+        : { u: scratchHit.z, v: scratchHit.y };
+    };
+
+    type DragState =
+      | { mode: 'move'; startU: number; startV: number; originU: number; originV: number }
+      | { mode: 'scale'; startClientY: number; originScale: number };
+
+    let drag: DragState | null = null;
+
+    const onDown = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      const store = useVectorStore.getState();
+      if (store.refTool === 'none' || store.refEditPlane !== planeId) return;
+      const ref = store.refImages[planeId];
+      if (!ref || ref.locked) return;
+      if ((e.target as HTMLElement | null)?.closest?.('.blockout-ref-toolbar')) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (store.refTool === 'move') {
+        const uv = hitUV(e.clientX, e.clientY);
+        if (!uv) return;
+        drag = {
+          mode: 'move',
+          startU: uv.u,
+          startV: uv.v,
+          originU: ref.offsetU,
+          originV: ref.offsetV,
+        };
+      } else {
+        drag = {
+          mode: 'scale',
+          startClientY: e.clientY,
+          originScale: ref.scale,
+        };
+      }
+      try {
+        container.setPointerCapture?.(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+    };
+
+    const onMove = (e: PointerEvent) => {
+      if (!drag) return;
+      const store = useVectorStore.getState();
+      if (drag.mode === 'move') {
+        const uv = hitUV(e.clientX, e.clientY);
+        if (!uv) return;
+        store.patchRefImage(planeId, {
+          offsetU: drag.originU + (uv.u - drag.startU),
+          offsetV: drag.originV + (uv.v - drag.startV),
+        });
+      } else {
+        const factor = Math.exp((drag.startClientY - e.clientY) * 0.01);
+        store.patchRefImage(planeId, {
+          scale: Math.max(0.25, Math.min(40, drag.originScale * factor)),
+        });
+      }
+    };
+
+    const onUp = (e: PointerEvent) => {
+      if (!drag) return;
+      drag = null;
+      try {
+        container.releasePointerCapture?.(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      const store = useVectorStore.getState();
+      if (store.refTool !== 'scale' || store.refEditPlane !== planeId) return;
+      const ref = store.refImages[planeId];
+      if (!ref || ref.locked) return;
+      e.preventDefault();
+      const factor = e.deltaY > 0 ? 0.94 : 1.06;
+      store.patchRefImage(planeId, {
+        scale: Math.max(0.25, Math.min(40, ref.scale * factor)),
+      });
+    };
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        useVectorStore.getState().setRefTool('none');
+      }
+    };
+
+    container.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    container.addEventListener('wheel', onWheel, { passive: false });
+    window.addEventListener('keydown', onKey);
+
+    return () => {
+      container.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      container.removeEventListener('wheel', onWheel);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [activeWorkspaceMode, vectorRefTool, vectorRefEditPlane, cameraType]);
 
   // Per-mesh nearest-filter textures (active mesh uses live paint canvas)
   useEffect(() => {
@@ -660,6 +1176,23 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       cancelled = true;
     };
   }, [meshes, activeMeshId, textureCanvas, textureRevision]);
+
+  // Live paint stamps: needsUpdate only — no App setState / effect re-walk.
+  useEffect(() => {
+    return () => {
+      cancelTexturePreviewNotify();
+    };
+  }, []);
+
+  useEffect(() => {
+    return subscribeTexturePreview(() => {
+      const entry = meshTexturesRef.current.get(activeMeshId);
+      if (!entry) return;
+      if (entry.key.startsWith('live:') || (entry.texture as THREE.CanvasTexture).isCanvasTexture) {
+        entry.texture.needsUpdate = true;
+      }
+    });
+  }, [activeMeshId]);
 
   // Live lighting, fog, and background from render settings / weather
   useEffect(() => {
@@ -1919,46 +2452,24 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const mGroup = meshesGroupRef.current;
 
     while (mGroup.children.length > 0) {
-      mGroup.remove(mGroup.children[0]);
+      const child = mGroup.children[0];
+      mGroup.remove(child);
+      disposeObject3D(child);
     }
 
-    if (verticesGroupRef.current) {
-      while (verticesGroupRef.current.children.length > 0) {
-        verticesGroupRef.current.remove(verticesGroupRef.current.children[0]);
-      }
-    }
-
-    if (edgesGroupRef.current) {
-      while (edgesGroupRef.current.children.length > 0) {
-        edgesGroupRef.current.remove(edgesGroupRef.current.children[0]);
-      }
-    }
+    clearAndDisposeGroup(verticesGroupRef.current);
+    clearAndDisposeGroup(edgesGroupRef.current);
 
     if (bonesGroupRef.current) {
       while (bonesGroupRef.current.children.length > 0) {
         const child = bonesGroupRef.current.children[0];
         bonesGroupRef.current.remove(child);
-        child.traverse((object) => {
-          const rendered = object as THREE.Mesh;
-          rendered.geometry?.dispose();
-          const material = rendered.material as THREE.Material | THREE.Material[] | undefined;
-          if (Array.isArray(material)) material.forEach((item) => item.dispose());
-          else material?.dispose();
-        });
+        disposeObject3D(child);
       }
     }
 
-    if (facesHighlightGroupRef.current) {
-      while (facesHighlightGroupRef.current.children.length > 0) {
-        facesHighlightGroupRef.current.remove(facesHighlightGroupRef.current.children[0]);
-      }
-    }
-
-    if (hoverHighlightGroupRef.current) {
-      while (hoverHighlightGroupRef.current.children.length > 0) {
-        hoverHighlightGroupRef.current.remove(hoverHighlightGroupRef.current.children[0]);
-      }
-    }
+    clearAndDisposeGroup(facesHighlightGroupRef.current);
+    clearAndDisposeGroup(hoverHighlightGroupRef.current);
 
     const showTrianglesDebug = !!toolState.showTriangulation;
     const isWireframe = toolState.viewMode === 'wireframe' || showTrianglesDebug;
@@ -1972,9 +2483,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       const ghostGeo = buildThreeGeometry(ghostCADMesh);
 
       const ghostMat = new THREE.MeshStandardMaterial({
-        color: 0x02a0e8,
+        color: VIEWPORT_THEME.ghostFill,
         transparent: true,
-        opacity: 0.55,
+        opacity: 0.45,
         side: THREE.DoubleSide,
         roughness: 0.2,
         metalness: 0.1,
@@ -1987,7 +2498,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
       // Clean Logical Edge Wireframe Overlay (No Triangulation Diagonals)
       const ghostWireMat = new THREE.LineBasicMaterial({
-        color: 0x00ffff,
+        color: VIEWPORT_THEME.ghostWire,
         linewidth: 2.5,
       });
       const ghostWireGeo = buildLogicalEdgeGeometry(ghostCADMesh);
@@ -1997,7 +2508,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
       // Placement Target Ring
       const ringGeo = new THREE.RingGeometry(0.1, 0.4, 32);
-      const ringMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, side: THREE.DoubleSide, transparent: true, opacity: 0.7 });
+      const ringMat = new THREE.MeshBasicMaterial({ color: VIEWPORT_THEME.ghostRing, side: THREE.DoubleSide, transparent: true, opacity: 0.7 });
       const ringMesh = new THREE.Mesh(ringGeo, ringMat);
       ringMesh.rotation.x = -Math.PI / 2;
       ringMesh.position.set(placementHoverPos.x, 0.003, placementHoverPos.z);
@@ -2021,9 +2532,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       const ghostGeo = buildThreeGeometry(ghostCADMesh);
 
       const ghostMat = new THREE.MeshStandardMaterial({
-        color: cadStep === 1 ? 0x02a0e8 : 0xf59e0b,
+        color: cadStep === 1 ? VIEWPORT_THEME.ghostFill : VIEWPORT_THEME.warning,
         transparent: true,
-        opacity: cadStep === 1 ? 0.6 : 0.45,
+        opacity: cadStep === 1 ? 0.55 : 0.45,
         side: THREE.DoubleSide,
         roughness: 0.2,
         metalness: 0.1,
@@ -2035,7 +2546,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
       // Clean Logical Edge Overlay for CAD Ghost
       const ghostWireMat = new THREE.LineBasicMaterial({
-        color: cadStep === 1 ? 0x00ffff : 0xffaa00,
+        color: cadStep === 1 ? VIEWPORT_THEME.ghostWire : VIEWPORT_THEME.accentSoft,
         linewidth: 2,
       });
       const ghostWireGeo = buildLogicalEdgeGeometry(ghostCADMesh);
@@ -2059,6 +2570,12 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     meshes.forEach((m) => {
       if (m.visible === false) return;
+      // Blockout: hide scene meshes until Build (or while curves changed since Build).
+      // Keeps Front/Side/Persp clean like the reference — ghost preview only while drawing.
+      if (activeWorkspaceMode === 'blockout') {
+        const vs = useVectorStore.getState();
+        if (vs.builtRevision === null || vs.builtRevision !== vs.revision) return;
+      }
 
       const evaluated = evaluateMeshModifiers(
         toolState.isPainting3D && (m.modifiers || []).some((mod) => mod.type === 'mirror' && mod.enabled)
@@ -2133,6 +2650,18 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           wireframe: isWireframe,
           side: THREE.DoubleSide,
         });
+      } else if (activeWorkspaceMode === 'blockout') {
+        // Clay flat-shaded look matching Vector Blockout reference.
+        material = new THREE.MeshStandardMaterial({
+          map: meshTexture || null,
+          color: meshTexture ? 0xffffff : 0xd2b48c,
+          vertexColors: false,
+          roughness: 0.82,
+          metalness: 0.04,
+          flatShading: true,
+          wireframe: isWireframe,
+          side: THREE.DoubleSide,
+        });
       } else {
         material = new THREE.MeshStandardMaterial({
           map: meshTexture || null,
@@ -2142,6 +2671,13 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           wireframe: isWireframe,
           side: THREE.DoubleSide,
         });
+      }
+
+      // Blender-style X-Ray: translucent surfaces so you can select / see through the mesh.
+      if (toolState.xray && !isWireframe) {
+        material.transparent = true;
+        material.opacity = 0.38;
+        material.depthWrite = false;
       }
 
       const meshObj = new THREE.Mesh(geometry, material);
@@ -2171,10 +2707,29 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       }
 
       // AAA Clean Logical Edge Wireframe Overlay for Selected/Hovered Mesh (No Triangulation Diagonals!)
-      if (isSelected || isHovered) {
+      // Blockout always shows cream edge wire like the reference Vector Blockout tool.
+      // X-Ray also draws edges so the silhouette stays readable through the transparent surface.
+      if (activeWorkspaceMode === 'blockout' || isSelected || isHovered || toolState.xray) {
         const outlineMat = new THREE.LineBasicMaterial({
-          color: isHovered ? 0xff0055 : 0x02a0e8,
-          linewidth: isHovered ? 3 : 2,
+          color:
+            activeWorkspaceMode === 'blockout'
+              ? 0xe8d090
+              : isHovered
+                ? VIEWPORT_THEME.hover
+                : isSelected
+                  ? VIEWPORT_THEME.idleHandle
+                  : toolState.xray
+                    ? 0x9a9a9a
+                    : VIEWPORT_THEME.idleHandle,
+          transparent: activeWorkspaceMode === 'blockout' || (!!toolState.xray && !isSelected && !isHovered),
+          opacity:
+            activeWorkspaceMode === 'blockout'
+              ? 0.75
+              : toolState.xray && !isSelected && !isHovered
+                ? 0.55
+                : 1,
+          linewidth: isHovered && activeWorkspaceMode !== 'blockout' ? 3 : 2,
+          depthTest: !toolState.xray,
         });
         const wireGeo = buildLogicalEdgeGeometry(displayMesh);
         const wireframe = new THREE.LineSegments(wireGeo, outlineMat);
@@ -2203,7 +2758,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           const isVertSelected = selectedVertexIds.includes(v.id);
           const isVertHovered = hoveredVertexId === v.id;
 
-          let vertColor = isVertHovered ? 0xff0055 : isVertSelected ? 0xf59e0b : 0x02a0e8;
+          let vertColor = isVertHovered ? VIEWPORT_THEME.hover : isVertSelected ? VIEWPORT_THEME.selection : VIEWPORT_THEME.idleHandle;
 
           if (toolState.rigMode === 'skin' && selectedBoneId) {
             const weights = activeMesh.skinWeights?.[v.id] || [];
@@ -2212,7 +2767,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
             if (weightVal > 0.8) vertColor = 0xec5b62; // High weight: Red
             else if (weightVal > 0.4) vertColor = 0xf59e0b; // Medium weight: Yellow
             else if (weightVal > 0.05) vertColor = 0x2d9d78; // Low weight: Green
-            else vertColor = 0x2680eb; // Zero weight: Blue
+            else vertColor = VIEWPORT_THEME.weightZero; // Zero weight: cool idle
           }
 
           const world = localToWorld(m, v.x, v.y, v.z);
@@ -2255,7 +2810,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           );
 
           const edgeMat = new THREE.LineBasicMaterial({
-            color: isEdgeSelected ? 0xf59e0b : 0x02a0e8,
+            color: isEdgeSelected ? VIEWPORT_THEME.selection : VIEWPORT_THEME.idleHandle,
             depthTest: false,
           });
 
@@ -2295,7 +2850,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           faceGeo.computeVertexNormals();
 
           const faceMat = new THREE.MeshBasicMaterial({
-            color: isFaceHovered ? 0xff0055 : 0xf59e0b,
+            color: isFaceHovered ? VIEWPORT_THEME.hover : VIEWPORT_THEME.selection,
             transparent: true,
             opacity: isFaceHovered ? 0.22 : 0.12,
             side: THREE.DoubleSide,
@@ -2318,7 +2873,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           const edgeGeo = new THREE.BufferGeometry();
           edgeGeo.setAttribute('position', new THREE.Float32BufferAttribute(edgePositions, 3));
           const edgeMat = new THREE.LineBasicMaterial({
-            color: isFaceHovered ? 0xff0055 : 0xffb366,
+            color: isFaceHovered ? VIEWPORT_THEME.hover : VIEWPORT_THEME.accentSoft,
             transparent: true,
             opacity: 0.85,
             linewidth: 2,
@@ -2359,7 +2914,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         const direction = end.clone().sub(start);
         const length = Math.max(.04, direction.length());
         const selected = bone.id === selectedBoneId;
-        const color = new THREE.Color(selected ? '#00ffff' : bone.color || '#ed7300');
+        const color = new THREE.Color(selected ? '#ff9a3c' : bone.color || '#ed7300');
 
         // Octahedral 3D bone geometry (tapered diamond shape)
         const radius = Math.max(0.04, length * 0.12);
@@ -2382,7 +2937,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         shaftGeometry.computeVertexNormals();
 
         const shaftMaterial = new THREE.MeshBasicMaterial({
-          color: selected ? 0x00ffff : color,
+          color: selected ? VIEWPORT_THEME.boneSelected : color,
           transparent: true,
           opacity: selected ? 0.95 : isBoneEditMode ? 0.85 : 0.6,
           depthTest: false,
@@ -2407,7 +2962,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         if (!bone.parentId) {
           const rootRing = new THREE.Mesh(
             new THREE.TorusGeometry(.14, .018, 6, 20),
-            new THREE.MeshBasicMaterial({ color: selected ? 0x00ffff : color, depthTest: false }),
+            new THREE.MeshBasicMaterial({ color: selected ? VIEWPORT_THEME.boneSelected : color, depthTest: false }),
           );
           rootRing.position.copy(start);
           rootRing.rotation.x = Math.PI / 2;
@@ -2518,7 +3073,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           previousGizmoPosRef.current.copy(centroid);
         }
         // Modal G/R/S: hide gizmo entirely for free mouse grab.
-        if (modalActiveRef.current) {
+        // Blockout is silhouette-driven — hide transform gizmo clutter.
+        if (modalActiveRef.current || activeWorkspaceMode === 'blockout') {
           transformControlsRef.current.enabled = false;
           transformControlsRef.current.getHelper().visible = false;
         } else {
@@ -2537,7 +3093,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         transformControlsRef.current.getHelper().visible = false;
       }
     }
-  }, [meshes, bones, selectedBoneId, activeMeshId, hoveredMeshId, hoveredVertexId, hoveredFaceId, toolState.viewMode, toolState.editMode, toolState.rigMode, toolState.isCadDrawing, toolState.cadDrawPrimitive, toolState.placeOnClick, toolState.activePrimitive, toolState.showTriangulation, toolState.isPainting3D, placementHoverPos, cadStep, drawBaseStart, drawBaseEnd, drawHeight, selectedVertexIds, selectedEdgeIds, selectedFaceIds, selectedMeshIds, renderSettings.wireframeColor, meshTextureTick, cameras, lights, particles, environment, sceneSelection]);
+  }, [meshes, bones, selectedBoneId, activeMeshId, hoveredMeshId, hoveredVertexId, hoveredFaceId, toolState.viewMode, toolState.editMode, toolState.rigMode, toolState.isCadDrawing, toolState.cadDrawPrimitive, toolState.placeOnClick, toolState.activePrimitive, toolState.showTriangulation, toolState.isPainting3D, toolState.xray, placementHoverPos, cadStep, drawBaseStart, drawBaseEnd, drawHeight, selectedVertexIds, selectedEdgeIds, selectedFaceIds, selectedMeshIds, renderSettings.wireframeColor, meshTextureTick, cameras, lights, particles, environment, sceneSelection, activeWorkspaceMode, vectorRevision, vectorBuiltRevision]);
 
   // Update edge hover/selection colors in place — avoid full scene rebuild on every hover
   useEffect(() => {
@@ -2550,7 +3106,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       if (!id) return;
       const selected = selectedEdgeIds.includes(id);
       const hovered = hoveredEdgeId === id;
-      mat.color.setHex(hovered ? 0xff0055 : selected ? 0xf59e0b : 0x02a0e8);
+      mat.color.setHex(hovered ? VIEWPORT_THEME.hover : selected ? VIEWPORT_THEME.selection : VIEWPORT_THEME.idleHandle);
       mat.needsUpdate = true;
     });
   }, [hoveredEdgeId, selectedEdgeIds, toolState.editMode, meshes, activeMeshId]);
@@ -3009,6 +3565,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     paintStrokeFaceIdRef.current = null;
     paintStrokeLastUvRef.current = null;
     isWeightPaintingRef.current = false;
+    if (paintCursorRafRef.current) {
+      cancelAnimationFrame(paintCursorRafRef.current);
+      paintCursorRafRef.current = 0;
+    }
+    pendingPaintCursorRef.current = null;
     if (controlsRef.current) {
       const cur = toolStateRef.current;
       const blocked =
@@ -3019,6 +3580,14 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         modalActiveRef.current;
       controlsRef.current.enabled = !blocked;
       applyStandardOrbitMouseButtons(controlsRef.current);
+      // Stay in paint / blockout-pen button map so the next LMB stroke isn't stolen incorrectly.
+      if (activeWorkspaceMode === 'blockout' && useVectorStore.getState().mode === 'pen') {
+        applyDrawToolOrbitMouseButtons(controlsRef.current, {
+          ortho: cameraType !== 'perspective',
+        });
+      } else if (cur.isPainting3D) {
+        applyPaintOrbitMouseButtons(controlsRef.current);
+      }
     }
 
     // Marquee Selection Box Completion Handler
@@ -3126,10 +3695,26 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     ) {
       controlsRef.current.enabled = true;
       applyStandardOrbitMouseButtons(controlsRef.current);
+      if (activeWorkspaceMode === 'blockout' && useVectorStore.getState().mode === 'pen') {
+        applyDrawToolOrbitMouseButtons(controlsRef.current, {
+          ortho: cameraType !== 'perspective',
+        });
+      } else if (cur.isPainting3D) {
+        applyPaintOrbitMouseButtons(controlsRef.current);
+      }
     }
   };
 
   const handlePointerLeave = () => {
+    // Keep an active paint stroke alive — pointer capture continues delivering moves.
+    if (isPainting3DActive || isWeightPaintingRef.current) {
+      if (paintCursorRafRef.current) {
+        cancelAnimationFrame(paintCursorRafRef.current);
+        paintCursorRafRef.current = 0;
+      }
+      setPaintCursor(null);
+      return;
+    }
     handlePointerUp();
     setPaintCursor(null);
   };
@@ -3200,6 +3785,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!containerRef.current || !cameraRef.current || !sceneRef.current) return;
+    // Vector Blockout: LMB drawing/editing is handled by VectorOverlay / OrbitControls.
+    // Do not run modeling selection on LMB here.
+    if (activeWorkspaceMode === 'blockout' && e.button === 0) return;
     // Blender modal G/R/S owns the pointer — don't steal selection mid-grab.
     if (modalActiveRef.current || toolStateRef.current.modalTransform || toolStateRef.current.modalMeshOp) {
       e.preventDefault();
@@ -3207,7 +3795,12 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     }
 
     // RMB / MMB are reserved for pan (OrbitControls) — never steal for tools
-    if (e.button === 1 || e.button === 2) return;
+    if (e.button === 1 || e.button === 2) {
+      if (activeWorkspaceMode === 'blockout' && controlsRef.current) {
+        controlsRef.current.enabled = true;
+      }
+      return;
+    }
 
     // Skin-mode weight painting — LMB on mesh paints; miss keeps orbit/pan/zoom
     if (toolState.rigMode === 'skin' && e.button === 0 && !e.ctrlKey) {
@@ -3222,9 +3815,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       return;
     }
 
-    // Direct 3D paint: LMB on the model paints; LMB on empty space orbits the camera.
-    // RMB pan · MMB/wheel zoom stay available always.
-    if (toolState.isPainting3D && onDirect3DPaintPixel && e.button === 0 && !e.ctrlKey) {
+    // Direct 3D paint: LMB on the model paints; empty LMB orbits (default mouse map).
+    if (toolState.isPainting3D && onDirect3DPaintPixel && e.button === 0 && !e.ctrlKey && !e.altKey) {
       const rect = containerRef.current.getBoundingClientRect();
       const mouseX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       const mouseY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -3547,6 +4139,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     // Modal G/R/S owns the pointer — don't thrash hover/selection rebuilds mid-grab.
     if (modalActiveRef.current || toolStateRef.current.modalTransform) return;
 
+    // Blockout owns LMB draw/edit via VectorOverlay — skip hover raycasts that
+    // setState and rebuild mesh outlines on every move.
+    if (activeWorkspaceMode === 'blockout') return;
+
     if (isWeightPaintingRef.current) {
       applyWeightPaintAtEvent(e);
       return;
@@ -3605,7 +4201,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         if (strokeHits.length > 0) {
           const last = strokeHits[strokeHits.length - 1];
           paintStrokeLastUvRef.current = { u: last.uv.x, v: last.uv.y };
-          setPaintCursor({
+          schedulePaintCursor({
             x: e.clientX - rect.left,
             y: e.clientY - rect.top,
             u: last.uv.x,
@@ -3619,26 +4215,26 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           }
         } else {
           // Keep last client pos so the next successful hit can fill the gap from here.
-          setPaintCursor(null);
+          schedulePaintCursor(null);
         }
       } else {
         const paintHits = raycaster.intersectObject(paintMesh);
         if (paintHits.length > 0 && paintHits[0].uv) {
-          setPaintCursor({
+          schedulePaintCursor({
             x: e.clientX - rect.left,
             y: e.clientY - rect.top,
             u: paintHits[0].uv.x,
             v: paintHits[0].uv.y,
           });
         } else {
-          setPaintCursor(null);
+          schedulePaintCursor(null);
         }
       }
       return;
     }
 
     if (toolState.rigMode === 'skin') {
-      setPaintCursor({
+      schedulePaintCursor({
         x: e.clientX - rect.left,
         y: e.clientY - rect.top,
         u: 0,
@@ -3715,6 +4311,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
   const totalVerts = meshes.reduce((acc, m) => acc + m.vertices.length, 0);
   const totalFaces = meshes.reduce((acc, m) => acc + m.faces.length, 0);
+  const isBlockout = activeWorkspaceMode === 'blockout';
 
   return (
     <div className="relative w-full h-full overflow-hidden bg-[#2b2b2b] select-none font-sans">
@@ -3734,6 +4331,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
             : 'cursor-default'
         }`}
       />
+
+      <VectorOverlay kind={cameraType as VectorViewportKind} active={isBlockout} />
 
       {(toolState.isPainting3D || toolState.rigMode === 'skin') && paintCursor && (
         <div
@@ -3757,7 +4356,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         />
       )}
 
-      <div className="absolute top-2 left-2 flex items-center gap-1.5 pointer-events-none z-10 font-mono text-[10px]">
+      <div className="absolute top-2 left-2 flex flex-col items-start gap-1.5 z-10 font-mono text-[10px]">
+        <div className="flex items-center gap-1.5 pointer-events-none">
         {isQuadSubViewport ? (
           <span className="cad-card px-2 py-0.5 text-[#ff9a3c] font-extrabold uppercase border-[#4d4d4d] bg-[#1a1a1a]/90 backdrop-blur tracking-wider">
             {cameraType} {cameraType === 'perspective' ? '3D' : 'ORTHO'}
@@ -3797,7 +4397,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         )}
         {toolState.isPainting3D && (
           <span className="cad-card px-2.5 py-1 text-[#ffb366] font-bold border-[#ed7300] bg-[#262626]">
-            3D PAINT ({toolState.drawTool?.toUpperCase() || 'PENCIL'}) · LMB on model paints · empty LMB orbits · {STANDARD_NAV_HINT}
+            3D PAINT ({toolState.drawTool?.toUpperCase() || 'PENCIL'}) · {PAINT_NAV_HINT}
           </span>
         )}
         {toolState.placeOnClick && (
@@ -3850,6 +4450,13 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
             BONE EDIT
           </span>
         )}
+        </div>
+        {isBlockout && (cameraType === 'front' || cameraType === 'side') && (
+          <>
+            <BlockoutRefToolbar plane={cameraType} />
+            <BlockoutSilhouetteToolbar plane={cameraType} />
+          </>
+        )}
       </div>
 
       {!isQuadSubViewport && (
@@ -3866,6 +4473,13 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
             </button>
             <button onClick={() => setViewOrientation('iso')} className="px-2 py-0.5 cad-button font-bold text-[#ff9a3c]">
               3D ISO
+            </button>
+            <button
+              onClick={() => setToolState((s) => ({ ...s, xray: !s.xray }))}
+              className={`px-2 py-0.5 cad-button font-bold transition flex items-center gap-1 ${toolState.xray ? 'text-[#ed7300] border-[#ed7300]/40 bg-[#ed7300]/10' : 'text-[#8c8c8c]'}`}
+              title="Toggle X-Ray (Alt+Z) — see through meshes like Blender"
+            >
+              <span>[X-Ray: {toolState.xray ? 'ON' : 'OFF'}]</span>
             </button>
             <button
               onClick={() => setToolState((s) => ({ ...s, showBones: s.showBones !== undefined ? !s.showBones : !shouldShowBones }))}
@@ -3888,16 +4502,18 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       )}
 
       {/* LightWave 3D Interactive Bottom-Right Navigation & Pen/Laptop Toolbar */}
-      <LightwaveNavToolbar
-        toolState={toolState}
-        setToolState={setToolState}
-        onFocusCenter={handleFocusCenter}
-        onDragPan={handleLightwaveDragPan}
-        onDragOrbit={handleLightwaveDragOrbit}
-        onDragZoom={handleLightwaveDragZoom}
-        showOrbit={cameraType === 'perspective'}
-        compact={isQuadSubViewport}
-      />
+      {!isBlockout && (
+        <LightwaveNavToolbar
+          toolState={toolState}
+          setToolState={setToolState}
+          onFocusCenter={handleFocusCenter}
+          onDragPan={handleLightwaveDragPan}
+          onDragOrbit={handleLightwaveDragOrbit}
+          onDragZoom={handleLightwaveDragZoom}
+          showOrbit={cameraType === 'perspective'}
+          compact={isQuadSubViewport}
+        />
+      )}
 
       {!isQuadSubViewport && (
         <div className="absolute bottom-2 left-2 cad-card px-3 py-1 text-[10px] font-mono flex items-center gap-3 bg-[#262626] border-[#4d4d4d]">
@@ -3906,6 +4522,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           <span>Total Verts: <strong className="text-[#ff9a3c]">{totalVerts}</strong></span>
           <span>Total Faces: <strong className="text-[#ed7300]">{totalFaces}</strong></span>
           <span>Selected Mesh: <strong className="text-[#ff9a3c]">{activeMesh?.name || 'None'}</strong></span>
+          {toolState.xray && (
+            <span className="text-[#ed7300] font-bold" title="Alt+Z to toggle">
+              X-RAY
+            </span>
+          )}
           <span className="text-[#6a7a8c]">{STANDARD_NAV_HINT}</span>
         </div>
       )}

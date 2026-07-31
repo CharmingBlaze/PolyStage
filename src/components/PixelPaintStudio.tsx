@@ -68,6 +68,8 @@ import {
   hexToRgba,
   rgbaToHex,
 } from '../utils/pixelPaint';
+import { isStandard2DPanButton } from '../utils/viewportNav';
+import { StrokeTexelMask } from '../utils/strokeTexelMask';
 import {
   getPaintPalette,
   PAINT_PALETTES,
@@ -133,15 +135,71 @@ type PixelSelection = {
   mask?: Set<number>;
 } | null;
 
-const ZOOM_MIN = 1;
+const ZOOM_MIN = 0.125; // 12.5% — enough to fit a 1024 canvas in a small paint panel
 const ZOOM_MAX = 256;
+
+function clampZoom(z: number) {
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
+}
+
+/** Step zoom with finer increments below 100% so large textures can be framed. */
+function nudgeZoom(z: number, dir: 1 | -1, mode: 'fine' | 'normal' | 'coarse' = 'normal') {
+  let step: number;
+  if (mode === 'fine') {
+    step = z <= 2 ? 0.125 : 1;
+  } else if (mode === 'coarse') {
+    step = z <= 1 ? 0.25 : z <= 4 ? 2 : 8;
+  } else if (z <= 1) {
+    step = 0.125;
+  } else if (z <= 4) {
+    step = 1;
+  } else {
+    step = 4;
+  }
+  const next = clampZoom(z + dir * step);
+  if (next < 2) return Math.round(next * 8) / 8;
+  return Math.round(next);
+}
+
+function formatZoomPercent(z: number) {
+  const pct = z * 100;
+  if (z < 1) return `${Number(pct.toFixed(1))}%`;
+  return `${Math.round(pct)}%`;
+}
 export const PIXEL_CANVAS_SIZES = [16, 32, 64, 128, 256, 512, 1024] as const;
 export type PixelCanvasSize = (typeof PIXEL_CANVAS_SIZES)[number];
 
-function nearestCanvasSize(w: number, h: number): PixelCanvasSize {
+/** Above this, undo snapshots are deferred to stroke-end and capped. */
+const LARGE_CANVAS_UNDO = 256;
+const LARGE_UNDO_MAX = 8;
+const HUGE_UNDO_MAX = 4; // ≥512 — fewer full-frame snapshots in RAM
+const SMALL_UNDO_MAX = 24;
+
+/** Default max edit size when hydrating UV photos into Paint (opt-in full via localStorage). */
+export const DEFAULT_PAINT_EDIT_MAX: PixelCanvasSize = 512;
+const PAINT_FULL_RES_KEY = 'cad.paintFullRes';
+
+export function isPaintFullResPreferred(): boolean {
+  try {
+    return localStorage.getItem(PAINT_FULL_RES_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function setPaintFullResPreferred(on: boolean) {
+  try {
+    localStorage.setItem(PAINT_FULL_RES_KEY, on ? '1' : '0');
+  } catch {
+    /* ignore */
+  }
+}
+
+function nearestCanvasSize(w: number, h: number, maxSize: PixelCanvasSize = 1024): PixelCanvasSize {
   const dim = Math.max(w, h);
   let best: PixelCanvasSize = PIXEL_CANVAS_SIZES[0];
   for (const s of PIXEL_CANVAS_SIZES) {
+    if (s > maxSize) break;
     best = s;
     if (s >= dim) break;
   }
@@ -170,7 +228,9 @@ export type Paint3DBridge = {
 interface PixelPaintStudioProps {
   toolState: ToolState;
   setToolState: React.Dispatch<React.SetStateAction<ToolState>>;
-  onTextureUpdated: (canvas: HTMLCanvasElement) => void;
+  onTextureUpdated: (canvas: HTMLCanvasElement, opts?: { encode?: boolean; immediate?: boolean; clearAnimation?: boolean }) => void;
+  /** Cheap 3D preview refresh (no PNG encode). */
+  onLiveTextureFlush?: () => void;
   textureCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
   initialDataUrl?: string | null;
   paintBridgeRef?: React.MutableRefObject<Paint3DBridge | null>;
@@ -203,6 +263,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
   toolState,
   setToolState,
   onTextureUpdated,
+  onLiveTextureFlush,
   textureCanvasRef,
   initialDataUrl,
   paintBridgeRef,
@@ -264,6 +325,9 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
   const persistTimerRef = useRef<number | null>(null);
   const hydratedMeshIdRef = useRef<string | null>(null);
   const readyToPersistRef = useRef(false);
+  /** Set by hydrate; flipped to ready only after frames/canvasSize commit. */
+  const pendingHydrateReadyRef = useRef(false);
+  const expectedHydrateSizeRef = useRef<number | null>(null);
 
   const [frames, setFrames] = useState<FrameMeta[]>(() => {
     const layerId = uid('layer');
@@ -281,18 +345,25 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
 
   const layerCanvasMap = useRef(new Map<string, HTMLCanvasElement>());
   const onTextureUpdatedRef = useRef(onTextureUpdated);
+  const onLiveTextureFlushRef = useRef(onLiveTextureFlush);
   const displayRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const compositeRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef(false);
+  const lastStrokePixelRef = useRef<{ x: number; y: number } | null>(null);
   const shapeStartRef = useRef<{ x: number; y: number } | null>(null);
   const snapshotBeforeStrokeRef = useRef<ImageData | null>(null);
   const panDragRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
-  const undoStack = useRef<string[]>([]);
-  const redoStack = useRef<string[]>([]);
+  const spacePanRef = useRef(false);
+  const toolBeforeSpaceRef = useRef<PaintTool | null>(null);
+  const undoStack = useRef<ImageData[]>([]);
+  const redoStack = useRef<ImageData[]>([]);
+  /** Large-canvas: baseline captured at stroke start, committed to undo on stroke end. */
+  const largeStrokeBaselineRef = useRef<ImageData | null>(null);
+  const largeStrokeDirtyRef = useRef(false);
   const paint3DStrokeRef = useRef<{ u: number; v: number; px: number; py: number; faceId: string | null } | null>(null);
   /** Texels stamped this 3D stroke — prevents double-pen overdraw across samples. */
-  const paint3DStrokeTexelsRef = useRef<Set<string>>(new Set());
+  const paint3DStrokeMaskRef = useRef(new StrokeTexelMask(32, 32));
   const paintMirrorURef = useRef(!!toolState.paintMirrorU);
   paintMirrorURef.current = !!toolState.paintMirrorU;
   const [, bumpUndoUi] = useState(0);
@@ -300,6 +371,10 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
   useEffect(() => {
     onTextureUpdatedRef.current = onTextureUpdated;
   }, [onTextureUpdated]);
+
+  useEffect(() => {
+    onLiveTextureFlushRef.current = onLiveTextureFlush;
+  }, [onLiveTextureFlush]);
 
   const frame = frames[frameIndex] || frames[0];
   const layers = frame?.layers || [];
@@ -311,25 +386,20 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
         const next = createLayerCanvas(canvasSize, canvasSize, !fillBg);
         if (c) {
           const ctx = next.getContext('2d')!;
-          ctx.drawImage(c, 0, 0);
+          ctx.imageSmoothingEnabled = false;
+          // Scale prior content to the new size (avoid cropping a 1024 layer down to 32).
+          ctx.drawImage(c, 0, 0, canvasSize, canvasSize);
         } else if (fillBg) {
           const ctx = next.getContext('2d')!;
           ctx.fillStyle = '#ffffff';
           ctx.fillRect(0, 0, canvasSize, canvasSize);
-          // starter checker accent like old editor
-          ctx.fillStyle = toolState.activeColor || '#ed7300';
-          for (let y = 0; y < canvasSize; y++) {
-            for (let x = 0; x < canvasSize; x++) {
-              if ((x + y) % 2 === 0) ctx.fillRect(x, y, 1, 1);
-            }
-          }
         }
         layerCanvasMap.current.set(layerId, next);
         c = next;
       }
       return c;
     },
-    [canvasSize, toolState.activeColor]
+    [canvasSize]
   );
 
   const getComposite = useCallback(() => {
@@ -361,24 +431,76 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     const layer = layers.find((l) => l.id === activeLayerId);
     if (!layer) return;
     const c = ensureLayerCanvas(layer.id);
-    undoStack.current.push(c.toDataURL());
-    if (undoStack.current.length > 40) undoStack.current.shift();
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+
+    // Large canvases: defer full snapshot to stroke lifecycle (beginLargeStrokeUndo / endLargeStrokeUndo).
+    if (canvasSize >= LARGE_CANVAS_UNDO) {
+      if (!largeStrokeBaselineRef.current) {
+        try {
+          largeStrokeBaselineRef.current = ctx.getImageData(0, 0, c.width, c.height);
+          largeStrokeDirtyRef.current = false;
+        } catch {
+          /* ignore */
+        }
+      }
+      return;
+    }
+
+    try {
+      undoStack.current.push(ctx.getImageData(0, 0, c.width, c.height));
+    } catch {
+      return;
+    }
+    if (undoStack.current.length > SMALL_UNDO_MAX) undoStack.current.shift();
     redoStack.current = [];
     bumpUndoUi((n) => n + 1);
-  }, [activeLayerId, layers, ensureLayerCanvas]);
+  }, [activeLayerId, layers, ensureLayerCanvas, canvasSize]);
 
-  const restoreLayerFromDataUrl = (dataUrl: string) => {
+  const beginLargeStrokeUndo = useCallback(() => {
+    if (canvasSize < LARGE_CANVAS_UNDO) return;
+    if (largeStrokeBaselineRef.current) return;
     const layer = layers.find((l) => l.id === activeLayerId);
     if (!layer) return;
     const c = ensureLayerCanvas(layer.id);
-    const img = new Image();
-    img.onload = () => {
-      const ctx = c.getContext('2d')!;
-      ctx.clearRect(0, 0, c.width, c.height);
-      ctx.drawImage(img, 0, 0);
-      paint();
-    };
-    img.src = dataUrl;
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+    try {
+      largeStrokeBaselineRef.current = ctx.getImageData(0, 0, c.width, c.height);
+      largeStrokeDirtyRef.current = false;
+    } catch {
+      /* ignore */
+    }
+  }, [canvasSize, layers, activeLayerId, ensureLayerCanvas]);
+
+  const markLargeStrokeDirty = useCallback(() => {
+    if (canvasSize >= LARGE_CANVAS_UNDO) largeStrokeDirtyRef.current = true;
+  }, [canvasSize]);
+
+  const endLargeStrokeUndo = useCallback(() => {
+    if (canvasSize < LARGE_CANVAS_UNDO) return;
+    const baseline = largeStrokeBaselineRef.current;
+    largeStrokeBaselineRef.current = null;
+    if (!baseline || !largeStrokeDirtyRef.current) {
+      largeStrokeDirtyRef.current = false;
+      return;
+    }
+    largeStrokeDirtyRef.current = false;
+    undoStack.current.push(baseline);
+    const max = canvasSize >= 512 ? HUGE_UNDO_MAX : LARGE_UNDO_MAX;
+    if (undoStack.current.length > max) undoStack.current.shift();
+    redoStack.current = [];
+    bumpUndoUi((n) => n + 1);
+  }, [canvasSize]);
+
+  const restoreLayerFromImageData = (data: ImageData) => {
+    const layer = layers.find((l) => l.id === activeLayerId);
+    if (!layer) return;
+    const c = ensureLayerCanvas(layer.id);
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+    ctx.putImageData(data, 0, 0);
+    paint({ persist: false });
   };
 
   const undo = () => {
@@ -387,8 +509,18 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     const layer = layers.find((l) => l.id === activeLayerId);
     if (!layer) return;
     const c = ensureLayerCanvas(layer.id);
-    redoStack.current.push(c.toDataURL());
-    restoreLayerFromDataUrl(prev);
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+    try {
+      redoStack.current.push(ctx.getImageData(0, 0, c.width, c.height));
+      const max = canvasSize >= 512 ? HUGE_UNDO_MAX : canvasSize >= LARGE_CANVAS_UNDO ? LARGE_UNDO_MAX : SMALL_UNDO_MAX;
+      if (redoStack.current.length > max) {
+        redoStack.current.shift();
+      }
+    } catch {
+      /* ignore */
+    }
+    restoreLayerFromImageData(prev);
     bumpUndoUi((n) => n + 1);
   };
 
@@ -398,15 +530,35 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     const layer = layers.find((l) => l.id === activeLayerId);
     if (!layer) return;
     const c = ensureLayerCanvas(layer.id);
-    undoStack.current.push(c.toDataURL());
-    restoreLayerFromDataUrl(next);
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+    try {
+      undoStack.current.push(ctx.getImageData(0, 0, c.width, c.height));
+      const max = canvasSize >= 512 ? HUGE_UNDO_MAX : canvasSize >= LARGE_CANVAS_UNDO ? LARGE_UNDO_MAX : SMALL_UNDO_MAX;
+      if (undoStack.current.length > max) {
+        undoStack.current.shift();
+      }
+    } catch {
+      /* ignore */
+    }
+    restoreLayerFromImageData(next);
     bumpUndoUi((n) => n + 1);
   };
 
-  const paint = useCallback(() => {
+  const paint = useCallback((opts?: { persist?: boolean }) => {
+    // Default: refresh display + live canvas ref only.
+    // Large stills: never PNG-encode on stroke end — encode on leave Paint / save / mesh switch.
+    const persist = opts?.persist === true;
     const composite = getComposite();
-    textureCanvasRef.current = composite;
-    onTextureUpdatedRef.current(composite);
+    if (readyToPersistRef.current || persist) {
+      textureCanvasRef.current = composite;
+      if (!persist || canvasSize >= LARGE_CANVAS_UNDO) {
+        onLiveTextureFlushRef.current?.();
+      }
+    }
+    if (persist && canvasSize < LARGE_CANVAS_UNDO) {
+      onTextureUpdatedRef.current(composite);
+    }
 
     const display = displayRef.current;
     if (!display) return;
@@ -416,14 +568,8 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     }
     const dctx = display.getContext('2d')!;
     dctx.imageSmoothingEnabled = false;
-    // checkerboard
-    const tile = 1;
-    for (let y = 0; y < canvasSize; y += tile) {
-      for (let x = 0; x < canvasSize; x += tile) {
-        dctx.fillStyle = (x + y) % 2 === 0 ? '#2a2a2a' : '#1a1a1a';
-        dctx.fillRect(x, y, tile, tile);
-      }
-    }
+    // Checkerboard lives on .pixel-paint__canvas-frame (CSS). Clear so transparency shows it.
+    dctx.clearRect(0, 0, canvasSize, canvasSize);
 
     if (onionSkin && frameIndex > 0) {
       const prev = frames[frameIndex - 1];
@@ -446,17 +592,152 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     ensureLayerCanvas,
   ]);
 
-  // Init first layer / load mesh texture or textureAnimation strip
+  // Release paint GPU/CPU buffers on unmount; encode large live texture if needed.
+  useEffect(() => {
+    return () => {
+      if (persistTimerRef.current) {
+        window.clearTimeout(persistTimerRef.current);
+        persistTimerRef.current = null;
+      }
+      if (readyToPersistRef.current) {
+        const composite = compositeRef.current || textureCanvasRef.current;
+        if (composite && Math.max(composite.width, composite.height) >= LARGE_CANVAS_UNDO) {
+          try {
+            onTextureUpdatedRef.current(composite, { encode: true, immediate: true });
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+      undoStack.current = [];
+      redoStack.current = [];
+      largeStrokeBaselineRef.current = null;
+      largeStrokeDirtyRef.current = false;
+      snapshotBeforeStrokeRef.current = null;
+      layerCanvasMap.current.forEach((c) => {
+        c.width = 0;
+        c.height = 0;
+      });
+      layerCanvasMap.current.clear();
+      if (compositeRef.current) {
+        compositeRef.current.width = 0;
+        compositeRef.current.height = 0;
+        compositeRef.current = null;
+      }
+      paint3DStrokeMaskRef.current.clear();
+    };
+    // Intentionally once — capture latest via refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Init first layer / load mesh texture or textureAnimation strip.
+  // Prefer keeping an existing UV/mesh texture so Paint edits it instead of replacing it.
   useEffect(() => {
     const meshId = mesh?.id || null;
-    if (hydratedMeshIdRef.current === meshId && meshId) return;
-    hydratedMeshIdRef.current = meshId;
+    const refCanvas = textureCanvasRef.current;
+    const stillUrl = initialDataUrl || mesh?.textureCanvasDataUrl || null;
+    const anim = mesh?.textureAnimation;
+    // Live UV canvas + still dataUrl always win over a leftover paint animation strip.
+    const useRefCanvas = !!(refCanvas && refCanvas.width > 0 && refCanvas.height > 0);
+    const useStill = !useRefCanvas && !!stillUrl;
+    const sizeHint = useRefCanvas
+      ? `${refCanvas!.width}x${refCanvas!.height}`
+      : useStill
+        ? `${stillUrl!.length}:${stillUrl!.slice(-24)}`
+        : `anim:${anim?.frames?.length || 0}`;
+    const hydrateKey = `${meshId || 'none'}::${sizeHint}`;
+    if (hydratedMeshIdRef.current === hydrateKey) return;
+    hydratedMeshIdRef.current = hydrateKey;
     readyToPersistRef.current = false;
     setImportPrompt(null);
+    // Drop previous layer canvases before allocating a new edit buffer.
+    layerCanvasMap.current.forEach((c) => {
+      c.width = 0;
+      c.height = 0;
+    });
+    layerCanvasMap.current.clear();
+    undoStack.current = [];
+    redoStack.current = [];
+    largeStrokeBaselineRef.current = null;
 
-    const anim = mesh?.textureAnimation;
+    const commitStillCanvas = (source: CanvasImageSource, nw: number, nh: number) => {
+      const maxEdit = isPaintFullResPreferred() ? 1024 : DEFAULT_PAINT_EDIT_MAX;
+      const snapped = nearestCanvasSize(nw, nh, maxEdit);
+      const layerId = uid('layer');
+      const c = createLayerCanvas(snapped, snapped, true);
+      const ctx = c.getContext('2d')!;
+      ctx.imageSmoothingEnabled = false;
+      ctx.clearRect(0, 0, snapped, snapped);
+      ctx.drawImage(source, 0, 0, snapped, snapped);
+      layerCanvasMap.current = new Map([[layerId, c]]);
+      if (compositeRef.current) {
+        compositeRef.current.width = snapped;
+        compositeRef.current.height = snapped;
+      }
+      // Keep live mesh texture on this canvas — do NOT encode PNG into React state here
+      // (that was freezing the tab at 1024²). Ref already drives the 3D view.
+      textureCanvasRef.current = c;
+      undoStack.current = [];
+      redoStack.current = [];
+      expectedHydrateSizeRef.current = snapped;
+      pendingHydrateReadyRef.current = true;
+      readyToPersistRef.current = false;
+      setFrames([
+        {
+          id: uid('frame'),
+          name: 'Frame 1',
+          durationMs: 100,
+          layers: [{ id: layerId, name: 'Layer 1', visible: true, opacity: 1 }],
+        },
+      ]);
+      setActiveLayerId(layerId);
+      setFrameIndex(0);
+      setCanvasSize(snapped);
+      // Fit large textures in view so users aren't stuck zoomed in.
+      setZoom((z) => (snapped >= 256 ? Math.min(z, 0.5) : z));
+    };
+
+    const applyStillToLayer = (dataUrl: string) => {
+      const img = new Image();
+      img.onload = () => {
+        commitStillCanvas(img, img.naturalWidth || img.width, img.naturalHeight || img.height);
+      };
+      img.onerror = () => {
+        const layerId = uid('layer');
+        const c = createLayerCanvas(32, 32, false);
+        layerCanvasMap.current = new Map([[layerId, c]]);
+        expectedHydrateSizeRef.current = 32;
+        pendingHydrateReadyRef.current = true;
+        readyToPersistRef.current = false;
+        setFrames([
+          {
+            id: uid('frame'),
+            name: 'Frame 1',
+            durationMs: 100,
+            layers: [{ id: layerId, name: 'Layer 1', visible: true, opacity: 1 }],
+          },
+        ]);
+        setActiveLayerId(layerId);
+        setCanvasSize(32);
+      };
+      img.src = dataUrl;
+    };
+
+    // Sync path: copy whatever UV / 3D was already showing — avoids async wipe races.
+    if (useRefCanvas && refCanvas) {
+      commitStillCanvas(refCanvas, refCanvas.width, refCanvas.height);
+      return;
+    }
+
+    if (useStill && stillUrl) {
+      applyStillToLayer(stillUrl);
+      return;
+    }
+
     if (anim?.frames?.length) {
-      setCanvasSize(anim.width || 32);
+      const animSize = anim.width || 32;
+      expectedHydrateSizeRef.current = animSize;
+      setCanvasSize(animSize);
       const nextFrames: FrameMeta[] = [];
       const map = new Map<string, HTMLCanvasElement>();
       let loaded = 0;
@@ -469,8 +750,17 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
           c.getContext('2d')!.drawImage(img, 0, 0, anim.width, anim.height);
           loaded += 1;
           if (loaded === anim.frames.length) {
-            paint();
-            readyToPersistRef.current = true;
+            pendingHydrateReadyRef.current = true;
+            readyToPersistRef.current = false;
+            setFrameIndex((i) => i);
+          }
+        };
+        img.onerror = () => {
+          loaded += 1;
+          if (loaded === anim.frames.length) {
+            pendingHydrateReadyRef.current = true;
+            readyToPersistRef.current = false;
+            setFrameIndex((i) => i);
           }
         };
         img.src = f.dataUrl;
@@ -491,33 +781,24 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       return;
     }
 
-    const uvUrl = initialDataUrl || mesh?.textureCanvasDataUrl;
-    if (uvUrl) {
-      const img = new Image();
-      img.onload = () => {
-        const nw = img.naturalWidth || img.width;
-        const nh = img.naturalHeight || img.height;
-        const snapped = nearestCanvasSize(nw, nh);
-        setCanvasSize(snapped);
-        const layerId = frames[0]?.layers[0]?.id || uid('layer');
-        const c = createLayerCanvas(snapped, snapped, true);
-        const ctx = c.getContext('2d')!;
-        ctx.imageSmoothingEnabled = false;
-        ctx.clearRect(0, 0, snapped, snapped);
-        ctx.drawImage(img, 0, 0, snapped, snapped);
-        layerCanvasMap.current.set(layerId, c);
-        readyToPersistRef.current = true;
-        paint();
-      };
-      img.src = uvUrl;
-    } else {
-      const first = frames[0]?.layers[0];
-      if (first) ensureLayerCanvas(first.id, true);
-      paint();
-      readyToPersistRef.current = true;
-    }
+    const layerId = frames[0]?.layers[0]?.id || uid('layer');
+    const blank = createLayerCanvas(32, 32, false);
+    layerCanvasMap.current = new Map([[layerId, blank]]);
+    expectedHydrateSizeRef.current = 32;
+    pendingHydrateReadyRef.current = true;
+    readyToPersistRef.current = false;
+    setFrames([
+      {
+        id: uid('frame'),
+        name: 'Frame 1',
+        durationMs: 100,
+        layers: [{ id: layerId, name: 'Layer 1', visible: true, opacity: 1 }],
+      },
+    ]);
+    setActiveLayerId(layerId);
+    setCanvasSize(32);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mesh?.id, mesh?.textureAnimation?.frames?.length, initialDataUrl]);
+  }, [mesh?.id]);
 
   useEffect(() => {
     if (!sizeMenuOpen && !importSizeMenuOpen && !paletteMenuOpen) return;
@@ -639,17 +920,35 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
 
   const schedulePersist = useCallback(() => {
     if (!onTextureAnimationChange || !readyToPersistRef.current) return;
+    // Large still photos: canvas ref is source of truth. Encoding frame PNGs freezes the UI.
+    if (canvasSize >= 256 && frames.length <= 1) return;
     if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current);
     persistTimerRef.current = window.setTimeout(() => {
       onTextureAnimationChange(buildTextureAnimation());
     }, 250);
-  }, [onTextureAnimationChange, buildTextureAnimation]);
+  }, [onTextureAnimationChange, buildTextureAnimation, canvasSize, frames.length]);
+
+  // Enable persist/paint only after hydrated frames + canvasSize have committed.
+  useEffect(() => {
+    if (!pendingHydrateReadyRef.current) return;
+    if (expectedHydrateSizeRef.current != null && canvasSize !== expectedHydrateSizeRef.current) return;
+    const layerId = frames[0]?.layers[0]?.id;
+    if (!layerId || !layerCanvasMap.current.has(layerId)) return;
+    pendingHydrateReadyRef.current = false;
+    expectedHydrateSizeRef.current = null;
+    readyToPersistRef.current = true;
+    paint({ persist: false });
+    schedulePersist();
+  }, [frames, canvasSize, paint, schedulePersist]);
 
   useEffect(() => {
+    if (!readyToPersistRef.current) return;
     schedulePersist();
   }, [frames, texClips, defaultClipId, canvasSize, schedulePersist]);
 
   useEffect(() => {
+    // Skip until hydrate finishes — otherwise empty default layers replace the UV texture.
+    if (!readyToPersistRef.current) return;
     paint();
   }, [frameIndex, layers, canvasSize, onionSkin, paint]);
 
@@ -702,7 +1001,14 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       else if (k === 'l') select('line');
       else if (k === 'c' && !e.ctrlKey && !e.metaKey) select('ellipse');
       else if (k === 'h') select('hand');
-      else if (k === 'm') select('move');
+      else if (k === ' ') {
+        e.preventDefault();
+        if (!spacePanRef.current) {
+          spacePanRef.current = true;
+          toolBeforeSpaceRef.current = tool;
+          setTool('hand');
+        }
+      } else if (k === 'm') select('move');
       else if (k === 'w') select('wand');
       else if (k === 'v' && !e.ctrlKey && !e.metaKey) select('select');
       else if ((e.ctrlKey || e.metaKey) && k === 'c') {
@@ -733,9 +1039,6 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
         });
         setFrameIndex((i) => i + 1);
         setActiveLayerId(newLayers[0].id);
-      } else if (k === ' ') {
-        e.preventDefault();
-        select('hand');
       } else if (k === '[') {
         setBrushSize((s) => {
           const next = Math.max(1, s - 1);
@@ -748,12 +1051,24 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
           setToolState((st) => ({ ...st, brushSize: next }));
           return next;
         });
-      }      else if (k === '=' || k === '+') setZoom((z) => Math.min(ZOOM_MAX, z + (e.ctrlKey ? 1 : 4)));
-      else if (k === '-') setZoom((z) => Math.max(ZOOM_MIN, z - (e.ctrlKey ? 1 : 4)));
+      }      else if (k === '=' || k === '+') setZoom((z) => nudgeZoom(z, 1, e.ctrlKey ? 'fine' : 'normal'));
+      else if (k === '-') setZoom((z) => nudgeZoom(z, -1, e.ctrlKey ? 'fine' : 'normal'));
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' && e.key !== ' ') return;
+      if (!spacePanRef.current) return;
+      spacePanRef.current = false;
+      const prev = toolBeforeSpaceRef.current;
+      toolBeforeSpaceRef.current = null;
+      if (prev && prev !== 'hand') setTool(prev);
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [undo, redo, brushSize, setToolState]);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, [undo, redo, brushSize, setToolState, tool]);
 
   const activeLayerCanvas = () => {
     const layer = layers.find((l) => l.id === activeLayerId) || layers[0];
@@ -821,7 +1136,8 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
         }
 
         if (!paint3DStrokeRef.current) {
-          paint3DStrokeTexelsRef.current = new Set();
+          paint3DStrokeMaskRef.current.reset(canvasSize, canvasSize);
+          beginLargeStrokeUndo();
           pushHistory();
         }
         if (paintTool === 'fill') {
@@ -831,14 +1147,14 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
           floodFill(image, x, y, hexToRgba(color, Math.round(opacity * 255)));
           ctx.putImageData(image, 0, 0);
           paint3DStrokeRef.current = { u: uvU, v: uvV, px: x, py: y, faceId: faceId ?? null };
+          largeStrokeDirtyRef.current = true;
           paint();
           return;
         } else {
+          largeStrokeDirtyRef.current = true;
           const stamp = (px: number, py: number) => {
             const stampAt = (cx: number) => {
-              const key = `${cx}:${py}`;
-              if (paint3DStrokeTexelsRef.current.has(key)) return;
-              paint3DStrokeTexelsRef.current.add(key);
+              if (!paint3DStrokeMaskRef.current.add(cx, py)) return;
 
               const half = Math.floor(size / 2);
               ctx.save();
@@ -889,20 +1205,22 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       },
       endStroke: () => {
         paint3DStrokeRef.current = null;
-        paint3DStrokeTexelsRef.current = new Set();
-        paint();
+        paint3DStrokeMaskRef.current.clear();
+        endLargeStrokeUndo();
+        paint({ persist: true });
       },
     };
     return () => {
       paintBridgeRef.current = null;
     };
-  }, [paintBridgeRef, activeLayerId, canvasSize, layers, getComposite, paint, textureCanvasRef, pushHistory, setToolState, ensureLayerCanvas]);
+  }, [paintBridgeRef, activeLayerId, canvasSize, layers, getComposite, paint, textureCanvasRef, pushHistory, beginLargeStrokeUndo, endLargeStrokeUndo, setToolState, ensureLayerCanvas]);
 
   const applyToolAt = (px: number, py: number) => {
     const canvas = activeLayerCanvas();
     if (!canvas) return;
     const ctx = canvas.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
+    markLargeStrokeDirty();
 
     if (tool === 'picker') {
       const d = ctx.getImageData(px, py, 1, 1).data;
@@ -968,12 +1286,22 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     paint();
   };
 
+  const beginPan = (e: React.PointerEvent, target: HTMLElement) => {
+    e.preventDefault();
+    e.stopPropagation();
+    panDragRef.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
+    target.setPointerCapture(e.pointerId);
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
-    // RMB / MMB pan · wheel zooms — LMB stays for paint tools
-    if (tool === 'hand' || e.button === 1 || e.button === 2) {
-      e.preventDefault();
-      panDragRef.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    // Hand tool, Space-hold, RMB, MMB, or Alt+LMB — pan the 2D view
+    const wantPan =
+      tool === 'hand'
+      || spacePanRef.current
+      || isStandard2DPanButton(e.button)
+      || (e.button === 0 && e.altKey);
+    if (wantPan) {
+      beginPan(e, e.currentTarget as HTMLElement);
       return;
     }
     if (e.button !== 0) return;
@@ -1029,6 +1357,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     drawingRef.current = true;
 
     if (tool === 'line' || tool === 'rect' || tool === 'ellipse') {
+      beginLargeStrokeUndo();
       pushHistory();
       const c = activeLayerCanvas();
       if (c) snapshotBeforeStrokeRef.current = c.getContext('2d')!.getImageData(0, 0, canvasSize, canvasSize);
@@ -1036,7 +1365,9 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       return;
     }
 
+    beginLargeStrokeUndo();
     pushHistory();
+    lastStrokePixelRef.current = coords;
     applyToolAt(coords.x, coords.y);
   };
 
@@ -1059,7 +1390,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       const y = Math.min(selDrag.startY, coords.y);
       const w = Math.abs(coords.x - selDrag.startX);
       const h = Math.abs(coords.y - selDrag.startY);
-      setSelection({ x, y, w: Math.max(1, w), h: Math.max(1, h) });
+      setSelection({ x: x, y, w: Math.max(1, w), h: Math.max(1, h) });
       return;
     }
     if (selDrag?.mode === 'move' && selDrag.origin && selDrag.snapshot) {
@@ -1162,12 +1493,32 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       return;
     }
 
-    if (tool !== 'fill' && tool !== 'picker') applyToolAt(coords.x, coords.y);
+    // Freehand tools: interpolate so hold-and-drag paints a continuous stroke.
+    if (tool !== 'fill' && tool !== 'picker') {
+      const prev = lastStrokePixelRef.current;
+      if (prev && (prev.x !== coords.x || prev.y !== coords.y)) {
+        const canvas = activeLayerCanvas();
+        if (canvas) {
+          const ctx = canvas.getContext('2d')!;
+          drawBresenham(ctx, prev.x, prev.y, coords.x, coords.y, 1, (x, y) => {
+            if (x === prev.x && y === prev.y) return;
+            applyToolAt(x, y);
+          });
+        } else {
+          applyToolAt(coords.x, coords.y);
+        }
+      } else if (!prev) {
+        applyToolAt(coords.x, coords.y);
+      }
+      lastStrokePixelRef.current = coords;
+    }
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
     panDragRef.current = null;
+    const wasDrawing = drawingRef.current;
     drawingRef.current = false;
+    lastStrokePixelRef.current = null;
     shapeStartRef.current = null;
     snapshotBeforeStrokeRef.current = null;
     selectionDragRef.current = null;
@@ -1175,6 +1526,10 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     } catch {
       /* ignore */
+    }
+    if (wasDrawing) endLargeStrokeUndo();
+    if (readyToPersistRef.current) {
+      paint({ persist: true });
     }
     schedulePersist();
   };
@@ -1250,6 +1605,15 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
 
   const deleteFrame = () => {
     if (frames.length <= 1) return;
+    const removed = frames[frameIndex];
+    removed?.layers.forEach((layer) => {
+      const c = layerCanvasMap.current.get(layer.id);
+      if (c) {
+        c.width = 0;
+        c.height = 0;
+        layerCanvasMap.current.delete(layer.id);
+      }
+    });
     setFrames((prev) => prev.filter((_, i) => i !== frameIndex));
     setFrameIndex((i) => Math.max(0, i - 1));
   };
@@ -1405,7 +1769,20 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
 
   const clearLayer = () => {
     withActiveLayer((ctx, c) => {
-      ctx.clearRect(0, 0, c.width, c.height);
+      // Explicit reset to a solid paintable surface (does not remove UV island layout).
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, c.width, c.height);
+    });
+  };
+
+  const fillLayerSolid = () => {
+    withActiveLayer((ctx, c) => {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = toolState.activeColor || '#ffffff';
+      ctx.fillRect(0, 0, c.width, c.height);
     });
   };
 
@@ -1469,7 +1846,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       { id: 'line', icon: <Slash className="w-3.5 h-3.5" />, title: 'Line (L)', group: 'shape' },
       { id: 'rect', icon: <Square className="w-3.5 h-3.5" />, title: 'Rectangle (U)', group: 'shape' },
       { id: 'ellipse', icon: <Circle className="w-3.5 h-3.5" />, title: 'Ellipse (C)', group: 'shape' },
-      { id: 'hand', icon: <Hand className="w-3.5 h-3.5" />, title: 'Hand / Pan (H / Space)', group: 'nav' },
+      { id: 'hand', icon: <Hand className="w-3.5 h-3.5" />, title: 'Hand / Pan (Space hold · RMB · MMB · Alt+LMB)', group: 'nav' },
     ],
     []
   );
@@ -1536,6 +1913,19 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                   {s >= 512 ? <span className="pixel-paint__size-hint">HD</span> : null}
                 </button>
               ))}
+              <button
+                type="button"
+                className={`pixel-paint__size-option ${isPaintFullResPreferred() ? 'is-active' : ''}`}
+                title="When on, UV photos open at up to 1024 in Paint (slower). Off caps at 512."
+                onClick={() => {
+                  const next = !isPaintFullResPreferred();
+                  setPaintFullResPreferred(next);
+                  setSizeMenuOpen(false);
+                  bumpUndoUi((n) => n + 1);
+                }}
+              >
+                Full res import {isPaintFullResPreferred() ? 'On' : 'Off'}
+              </button>
             </div>
           )}
         </div>
@@ -1559,8 +1949,11 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
           <button type="button" className="pixel-paint__text-btn" onClick={outlineLayer} title="Outline opaque pixels">
             Outline
           </button>
-          <button type="button" className="pixel-paint__text-btn" onClick={clearLayer} title="Clear layer">
+          <button type="button" className="pixel-paint__text-btn" onClick={clearLayer} title="Clear layer to solid white (keeps UV layout)">
             Clear
+          </button>
+          <button type="button" className="pixel-paint__text-btn" onClick={fillLayerSolid} title="Fill layer with the active color">
+            Fill Color
           </button>
           <button
             type="button"
@@ -1710,11 +2103,47 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
         <div
           ref={stageRef}
           className="pixel-paint__stage flex-1 relative overflow-hidden"
+          onPointerDown={(e) => {
+            // Pan from empty stage chrome (not only on the canvas pixels).
+            const wantPan =
+              tool === 'hand'
+              || spacePanRef.current
+              || isStandard2DPanButton(e.button)
+              || (e.button === 0 && e.altKey);
+            if (wantPan) beginPan(e, e.currentTarget);
+          }}
+          onPointerMove={(e) => {
+            if (!panDragRef.current) return;
+            const d = panDragRef.current;
+            setPan({
+              x: d.panX + (e.clientX - d.x),
+              y: d.panY + (e.clientY - d.y),
+            });
+          }}
+          onPointerUp={(e) => {
+            if (panDragRef.current) {
+              panDragRef.current = null;
+              try {
+                e.currentTarget.releasePointerCapture(e.pointerId);
+              } catch {
+                /* ignore */
+              }
+            }
+          }}
+          onPointerCancel={(e) => {
+            panDragRef.current = null;
+            try {
+              e.currentTarget.releasePointerCapture(e.pointerId);
+            } catch {
+              /* ignore */
+            }
+          }}
           onWheel={(e) => {
             e.preventDefault();
-            const step = e.ctrlKey ? 1 : e.shiftKey ? 8 : 4;
-            setZoom((z) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z + (e.deltaY > 0 ? -step : step))));
+            const mode = e.ctrlKey ? 'fine' : e.shiftKey ? 'coarse' : 'normal';
+            setZoom((z) => nudgeZoom(z, e.deltaY > 0 ? -1 : 1, mode));
           }}
+          onContextMenu={(e) => e.preventDefault()}
         >
           <div
             className="absolute left-1/2 top-1/2"
@@ -1793,11 +2222,11 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
               Onion
             </button>
             <div className="pixel-paint__vdiv" />
-            <button type="button" className="pixel-paint__hud-btn is-square" onClick={() => setZoom((z) => Math.max(ZOOM_MIN, z - 4))} title="Zoom out">
+            <button type="button" className="pixel-paint__hud-btn is-square" onClick={() => setZoom((z) => nudgeZoom(z, -1))} title="Zoom out">
               <ZoomOut className="w-3.5 h-3.5" />
             </button>
-            <span className="pixel-paint__zoom-label" title="Ctrl+wheel for fine zoom">{zoom * 100}%</span>
-            <button type="button" className="pixel-paint__hud-btn is-square" onClick={() => setZoom((z) => Math.min(ZOOM_MAX, z + 4))} title="Zoom in">
+            <span className="pixel-paint__zoom-label" title="Ctrl+wheel for fine zoom · Shift+wheel for coarse">{formatZoomPercent(zoom)}</span>
+            <button type="button" className="pixel-paint__hud-btn is-square" onClick={() => setZoom((z) => nudgeZoom(z, 1))} title="Zoom in">
               <ZoomIn className="w-3.5 h-3.5" />
             </button>
           </div>

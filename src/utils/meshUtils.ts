@@ -18,6 +18,76 @@ export function snapToGrid(val: number, step: number): number {
   return Math.round(val / step) * step;
 }
 
+/**
+ * Move the mesh pivot to the local bounding-box center without changing world
+ * appearance. Object-mode gizmos use `mesh.position`, so uncentered blockout
+ * verts (silhouette space with position 0) leave the gizmo on the floor.
+ */
+export function recenterMeshOrigin(mesh: CADMesh): CADMesh {
+  if (!mesh.vertices.length) return mesh;
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
+  for (const v of mesh.vertices) {
+    if (v.x < minX) minX = v.x;
+    if (v.y < minY) minY = v.y;
+    if (v.z < minZ) minZ = v.z;
+    if (v.x > maxX) maxX = v.x;
+    if (v.y > maxY) maxY = v.y;
+    if (v.z > maxZ) maxZ = v.z;
+  }
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const cz = (minZ + maxZ) / 2;
+  if (Math.abs(cx) < 1e-10 && Math.abs(cy) < 1e-10 && Math.abs(cz) < 1e-10) {
+    return mesh;
+  }
+
+  const vertices = mesh.vertices.map((v) => ({
+    ...v,
+    x: v.x - cx,
+    y: v.y - cy,
+    z: v.z - cz,
+  }));
+
+  // Offset world position by the local center transformed by scale + Euler XYZ.
+  const { x: sx, y: sy, z: sz } = mesh.scale;
+  const { x: rx, y: ry, z: rz } = mesh.rotation;
+  let dx = cx * sx;
+  let dy = cy * sy;
+  let dz = cz * sz;
+
+  let y1 = dy * Math.cos(rx) - dz * Math.sin(rx);
+  let z1 = dy * Math.sin(rx) + dz * Math.cos(rx);
+  dy = y1;
+  dz = z1;
+
+  let x2 = dx * Math.cos(ry) + dz * Math.sin(ry);
+  let z2 = -dx * Math.sin(ry) + dz * Math.cos(ry);
+  dx = x2;
+  dz = z2;
+
+  let x3 = dx * Math.cos(rz) - dy * Math.sin(rz);
+  let y3 = dx * Math.sin(rz) + dy * Math.cos(rz);
+  dx = x3;
+  dy = y3;
+
+  return finalizeEditableMesh({
+    ...mesh,
+    vertices,
+    position: {
+      x: mesh.position.x + dx,
+      y: mesh.position.y + dy,
+      z: mesh.position.z + dz,
+    },
+    revision: (mesh.revision || 0) + 1,
+  });
+}
+
 export function planarProjectUVs(mesh: CADMesh, faceId: string): CADMesh {
   const targetFace = mesh.faces.find((f) => f.id === faceId);
   if (!targetFace) return mesh;

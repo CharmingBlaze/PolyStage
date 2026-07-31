@@ -50,18 +50,6 @@ export const TextureEditor: React.FC<TextureEditorProps> = ({
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, textureWidth, textureHeight);
 
-    for (let x = 0; x < textureWidth; x++) {
-      for (let y = 0; y < textureHeight; y++) {
-        if ((x + y) % 2 === 0) {
-          ctx.fillStyle = '#ed7300';
-          ctx.fillRect(x, y, 1, 1);
-        } else {
-          ctx.fillStyle = '#ed7300';
-          ctx.fillRect(x, y, 1, 1);
-        }
-      }
-    }
-
     onTextureUpdated(canvas);
   }, []);
 

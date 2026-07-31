@@ -112,7 +112,6 @@ export const UVEditor: React.FC<UVEditorProps> = ({
   const livePreviewRafRef = useRef<number>(0);
   const boxRectRef = useRef<{ a: Point; b: Point } | null>(null);
   const drawRef = useRef<() => void>(() => {});
-  const imageInputRef = useRef<HTMLInputElement>(null);
   const imageImportModeRef = useRef<'texture' | 'reference'>('reference');
   const textureResolution = {
     width: textureCanvas?.width || 32,
@@ -246,15 +245,29 @@ export const UVEditor: React.FC<UVEditorProps> = ({
     return { u: Math.round(uv.u*divU)/divU, v: Math.round(uv.v*divV)/divV };
   };
 
-  const importImage = (file: File | undefined) => {
-    if (!file || !file.type.startsWith('image/')) return;
-    const importMode = imageImportModeRef.current;
+  const importImage = (file: File | undefined, mode?: 'texture' | 'reference') => {
+    if (!file) return;
+    const name = file.name.toLowerCase();
+    const looksLikeImage =
+      file.type.startsWith('image/')
+      || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name)
+      || !file.type; // Windows often leaves MIME empty
+    if (!looksLikeImage && file.type && !file.type.startsWith('image/')) return;
+
+    const importMode = mode ?? imageImportModeRef.current;
     const reader = new FileReader();
+    reader.onerror = () => {
+      console.warn('[UVEditor] Failed to read image file', file.name);
+    };
     reader.onload = () => {
       if (typeof reader.result !== 'string') return;
       const image = new Image();
       image.onload = () => {
         if (importMode === 'texture') {
+          if (!onTextureUpdated) {
+            console.warn('[UVEditor] onTextureUpdated missing — cannot apply mesh texture');
+            return;
+          }
           const canvas = document.createElement('canvas');
           canvas.width = Math.max(1, image.naturalWidth);
           canvas.height = Math.max(1, image.naturalHeight);
@@ -263,8 +276,9 @@ export const UVEditor: React.FC<UVEditorProps> = ({
           context.imageSmoothingEnabled = false;
           context.clearRect(0, 0, canvas.width, canvas.height);
           context.drawImage(image, 0, 0);
-          onTextureUpdated?.(canvas);
+          onTextureUpdated(canvas);
           setShowTexture(true);
+          setTextureLocked(false);
           return;
         }
         setReferenceLayer({
@@ -280,9 +294,28 @@ export const UVEditor: React.FC<UVEditorProps> = ({
         });
         setEditReferenceImage(false);
       };
+      image.onerror = () => {
+        console.warn('[UVEditor] Failed to decode image', file.name);
+      };
       image.src = reader.result;
     };
     reader.readAsDataURL(file);
+  };
+
+  const openImagePicker = (mode: 'texture' | 'reference') => {
+    imageImportModeRef.current = mode;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*,.png,.jpg,.jpeg,.webp,.gif,.bmp';
+    input.style.display = 'none';
+    input.onchange = () => {
+      importImage(input.files?.[0], mode);
+      input.remove();
+    };
+    document.body.appendChild(input);
+    input.click();
+    // Remove if the user cancels (no change event).
+    window.setTimeout(() => input.remove(), 60_000);
   };
 
   const commitOperation = (positions: Map<UvVertexId, UVCoord> | null) => {
@@ -628,17 +661,18 @@ export const UVEditor: React.FC<UVEditorProps> = ({
     const ctx=canvas.getContext('2d');if(!ctx)return;
     const dpr=window.devicePixelRatio||1,w=canvas.clientWidth,h=canvas.clientHeight;
     ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
-    ctx.fillStyle='#0a0f16';ctx.fillRect(0,0,w,h);
+    // PolyStage charcoal stage (not navy/cyan)
+    ctx.fillStyle='#2b2b2b';ctx.fillRect(0,0,w,h);
     const v=viewRef.current;
-    // Neighboring tiles / checker.
+    // Neighboring tiles / checker — charcoal tones
     for(let tu=-1;tu<=1;tu++)for(let tv=-1;tv<=1;tv++){
       const x=v.x+tu*v.scale,y=v.y-(tv)*v.scale;
-      ctx.fillStyle=(tu===0&&tv===0)?'#111a25':'#0d141e';ctx.fillRect(x,y,v.scale,v.scale);
+      ctx.fillStyle=(tu===0&&tv===0)?'#262626':'#222222';ctx.fillRect(x,y,v.scale,v.scale);
       const tile=Math.max(8,v.scale/16);for(let yy=0;yy<v.scale;yy+=tile)for(let xx=0;xx<v.scale;xx+=tile){
-        if((Math.floor(xx/tile)+Math.floor(yy/tile))%2===0){ctx.fillStyle=tu===0&&tv===0?'#172231':'#111a25';ctx.fillRect(x+xx,y+yy,tile,tile)}
+        if((Math.floor(xx/tile)+Math.floor(yy/tile))%2===0){ctx.fillStyle=tu===0&&tv===0?'#303030':'#282828';ctx.fillRect(x+xx,y+yy,tile,tile)}
       }
-      ctx.strokeStyle=tu===0&&tv===0?'#7dd3fc':'#263549';ctx.lineWidth=tu===0&&tv===0?2:1;ctx.strokeRect(x,y,v.scale,v.scale);
-      if(tu!==0||tv!==0){ctx.fillStyle='#475569';ctx.font='10px monospace';ctx.fillText(`${1001+tu+tv*10}`,x+6,y+14)}
+      ctx.strokeStyle=tu===0&&tv===0?'#ed7300':'#3a3a3a';ctx.lineWidth=tu===0&&tv===0?2:1;ctx.strokeRect(x,y,v.scale,v.scale);
+      if(tu!==0||tv!==0){ctx.fillStyle='#6a6a6a';ctx.font='10px monospace';ctx.fillText(`${1001+tu+tv*10}`,x+6,y+14)}
     }
     if(showTexture&&textureCanvas){
       // Atlas buffer already has v=1 at canvas top (flipY=true / paint stamps 1-v).
@@ -663,14 +697,14 @@ export const UVEditor: React.FC<UVEditorProps> = ({
       const imageW=baseW*referenceLayer.scale,imageH=baseH*referenceLayer.scale;
       ctx.drawImage(referenceLayer.image,-imageW/2,-imageH/2,imageW,imageH);
       if(editReferenceImage&&!referenceLayer.locked){
-        ctx.globalAlpha=1;ctx.strokeStyle='#facc15';ctx.lineWidth=2;ctx.setLineDash([6,4]);
+        ctx.globalAlpha=1;ctx.strokeStyle='#ff9a3c';ctx.lineWidth=2;ctx.setLineDash([6,4]);
         ctx.strokeRect(-imageW/2,-imageH/2,imageW,imageH);ctx.setLineDash([]);
       }
       ctx.restore();
     }
     const pixelX=v.scale/textureResolution.width,pixelY=v.scale/textureResolution.height;
     if(showGrid&&Math.min(pixelX,pixelY)>5){
-      ctx.beginPath();ctx.strokeStyle='#7dd3fc25';ctx.lineWidth=1;
+      ctx.beginPath();ctx.strokeStyle='rgba(237,115,0,0.18)';ctx.lineWidth=1;
       for(let x=0;x<=textureResolution.width;x++){const sx=v.x+x*pixelX;ctx.moveTo(sx,v.y);ctx.lineTo(sx,v.y+v.scale)}
       for(let y=0;y<=textureResolution.height;y++){const sy=v.y+y*pixelY;ctx.moveTo(v.x,sy);ctx.lineTo(v.x+v.scale,sy)}ctx.stroke();
     }
@@ -679,33 +713,33 @@ export const UVEditor: React.FC<UVEditorProps> = ({
       const pts=positions(face),selected=selectedFaceIds.includes(face.id),overlap=showOverlaps&&overlaps.has(face.id),d=distortion.get(face.id)||0;
       ctx.beginPath();pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();
       if(showDistortion){
-        const strength=Math.min(1,Math.abs(d)/2);ctx.fillStyle=d>0?`rgba(239,68,68,${.18+.48*strength})`:`rgba(59,130,246,${.18+.48*strength})`;
-      }else ctx.fillStyle=overlap?'rgba(244,63,94,.52)':selected?'rgba(34,211,238,.22)':'rgba(56,189,248,.06)';
+        const strength=Math.min(1,Math.abs(d)/2);ctx.fillStyle=d>0?`rgba(236,91,98,${.18+.48*strength})`:`rgba(45,157,120,${.18+.48*strength})`;
+      }else ctx.fillStyle=overlap?'rgba(236,91,98,.45)':selected?'rgba(237,115,0,.28)':'rgba(255,255,255,.04)';
       ctx.fill();
       // Perforated (dashed) face borders — stronger dash on selection
-      ctx.strokeStyle=overlap?'#fb7185':selected?'#ed7300':'#666666';
+      ctx.strokeStyle=overlap?'#ec5b62':selected?'#ed7300':'#7a7a7a';
       ctx.lineWidth=selected?2.4:1.25;
       ctx.setLineDash(selected ? [5, 4] : [3, 3]);
       ctx.stroke();
       ctx.setLineDash([]);
       if(showLabels&&v.scale>100){
         const cx=pts.reduce((n,p)=>n+p.x,0)/pts.length,cy=pts.reduce((n,p)=>n+p.y,0)/pts.length;
-        ctx.fillStyle=selected?'#ecfeff':'#94a3b8';ctx.font='10px monospace';ctx.textAlign='center';ctx.fillText(`${index+1}`,cx,cy+3);
+        ctx.fillStyle=selected?'#ffffff':'#aaaaaa';ctx.font='10px monospace';ctx.textAlign='center';ctx.fillText(`${index+1}`,cx,cy+3);
       }
     });
     topology.edges.forEach(edge=>{
       const a=uvToScreen(getPosition(edge.cornerA)),b=uvToScreen(getPosition(edge.cornerB)),selected=selectedUvEdges.has(edge.id);
       ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
-      ctx.strokeStyle=selected?'#facc15':edge.seam?'#f472b6':edge.boundary?'#cbd5e1':'#64748b';
+      ctx.strokeStyle=selected?'#ff9a3c':edge.seam?'#ec5b62':edge.boundary?'#cccccc':'#666666';
       ctx.lineWidth=selected?3:edge.seam||edge.boundary?2:1;ctx.setLineDash(edge.seam?[5,3]:[]);ctx.stroke();ctx.setLineDash([]);
     });
     if(mode==='vertex')topology.vertices.forEach(vertex=>{
       const p=uvToScreen(getPosition(vertex.id)),selected=selectedUvVertices.has(vertex.id);
-      ctx.beginPath();ctx.arc(p.x,p.y,selected?5:3.5,0,Math.PI*2);ctx.fillStyle=selected?'#fde047':vertex.pinned?'#f472b6':'#e2e8f0';ctx.fill();ctx.strokeStyle='#0f172a';ctx.lineWidth=1.5;ctx.stroke();
-      if(vertex.pinned){ctx.fillStyle='#fce7f3';ctx.font='9px sans-serif';ctx.fillText('•',p.x,p.y+3)}
+      ctx.beginPath();ctx.arc(p.x,p.y,selected?5:3.5,0,Math.PI*2);ctx.fillStyle=selected?'#ed7300':vertex.pinned?'#ec5b62':'#e6e6e6';ctx.fill();ctx.strokeStyle='#1a1a1a';ctx.lineWidth=1.5;ctx.stroke();
+      if(vertex.pinned){ctx.fillStyle='#ffb0b0';ctx.font='9px sans-serif';ctx.fillText('•',p.x,p.y+3)}
     });
 
-    // Blockbench-style transform gizmo on the UV selection
+    // Transform gizmo on the UV selection
     const gizmo = getSelectionGizmo();
     if (gizmo && (mode === 'face' || mode === 'island' || selectedFaceIds.length > 0 || selectedUvVertices.size > 0)) {
       const { minX, minY, maxX, maxY, cx, cy, corners, rotateHandle } = gizmo;
@@ -717,31 +751,31 @@ export const UVEditor: React.FC<UVEditorProps> = ({
       ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
       ctx.setLineDash([]);
 
-      // Rotation stem + handle (like Blockbench)
+      // Rotation stem + handle
       ctx.beginPath();
       ctx.moveTo(cx, minY);
       ctx.lineTo(rotateHandle.x, rotateHandle.y);
-      ctx.strokeStyle = '#fbbf24';
+      ctx.strokeStyle = '#ff9a3c';
       ctx.lineWidth = 1.5;
       ctx.stroke();
       ctx.beginPath();
       ctx.arc(rotateHandle.x, rotateHandle.y, HANDLE_R, 0, Math.PI * 2);
-      ctx.fillStyle = transform === 'rotate' ? '#fbbf24' : '#fde68a';
+      ctx.fillStyle = transform === 'rotate' ? '#ed7300' : '#ff9a3c';
       ctx.fill();
-      ctx.strokeStyle = '#78350f';
+      ctx.strokeStyle = '#1a1a1a';
       ctx.lineWidth = 1.5;
       ctx.stroke();
       // Small rotate glyph
       ctx.beginPath();
       ctx.arc(rotateHandle.x, rotateHandle.y, 3, -0.8, Math.PI * 1.2);
-      ctx.strokeStyle = '#78350f';
+      ctx.strokeStyle = '#1a1a1a';
       ctx.lineWidth = 1.2;
       ctx.stroke();
 
       // Corner scale handles
       corners.forEach((c) => {
-        ctx.fillStyle = transform === 'scale' ? '#ed7300' : '#ffb366';
-        ctx.strokeStyle = '#0c4a6e';
+        ctx.fillStyle = transform === 'scale' ? '#ed7300' : '#ff9a3c';
+        ctx.strokeStyle = '#1a1a1a';
         ctx.lineWidth = 1.5;
         ctx.fillRect(c.x - HANDLE_R / 2, c.y - HANDLE_R / 2, HANDLE_R, HANDLE_R);
         ctx.strokeRect(c.x - HANDLE_R / 2, c.y - HANDLE_R / 2, HANDLE_R, HANDLE_R);
@@ -756,7 +790,7 @@ export const UVEditor: React.FC<UVEditorProps> = ({
       ctx.closePath();
       ctx.fillStyle = transform === 'move' ? '#ed7300' : '#ff9a3c';
       ctx.fill();
-      ctx.strokeStyle = '#164e63';
+      ctx.strokeStyle = '#1a1a1a';
       ctx.lineWidth = 1.5;
       ctx.stroke();
       ctx.restore();
@@ -958,11 +992,19 @@ export const UVEditor: React.FC<UVEditorProps> = ({
             ))}
           </div>
         </details>
+        <button
+          type="button"
+          className={toolButton()}
+          title="Load an image as the mesh texture"
+          onClick={() => openImagePicker('texture')}
+        >
+          <ImagePlus size={12} /> Load Image
+        </button>
         <details className="relative">
           <summary className={`${toolButton(editReferenceImage)} list-none cursor-pointer`}><ImagePlus size={12} /> Ref</summary>
           <div className={`${menuClass} w-48`} onClick={closeMenuAfterAction}>
-            <button type="button" className="uv-menu-item" onClick={() => { imageImportModeRef.current = 'texture'; imageInputRef.current?.click(); }}>Import mesh texture…</button>
-            <button type="button" className="uv-menu-item" onClick={() => { imageImportModeRef.current = 'reference'; imageInputRef.current?.click(); }}>Import reference…</button>
+            <button type="button" className="uv-menu-item" onClick={(e) => { e.stopPropagation(); openImagePicker('texture'); }}>Import mesh texture…</button>
+            <button type="button" className="uv-menu-item" onClick={(e) => { e.stopPropagation(); openImagePicker('reference'); }}>Import reference…</button>
             {referenceLayer && (
               <>
                 <div className="uv-menu-hint truncate" title={referenceLayer.name}>{referenceLayer.name}</div>
@@ -992,8 +1034,6 @@ export const UVEditor: React.FC<UVEditorProps> = ({
           </div>
         </details>
       </div>
-
-      <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={(e) => { importImage(e.target.files?.[0]); e.currentTarget.value = ''; }} />
 
       <div className="flex-1 min-h-0 flex">
         <div ref={hostRef} className="uv-stage flex-1 min-w-0 relative overflow-hidden">

@@ -9,6 +9,7 @@ import type {
   SceneSelection,
   ToolState,
   RenderSettings,
+  WorkspaceMode,
 } from '../types/cad';
 import type { KnifeHit } from '../utils/meshCutTools';
 
@@ -52,6 +53,9 @@ interface QuadViewportProps {
   setEnvironment?: (env: EnvironmentSettings | ((prev: EnvironmentSettings) => EnvironmentSettings)) => void;
   sceneSelection?: SceneSelection | null;
   setSceneSelection?: (sel: SceneSelection | null) => void;
+  activeWorkspaceMode?: WorkspaceMode;
+  /** `blockout` = Front | Side | Perspective (matches Vector Blockout reference). */
+  layout?: 'quad' | 'blockout';
 }
 
 export const QuadViewport: React.FC<QuadViewportProps> = ({
@@ -91,11 +95,14 @@ export const QuadViewport: React.FC<QuadViewportProps> = ({
   setEnvironment,
   sceneSelection,
   setSceneSelection,
+  activeWorkspaceMode,
+  layout = 'quad',
 }) => {
-  const [splitRatioX, setSplitRatioX] = useState<number>(50);
+  const [splitRatioX, setSplitRatioX] = useState<number>(layout === 'blockout' ? 33.33 : 50);
   const [splitRatioY, setSplitRatioY] = useState<number>(50);
   const [isResizing, setIsResizing] = useState<boolean>(false);
   const maximizedPane: PaneId | null = null;
+  const isBlockoutLayout = layout === 'blockout';
 
   const handlePointerDownSplitter = (e: React.PointerEvent<HTMLDivElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -161,9 +168,25 @@ export const QuadViewport: React.FC<QuadViewportProps> = ({
     setEnvironment,
     sceneSelection,
     setSceneSelection,
+    activeWorkspaceMode,
   };
 
-  return (
+  return isBlockoutLayout ? (
+    <div
+      className="relative w-full h-full grid gap-px bg-[#0a0a0a]"
+      style={{ gridTemplateColumns: '1fr 1fr 1.15fr', gridTemplateRows: '1fr' }}
+    >
+      <div className="relative min-h-0 min-w-0 overflow-hidden border border-[#222]">
+        <Viewport3D {...shared} cameraType="front" />
+      </div>
+      <div className="relative min-h-0 min-w-0 overflow-hidden border border-[#222]">
+        <Viewport3D {...shared} cameraType="side" />
+      </div>
+      <div className="relative min-h-0 min-w-0 overflow-hidden border border-[#222]">
+        <Viewport3D {...shared} cameraType="perspective" />
+      </div>
+    </div>
+  ) : (
     <div
       className="relative w-full h-full grid gap-px bg-[#0a0a0a]"
       style={{

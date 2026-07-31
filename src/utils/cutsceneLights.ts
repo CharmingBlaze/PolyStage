@@ -242,7 +242,7 @@ export function applyLiveLightProps(light: THREE.Light, partial: Partial<CADLigh
 /** Build a selectable viewport gizmo for a CAD light. */
 export function createCadLightHelper(L: CADLight, selected: boolean): THREE.Group {
   const helper = new THREE.Group();
-  const color = new THREE.Color(selected ? '#ffffff' : L.color || '#fff5e6');
+  const color = new THREE.Color(selected ? '#ed7300' : L.color || '#fff5e6');
   const mat = new THREE.MeshBasicMaterial({
     color,
     depthTest: false,
@@ -256,7 +256,7 @@ export function createCadLightHelper(L: CADLight, selected: boolean): THREE.Grou
     helper.add(cone);
     const shaft = new THREE.Mesh(
       new THREE.CylinderGeometry(0.02, 0.02, 0.55, 6),
-      new THREE.MeshBasicMaterial({ color: selected ? 0xffffff : 0xffcc66, depthTest: false }),
+      new THREE.MeshBasicMaterial({ color: selected ? 0xed7300 : 0xff9a3c, depthTest: false }),
     );
     shaft.position.y = -0.35;
     helper.add(shaft);
@@ -289,7 +289,7 @@ export function createCadLightHelper(L: CADLight, selected: boolean): THREE.Grou
     helper.add(plane);
     const frame = new THREE.LineSegments(
       new THREE.EdgesGeometry(new THREE.PlaneGeometry(Math.min(2.5, width * 0.35), Math.min(2.5, height * 0.35))),
-      new THREE.LineBasicMaterial({ color: selected ? 0xffffff : 0xffcc66 }),
+      new THREE.LineBasicMaterial({ color: selected ? 0xed7300 : 0xff9a3c }),
     );
     helper.add(frame);
   } else {

@@ -60,6 +60,7 @@ interface OutlinerPanelProps {
   onSpawnPrimitive: (type: any) => void;
   onDeleteMesh: (id: string) => void;
   onDuplicateMesh?: (id: string) => void;
+  onSeparateMesh?: (id: string) => void;
   cameras?: CADCamera[];
   setCameras?: React.Dispatch<React.SetStateAction<CADCamera[]>>;
   lights?: CADLight[];
@@ -93,6 +94,7 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
   onSpawnPrimitive,
   onDeleteMesh,
   onDuplicateMesh,
+  onSeparateMesh,
   cameras = [],
   setCameras,
   lights = [],
@@ -321,6 +323,10 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
     setSelectedMeshIds?.([dupId]);
   };
 
+  const handleSeparate = (meshToSep: CADMesh) => {
+    onSeparateMesh?.(meshToSep.id);
+  };
+
   // Inline Renaming handlers
   const handleStartRename = (id: string, currentName: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -491,6 +497,19 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
           >
             <Copy className="w-3 h-3" />
           </button>
+
+          {onSeparateMesh && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleSeparate(m);
+              }}
+              className="p-1 hover:bg-[#404040] rounded text-[#8c8c8c] hover:text-amber-400"
+              title="Separate loose parts (P)"
+            >
+              <Unlink className="w-3 h-3" />
+            </button>
+          )}
 
           {/* Lock / Unlock Toggle */}
           <button

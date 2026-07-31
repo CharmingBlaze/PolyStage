@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { applyStandardOrbitMouseButtons, bindBlockbenchOrbitModifiers } from '../utils/viewportNav';
+import { applyThemedTransformGizmo, VIEWPORT_THEME } from '../utils/viewportTheme';
 import {
   Play, Pause, RotateCcw, Film, Camera, CloudRain, Sparkles, Plus, Video, Eye, Download,
   Key, Move, RotateCw, Maximize2, Minimize2, Trash2, ChevronRight, ChevronDown, ChevronUp, Minus, Layers, Bone,
@@ -518,7 +519,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
       if (!joint) {
         joint = new THREE.Mesh(
           new THREE.SphereGeometry(0.08, 10, 8),
-          new THREE.MeshBasicMaterial({ color: bone.color || 0x2680eb, depthTest: false }),
+          new THREE.MeshBasicMaterial({ color: bone.color || VIEWPORT_THEME.boneIdle, depthTest: false }),
         );
         joint.renderOrder = 20;
         joint.userData = { animTarget: 'bone', targetId: bone.id };
@@ -526,7 +527,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
         boneCache.set(bone.id, joint);
       }
       const mat = joint.material as THREE.MeshBasicMaterial;
-      mat.color.set(bone.id === ctx.editId && ctx.editKind === 'bone' ? 0xffffff : (bone.color || 0x2680eb));
+      mat.color.set(bone.id === ctx.editId && ctx.editKind === 'bone' ? 0xffffff : (bone.color || VIEWPORT_THEME.boneIdle));
       const skipBone =
         (gizmoDraggingRef.current || Boolean(modalTransformRef.current)) &&
         ctx.editKind === 'bone' &&
@@ -577,7 +578,9 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
       }
       helper.visible = true;
       const body = helper.children[0] as THREE.Mesh;
-      (body.material as THREE.MeshBasicMaterial).color.set(cam.id === posedActive?.id ? 0x1473e6 : 0x888888);
+      (body.material as THREE.MeshBasicMaterial).color.set(
+        cam.id === posedActive?.id ? VIEWPORT_THEME.cameraSelected : VIEWPORT_THEME.cameraIdle,
+      );
       const skipCam =
         (gizmoDraggingRef.current || Boolean(modalTransformRef.current)) &&
         ctx.editKind === 'camera' &&
@@ -935,7 +938,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
     sun.shadow.mapSize.set(1024, 1024);
     sunRef.current = sun;
     scene.add(sun);
-    const grid = new THREE.GridHelper(12, 24, 0x2680eb, 0x2a3140);
+    const grid = new THREE.GridHelper(12, 24, VIEWPORT_THEME.gridMajor, VIEWPORT_THEME.gridMinor);
     gridHelperRef.current = grid;
     scene.add(grid);
 
@@ -970,6 +973,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
 
     const tc = new TransformControls(freeCam, renderer.domElement);
     tc.setSize(0.85);
+    applyThemedTransformGizmo(tc);
     transformControlsRef.current = tc;
     tc.addEventListener('dragging-changed', (event) => {
       const dragging = !!event.value;
