@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
-import { applyStandardOrbitMouseButtons, bindBlockbenchOrbitModifiers } from '../utils/viewportNav';
+import { applyStandardOrbitMouseButtons, bindBlockbenchOrbitModifiers, panCameraInScreenSpace } from '../utils/viewportNav';
 import { applyThemedTransformGizmo, VIEWPORT_THEME } from '../utils/viewportTheme';
 import {
   Play, Pause, RotateCcw, Film, Camera, CloudRain, Sparkles, Plus, Video, Eye, Download,
@@ -1956,13 +1956,21 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
     controls.update();
   };
 
-  const handleLightwaveDragPan = (deltaX: number, deltaY: number) => {
+  const handleLightwaveDragPan = (
+    deltaX: number,
+    deltaY: number,
+    _button: 0 | 2,
+    shiftKey: boolean,
+  ) => {
     if (!controlsRef.current || !freeCamRef.current || cameraView) return;
-    const factor = 0.01;
-    controlsRef.current.target.x -= deltaX * factor;
-    controlsRef.current.target.y += deltaY * factor;
-    freeCamRef.current.position.x -= deltaX * factor;
-    freeCamRef.current.position.y += deltaY * factor;
+    panCameraInScreenSpace(
+      freeCamRef.current,
+      controlsRef.current.target,
+      deltaX,
+      deltaY,
+      containerRef.current?.clientHeight || 720,
+      shiftKey,
+    );
     controlsRef.current.update();
   };
 

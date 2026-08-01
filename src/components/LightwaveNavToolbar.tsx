@@ -15,7 +15,7 @@ interface LightwaveNavToolbarProps {
   toolState?: Pick<ToolState, 'viewportLayout'> | ToolState;
   setToolState?: React.Dispatch<React.SetStateAction<ToolState>>;
   onFocusCenter?: () => void;
-  /** LightWave Move: ortho = screen pan; perspective LMB = X + dolly, RMB = vertical */
+  /** LightWave Move: drag the camera view in screen space without dollying. */
   onDragPan?: (deltaX: number, deltaY: number, button: LightwaveNavButton, shiftKey: boolean) => void;
   /** LightWave Rotate: LMB = heading + pitch; RMB = bank; Ctrl snaps 15° */
   onDragOrbit?: (deltaX: number, deltaY: number, button: LightwaveNavButton, ctrlKey: boolean) => void;
@@ -31,6 +31,8 @@ interface LightwaveNavToolbarProps {
   compact?: boolean;
   /** Title for maximize button when custom onMaximize is provided. */
   maximizeTitle?: string;
+  /** Blockout uses top-right so its bottom dock never covers navigation. */
+  placement?: 'bottom-right' | 'top-right';
 }
 
 export const LightwaveNavToolbar: React.FC<LightwaveNavToolbarProps> = ({
@@ -45,6 +47,7 @@ export const LightwaveNavToolbar: React.FC<LightwaveNavToolbarProps> = ({
   isMaximized = false,
   compact = false,
   maximizeTitle,
+  placement = 'bottom-right',
 }) => {
   const [activeDragTool, setActiveDragTool] = useState<'pan' | 'orbit' | 'zoom' | null>(null);
   const buttonRef = useRef<LightwaveNavButton>(0);
@@ -68,6 +71,7 @@ export const LightwaveNavToolbar: React.FC<LightwaveNavToolbarProps> = ({
   ) => {
     if (e.button !== 0 && e.button !== 2) return;
     e.preventDefault();
+    e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
     setActiveDragTool(tool);
     buttonRef.current = e.button === 2 ? 2 : 0;
@@ -80,6 +84,8 @@ export const LightwaveNavToolbar: React.FC<LightwaveNavToolbarProps> = ({
 
   const handlePointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (!activeDragTool || !lastPointerRef.current) return;
+    e.preventDefault();
+    e.stopPropagation();
     const deltaX = e.clientX - lastPointerRef.current.x;
     const deltaY = e.clientY - lastPointerRef.current.y;
     lastPointerRef.current = { x: e.clientX, y: e.clientY };
@@ -96,6 +102,8 @@ export const LightwaveNavToolbar: React.FC<LightwaveNavToolbarProps> = ({
 
   const handlePointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (!activeDragTool) return;
+    e.preventDefault();
+    e.stopPropagation();
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {
@@ -108,19 +116,33 @@ export const LightwaveNavToolbar: React.FC<LightwaveNavToolbarProps> = ({
 
   const maximizeActive =
     isMaximized || (toolState?.viewportLayout === 'quad' && !onMaximize);
+  const placementClass =
+    placement === 'top-right'
+      ? compact
+        ? 'top-1.5 right-1.5'
+        : 'top-3 right-3'
+      : compact
+        ? 'bottom-1.5 right-1.5'
+        : 'bottom-3 right-3';
 
   return (
     <div
-      className={`absolute z-30 flex items-center shadow-2xl rounded font-mono select-none transition-all ${
+      className={`lightwave-nav-toolbar absolute z-30 flex items-center shadow-2xl rounded font-mono select-none transition-all ${
+        placementClass
+      } ${
         showOrbit
           ? compact
-            ? 'bottom-1.5 right-1.5 p-0.5 bg-[#1a1a1a]/95 backdrop-blur border border-[#ed7300]/50 shadow-[#ed7300]/10'
-            : 'bottom-3 right-3 p-0.5 bg-[#222222] border border-[#ed7300]/60 shadow-2xl'
+            ? 'p-0.5 bg-[#1a1a1a]/95 backdrop-blur border border-[#ed7300]/50 shadow-[#ed7300]/10'
+            : 'p-0.5 bg-[#222222] border border-[#ed7300]/60 shadow-2xl'
           : compact
-            ? 'bottom-1.5 right-1.5 p-0.5 bg-[#3a3a3a]/90 backdrop-blur border border-[#333333]'
-            : 'bottom-3 right-3 p-0.5 bg-[#2a2a2a] border border-[#4d4d4d]'
+            ? 'p-0.5 bg-[#3a3a3a]/90 backdrop-blur border border-[#333333]'
+            : 'p-0.5 bg-[#2a2a2a] border border-[#4d4d4d]'
       }`}
-      onContextMenu={(e) => e.preventDefault()}
+      onPointerDown={(e) => e.stopPropagation()}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
     >
       <button
         type="button"
@@ -146,7 +168,7 @@ export const LightwaveNavToolbar: React.FC<LightwaveNavToolbarProps> = ({
         }`}
         title={
           showOrbit
-            ? 'Move — LMB: pan X + dolly · RMB: pan Y (Shift = fine)'
+            ? 'Move — drag the camera view (Shift = fine)'
             : 'Move — drag to pan (Shift = fine)'
         }
       >

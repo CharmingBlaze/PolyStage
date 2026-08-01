@@ -53,6 +53,40 @@ export function applyPaintOrbitMouseButtons(controls: OrbitControls | null | und
 }
 
 /**
+ * Translate a camera and its orbit target together in camera screen space.
+ * The camera→target offset never changes, so this is a true view drag—not a dolly.
+ */
+export function panCameraInScreenSpace(
+  camera: THREE.Camera,
+  target: THREE.Vector3,
+  deltaX: number,
+  deltaY: number,
+  viewportHeight: number,
+  shiftKey = false,
+) {
+  camera.updateMatrixWorld();
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
+  const height = Math.max(1, viewportHeight);
+  let worldPerPixel = 0.01;
+
+  if (camera instanceof THREE.PerspectiveCamera) {
+    const distance = Math.max(0.001, camera.position.distanceTo(target));
+    worldPerPixel =
+      (2 * distance * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)) / height;
+  } else if (camera instanceof THREE.OrthographicCamera) {
+    worldPerPixel = Math.abs(camera.top - camera.bottom) / Math.max(0.001, camera.zoom) / height;
+  }
+
+  if (shiftKey) worldPerPixel *= 0.25;
+  const translation = right
+    .multiplyScalar(-deltaX * worldPerPixel)
+    .add(up.multiplyScalar(deltaY * worldPerPixel));
+  camera.position.add(translation);
+  target.add(translation);
+}
+
+/**
  * Blockout pen / modes where LMB is always a draw tool (never orbit).
  * Ortho drafting views also map MMB → pan (CAD-style); wheel still zooms.
  */

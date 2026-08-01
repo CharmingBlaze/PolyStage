@@ -106,6 +106,15 @@ export interface TextureClipKey {
 export interface CADMesh {
   id: string;
   name: string;
+  /** Stable source link used by non-destructive Vector Blockout rebuilds. */
+  blockoutPartId?: string;
+  blockoutRevision?: number;
+  /** Last transform authored by Blockout; used to preserve later manual Model moves. */
+  blockoutTransform?: {
+    position: Vector3D;
+    rotation: Vector3D;
+    scale: Vector3D;
+  };
   groupId?: string | null;
   boneId?: string | null;
   position: Vector3D;

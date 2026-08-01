@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { applyStandardOrbitMouseButtons, applyPaintOrbitMouseButtons, applyDrawToolOrbitMouseButtons, bindBlockbenchOrbitModifiers, STANDARD_NAV_HINT, PAINT_NAV_HINT } from '../utils/viewportNav';
+import { applyStandardOrbitMouseButtons, applyPaintOrbitMouseButtons, applyDrawToolOrbitMouseButtons, bindBlockbenchOrbitModifiers, panCameraInScreenSpace, STANDARD_NAV_HINT, PAINT_NAV_HINT } from '../utils/viewportNav';
 import { applyThemedTransformGizmo, VIEWPORT_THEME } from '../utils/viewportTheme';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import type { CADMesh, CADBone, CADCamera, CADLight, ParticleEmitter, EnvironmentSettings, ToolState, RenderSettings, PrimitiveType, SceneSelection, Vector3D, WorkspaceMode } from '../types/cad';
@@ -44,7 +44,11 @@ import {
 } from '../utils/vectorViewportRegistry';
 import { useVectorStore } from '../store/useVectorStore';
 import {
+  applyVectorSectionEdits,
   combineVectorMeshes,
+  resolveVectorPartTransform,
+  transformVectorSnapshot,
+  vectorPrimitiveToMesh,
   vectorPathsToMesh,
   vectorSnapshotToCADMesh,
 } from '../utils/vectorBlockout';
@@ -84,6 +88,8 @@ interface Viewport3DProps {
   onSpawnDrawnPrimitive?: (newMesh: CADMesh) => void;
   onOpenUVModal?: () => void;
   isQuadSubViewport?: boolean;
+  onMaximizeViewport?: () => void;
+  isViewportMaximized?: boolean;
   onModalMeshPreview?: (amount: number) => void;
   onModalMeshConfirm?: () => void;
   onModalMeshCancel?: () => void;
@@ -131,6 +137,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   onSpawnDrawnPrimitive,
   onOpenUVModal,
   isQuadSubViewport = false,
+  onMaximizeViewport,
+  isViewportMaximized = false,
   onModalMeshPreview,
   onModalMeshConfirm,
   onModalMeshCancel,
@@ -810,6 +818,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
       const store = useVectorStore.getState();
       const hasClosed = store.parts.some((part) => {
+        if (part.hidden) return false;
+        if (part.kind === 'primitive') return true;
         const paths = part.id === store.activePartId ? store.paths : part.paths;
         return paths.front.closed || paths.side.closed || paths.top.closed;
       });
@@ -844,16 +854,25 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         part.id === store.activePartId ? { ...part, paths: store.paths } : part
       );
       const generated = buildParts
-        .map((part) =>
-          vectorPathsToMesh(
-            part.paths.front.closed ? part.paths.front : null,
-            part.paths.side.closed ? part.paths.side : null,
-            store.verticalSegments,
-            store.radialSegments,
-            part.paths.top.closed ? part.paths.top : null,
-            { thickness: store.thickness, gameTopology: true, capStyle: store.capStyle, taperThickness: true, roundness: store.roundness }
-          )
-        )
+        .filter((part) => !part.hidden)
+        .map((part) => {
+          const base = part.kind === 'primitive' && part.primitive
+            ? vectorPrimitiveToMesh(part.primitive)
+            : vectorPathsToMesh(
+                part.paths.front.closed ? part.paths.front : null,
+                part.paths.side.closed ? part.paths.side : null,
+                store.verticalSegments,
+                store.radialSegments,
+                part.paths.top.closed ? part.paths.top : null,
+                { thickness: store.thickness, gameTopology: true, capStyle: store.capStyle, taperThickness: true, roundness: store.roundness }
+              );
+          return base
+            ? transformVectorSnapshot(
+                applyVectorSectionEdits(base, part.sections || []),
+                resolveVectorPartTransform(part, buildParts),
+              )
+            : null;
+        })
         .filter((mesh): mesh is NonNullable<typeof mesh> => !!mesh);
 
       while (g.children.length) {
@@ -882,6 +901,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         depthWrite: false,
       });
       const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(cad.position.x, cad.position.y, cad.position.z);
+      mesh.rotation.set(cad.rotation.x, cad.rotation.y, cad.rotation.z);
+      mesh.scale.set(cad.scale.x, cad.scale.y, cad.scale.z);
       mesh.renderOrder = 1;
       g.add(mesh);
 
@@ -892,8 +914,40 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         depthWrite: false,
       });
       const wire = new THREE.LineSegments(buildLogicalEdgeGeometry(cad), wireMat);
+      wire.position.copy(mesh.position);
+      wire.rotation.copy(mesh.rotation);
+      wire.scale.copy(mesh.scale);
       wire.renderOrder = 2;
       g.add(wire);
+
+      const activePart = buildParts.find((part) => part.id === store.activePartId);
+      if (activePart?.sections?.length && snapshot.vertices.length) {
+        const xs = snapshot.vertices.map((v) => v.x);
+        const ys = snapshot.vertices.map((v) => v.y);
+        const zs = snapshot.vertices.map((v) => v.z);
+        const minX = Math.min(...xs), maxX = Math.max(...xs);
+        const minY = Math.min(...ys), maxY = Math.max(...ys);
+        const minZ = Math.min(...zs), maxZ = Math.max(...zs);
+        activePart.sections.forEach((section) => {
+          const y = minY + (maxY - minY) * section.t;
+          const points = [
+            new THREE.Vector3(minX, y, minZ),
+            new THREE.Vector3(maxX, y, minZ),
+            new THREE.Vector3(maxX, y, maxZ),
+            new THREE.Vector3(minX, y, maxZ),
+          ];
+          const ringGeo = new THREE.BufferGeometry().setFromPoints(points);
+          const ringMat = new THREE.LineBasicMaterial({
+            color: 0xff9a3c,
+            transparent: true,
+            opacity: 0.95,
+            depthTest: false,
+          });
+          const ring = new THREE.LineLoop(ringGeo, ringMat);
+          ring.renderOrder = 4;
+          g.add(ring);
+        });
+      }
       g.visible = true;
     };
 
@@ -2424,13 +2478,21 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   ]);
 
   // LightWave Interactive Drag Navigation Handlers
-  const handleLightwaveDragPan = (deltaX: number, deltaY: number) => {
+  const handleLightwaveDragPan = (
+    deltaX: number,
+    deltaY: number,
+    _button: 0 | 2,
+    shiftKey: boolean,
+  ) => {
     if (!controlsRef.current || !cameraRef.current) return;
-    const factor = 0.01;
-    controlsRef.current.target.x -= deltaX * factor;
-    controlsRef.current.target.y += deltaY * factor;
-    cameraRef.current.position.x -= deltaX * factor;
-    cameraRef.current.position.y += deltaY * factor;
+    panCameraInScreenSpace(
+      cameraRef.current,
+      controlsRef.current.target,
+      deltaX,
+      deltaY,
+      containerRef.current?.clientHeight || 720,
+      shiftKey,
+    );
     controlsRef.current.update();
   };
 
@@ -4570,19 +4632,21 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         </div>
       )}
 
-      {/* LightWave 3D Interactive Bottom-Right Navigation & Pen/Laptop Toolbar */}
-      {!isBlockout && (
-        <LightwaveNavToolbar
-          toolState={toolState}
-          setToolState={setToolState}
-          onFocusCenter={handleFocusCenter}
-          onDragPan={handleLightwaveDragPan}
-          onDragOrbit={handleLightwaveDragOrbit}
-          onDragZoom={handleLightwaveDragZoom}
-          showOrbit={cameraType === 'perspective'}
-          compact={isQuadSubViewport}
-        />
-      )}
+      {/* LightWave navigation is available in every Model and Blockout viewport. */}
+      <LightwaveNavToolbar
+        toolState={toolState}
+        setToolState={setToolState}
+        onFocusCenter={handleFocusCenter}
+        onDragPan={handleLightwaveDragPan}
+        onDragOrbit={handleLightwaveDragOrbit}
+        onDragZoom={handleLightwaveDragZoom}
+        onMaximize={onMaximizeViewport}
+        isMaximized={isViewportMaximized}
+        maximizeTitle={isViewportMaximized ? 'Restore all viewports' : 'Maximize this viewport'}
+        showOrbit={cameraType === 'perspective'}
+        compact={isQuadSubViewport && !isViewportMaximized}
+        placement={isBlockout ? 'top-right' : 'bottom-right'}
+      />
 
       {!isQuadSubViewport && (
         <div className="absolute bottom-2 left-2 cad-card px-3 py-1 text-[10px] font-mono flex items-center gap-3 bg-[#262626] border-[#4d4d4d]">

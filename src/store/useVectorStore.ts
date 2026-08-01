@@ -5,9 +5,14 @@ import type {
   VectorCapStyle,
   VectorPlane,
   VectorPoint,
+  VectorPartTransform,
+  VectorPrimitive,
+  VectorPrimitiveType,
+  VectorSectionEdit,
 } from '../utils/vectorBlockout';
 import {
   DEFAULT_BLOCKOUT_THICKNESS,
+  DEFAULT_VECTOR_PART_TRANSFORM,
   buildCompanionCagePath,
   closestPointOnPath,
   evenRadialSegments,
@@ -26,6 +31,13 @@ export type VectorPart = {
   id: string;
   name: string;
   paths: Record<VectorPlane, BezierPath>;
+  kind?: 'silhouette' | 'primitive';
+  primitive?: VectorPrimitive;
+  transform?: VectorPartTransform;
+  sections?: VectorSectionEdit[];
+  parentId?: string | null;
+  hidden?: boolean;
+  mirroredFromId?: string | null;
 };
 export type VectorRefPlaneId = 'front' | 'side';
 export type VectorRefTool = 'none' | 'move' | 'scale';
@@ -43,6 +55,9 @@ export type VectorRefImage = {
   offsetV: number;
   /** When true, move/scale tools cannot change this plane. */
   locked: boolean;
+  /** Optional user-entered real-world length for the image's longest edge. */
+  calibrationLength?: number;
+  calibrationUnit?: string;
 };
 type VectorSnapshot = {
   paths: Record<VectorPlane, BezierPath>;
@@ -103,9 +118,15 @@ type VectorStore = {
   /** Seed Front width or Side depth polygon from the other closed silhouette. */
   seedCompanionCage: (target: 'front' | 'side') => boolean;
   addPart: () => void;
+  addPrimitivePart: (type: VectorPrimitiveType) => void;
   duplicatePart: () => void;
+  mirrorPart: () => void;
   deletePart: () => void;
   renamePart: (name: string) => void;
+  patchActivePart: (patch: Partial<Omit<VectorPart, 'id' | 'paths'>>) => void;
+  addSection: () => void;
+  patchSection: (id: string, patch: Partial<VectorSectionEdit>) => void;
+  deleteSection: (id: string) => void;
   setActivePart: (id: string) => void;
   setSelected: (selected: SelectedPoint) => void;
   /** Replace or add (Shift) a marquee / multi point selection on one plane. */
@@ -184,7 +205,23 @@ const clonePaths = (
   top: paths.top ? clonePath(paths.top) : makePath('top'),
 });
 const cloneParts = (parts: VectorPart[]): VectorPart[] =>
-  parts.map((part) => ({ ...part, paths: clonePaths(part.paths) }));
+  parts.map((part) => ({
+    ...part,
+    paths: clonePaths(part.paths),
+    primitive: part.primitive ? { ...part.primitive } : undefined,
+    transform: part.transform
+      ? {
+          position: { ...part.transform.position },
+          rotationY: part.transform.rotationY,
+          scale: { ...part.transform.scale },
+        }
+      : {
+          position: { ...DEFAULT_VECTOR_PART_TRANSFORM.position },
+          rotationY: 0,
+          scale: { ...DEFAULT_VECTOR_PART_TRANSFORM.scale },
+        },
+    sections: (part.sections || []).map((section) => ({ ...section })),
+  }));
 let partSerial = 1;
 const makePart = (name = 'Part 1'): VectorPart => {
   const id = `vector_part_${Date.now()}_${partSerial++}`;
@@ -196,6 +233,16 @@ const makePart = (name = 'Part 1'): VectorPart => {
       side: makePath('side'),
       top: makePath('top'),
     },
+    kind: 'silhouette',
+    transform: {
+      position: { ...DEFAULT_VECTOR_PART_TRANSFORM.position },
+      rotationY: 0,
+      scale: { ...DEFAULT_VECTOR_PART_TRANSFORM.scale },
+    },
+    sections: [],
+    parentId: null,
+    hidden: false,
+    mirroredFromId: null,
   };
 };
 const midpoint = (a: VectorPoint, b: VectorPoint): VectorPoint => ({
@@ -215,6 +262,26 @@ export const useVectorStore = create<VectorStore>((set, get) => {
         part.id === state.activePartId ? { ...part, paths: clonePaths(paths) } : part
       ),
     };
+  };
+  const withAutomaticCompanion = (
+    paths: Record<VectorPlane, BezierPath>,
+    sourcePlane: VectorPlane
+  ): Record<VectorPlane, BezierPath> => {
+    if (sourcePlane === 'top') return paths;
+    const targetPlane = sourcePlane === 'front' ? 'side' : 'front';
+    const source = paths[sourcePlane];
+    const target = paths[targetPlane];
+    if (!source.closed || source.anchors.length < 3 || target.closed || target.anchors.length) {
+      return paths;
+    }
+    const state = get();
+    const cage = buildCompanionCagePath(
+      source,
+      targetPlane,
+      Math.max(0.08, state.thickness / 2),
+      Math.max(4, Math.round(state.verticalSegments / 2))
+    );
+    return cage.anchors.length >= 4 ? { ...paths, [targetPlane]: cage } : paths;
   };
   const snapshot = (): VectorSnapshot => {
     const state = get();
@@ -328,7 +395,6 @@ export const useVectorStore = create<VectorStore>((set, get) => {
           ...get().paths,
           [target]: cage,
         }),
-        activePlane: target,
         ...selectionOf(target, [0]),
         mode: 'edit',
         pathStyle: 'polygon',
@@ -350,6 +416,28 @@ export const useVectorStore = create<VectorStore>((set, get) => {
         revision: get().revision + 1,
       });
     },
+    addPrimitivePart: (type) => {
+      checkpoint();
+      const label = type[0].toUpperCase() + type.slice(1);
+      const part = makePart(`${label} ${get().parts.length + 1}`);
+      part.kind = 'primitive';
+      part.primitive = {
+        type,
+        width: type === 'capsule' ? 0.8 : 1,
+        height: type === 'capsule' ? 2 : 1,
+        depth: type === 'wedge' ? 1.5 : 1,
+        sides: 12,
+      };
+      set({
+        parts: [...get().parts, part],
+        activePartId: part.id,
+        paths: clonePaths(part.paths),
+        ...clearSelection(),
+        activePlane: 'front',
+        mode: 'edit',
+        revision: get().revision + 1,
+      });
+    },
     duplicatePart: () => {
       const state = get();
       const source = state.parts.find((part) => part.id === state.activePartId);
@@ -357,12 +445,75 @@ export const useVectorStore = create<VectorStore>((set, get) => {
       checkpoint();
       const part = makePart(`${source.name} Copy`);
       part.paths = clonePaths(source.paths);
+      part.kind = source.kind || 'silhouette';
+      part.primitive = source.primitive ? { ...source.primitive } : undefined;
+      part.transform = source.transform
+        ? {
+            position: { ...source.transform.position, x: source.transform.position.x + 0.5 },
+            rotationY: source.transform.rotationY,
+            scale: { ...source.transform.scale },
+          }
+        : {
+            position: { x: 0.5, y: 0, z: 0 },
+            rotationY: 0,
+            scale: { x: 1, y: 1, z: 1 },
+          };
+      part.sections = (source.sections || []).map((section) => ({
+        ...section,
+        id: `section_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      }));
+      part.parentId = source.parentId || null;
       set({
         parts: [...get().parts, part],
         activePartId: part.id,
         paths: clonePaths(part.paths),
         ...clearSelection(),
         revision: get().revision + 1,
+      });
+    },
+    mirrorPart: () => {
+      const state = get();
+      const source = state.parts.find((part) => part.id === state.activePartId);
+      if (!source) return;
+      checkpoint();
+      const part = makePart(`${source.name} Mirrored`);
+      const mirrorPath = (path: BezierPath): BezierPath => ({
+        ...clonePath(path),
+        anchors: path.anchors
+          .map((anchor) => ({
+            point: { u: -anchor.point.u, v: anchor.point.v },
+            handleIn: { u: -anchor.handleIn.u, v: anchor.handleIn.v },
+            handleOut: { u: -anchor.handleOut.u, v: anchor.handleOut.v },
+          }))
+          .reverse(),
+      });
+      part.paths = {
+        front: mirrorPath(source.paths.front),
+        side: clonePath(source.paths.side),
+        top: mirrorPath(source.paths.top),
+      };
+      part.kind = source.kind || 'silhouette';
+      part.primitive = source.primitive ? { ...source.primitive } : undefined;
+      const transform = source.transform || DEFAULT_VECTOR_PART_TRANSFORM;
+      part.transform = {
+        position: { ...transform.position, x: -transform.position.x },
+        rotationY: -transform.rotationY,
+        scale: { ...transform.scale },
+      };
+      part.sections = (source.sections || []).map((section) => ({
+        ...section,
+        id: `section_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        offsetX: -section.offsetX,
+        twist: -section.twist,
+      }));
+      part.parentId = source.parentId || null;
+      part.mirroredFromId = source.id;
+      set({
+        parts: [...state.parts, part],
+        activePartId: part.id,
+        paths: clonePaths(part.paths),
+        ...clearSelection(),
+        revision: state.revision + 1,
       });
     },
     deletePart: () => {
@@ -388,6 +539,65 @@ export const useVectorStore = create<VectorStore>((set, get) => {
         parts: get().parts.map((part) =>
           part.id === get().activePartId ? { ...part, name: clean } : part
         ),
+      });
+    },
+    patchActivePart: (patch) => {
+      const state = get();
+      const cleanPatch = { ...patch };
+      if (cleanPatch.parentId === state.activePartId) cleanPatch.parentId = null;
+      set({
+        parts: state.parts.map((part) =>
+          part.id === state.activePartId ? { ...part, ...cleanPatch } : part
+        ),
+        revision: state.revision + 1,
+      });
+    },
+    addSection: () => {
+      const state = get();
+      const section: VectorSectionEdit = {
+        id: `section_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        t: 0.5,
+        width: 1,
+        depth: 1,
+        offsetX: 0,
+        offsetZ: 0,
+        twist: 0,
+        falloff: 0.3,
+      };
+      set({
+        parts: state.parts.map((part) =>
+          part.id === state.activePartId
+            ? { ...part, sections: [...(part.sections || []), section] }
+            : part
+        ),
+        revision: state.revision + 1,
+      });
+    },
+    patchSection: (id, patch) => {
+      const state = get();
+      set({
+        parts: state.parts.map((part) =>
+          part.id === state.activePartId
+            ? {
+                ...part,
+                sections: (part.sections || []).map((section) =>
+                  section.id === id ? { ...section, ...patch } : section
+                ),
+              }
+            : part
+        ),
+        revision: state.revision + 1,
+      });
+    },
+    deleteSection: (id) => {
+      const state = get();
+      set({
+        parts: state.parts.map((part) =>
+          part.id === state.activePartId
+            ? { ...part, sections: (part.sections || []).filter((section) => section.id !== id) }
+            : part
+        ),
+        revision: state.revision + 1,
       });
     },
     setActivePart: (activePartId) => {
@@ -434,8 +644,8 @@ export const useVectorStore = create<VectorStore>((set, get) => {
     setSnapSize: (snapSize) => set({ snapSize: Math.max(0.01, snapSize) }),
     setSegments: (verticalSegments, radialSegments) =>
       set({
-        verticalSegments: Math.max(3, Math.round(verticalSegments)),
-        radialSegments: evenRadialSegments(radialSegments, 4),
+        verticalSegments: Math.min(24, Math.max(3, Math.round(verticalSegments))),
+        radialSegments: Math.min(24, evenRadialSegments(radialSegments, 8)),
         revision: get().revision + 1,
       }),
     setThickness: (thickness) =>
@@ -649,11 +859,17 @@ export const useVectorStore = create<VectorStore>((set, get) => {
       const path = get().paths[plane];
       if (path.closed || path.anchors.length < 3) return;
       checkpoint();
+      const closedPaths = {
+        ...get().paths,
+        [plane]: { ...path, closed: true },
+      };
       set({
-        ...syncActivePaths({ ...get().paths, [plane]: { ...path, closed: true } }),
+        ...syncActivePaths(withAutomaticCompanion(closedPaths, plane)),
         ...clearSelection(),
         activePlane: plane,
         mode: 'edit',
+        mirrorWidth: true,
+        pointEditMode: 'symmetric',
         revision: get().revision + 1,
       });
     },
@@ -662,11 +878,21 @@ export const useVectorStore = create<VectorStore>((set, get) => {
       const path = get().paths[plane];
       if (!path.closed && path.anchors.length < 3) return;
       checkpoint();
+      const willClose = !path.closed;
+      const toggledPaths = {
+        ...get().paths,
+        [plane]: { ...path, closed: willClose },
+      };
       set({
-        ...syncActivePaths({ ...get().paths, [plane]: { ...path, closed: !path.closed } }),
+        ...syncActivePaths(
+          willClose ? withAutomaticCompanion(toggledPaths, plane) : toggledPaths
+        ),
         ...clearSelection(),
         activePlane: plane,
-        mode: path.closed ? 'pen' : 'edit',
+        mode: willClose ? 'edit' : 'pen',
+        ...(willClose
+          ? { mirrorWidth: true, pointEditMode: 'symmetric' as const }
+          : {}),
         revision: get().revision + 1,
       });
     },

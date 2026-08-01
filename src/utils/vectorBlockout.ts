@@ -36,6 +36,46 @@ export type VectorMeshSnapshot = {
 
 export type VectorCapStyle = 'game' | 'pointed';
 
+export type VectorPrimitiveType = 'box' | 'cylinder' | 'wedge' | 'capsule';
+export type VectorPartTransform = {
+  position: { x: number; y: number; z: number };
+  rotationY: number;
+  scale: { x: number; y: number; z: number };
+};
+export type VectorSectionEdit = {
+  id: string;
+  /** Normalized height, 0 = bottom and 1 = top. */
+  t: number;
+  width: number;
+  depth: number;
+  offsetX: number;
+  offsetZ: number;
+  twist: number;
+  falloff: number;
+};
+export type VectorPrimitive = {
+  type: VectorPrimitiveType;
+  width: number;
+  height: number;
+  depth: number;
+  sides: number;
+};
+export type VectorValidationIssue = {
+  severity: 'error' | 'warning';
+  message: string;
+  plane?: VectorPlane;
+};
+
+export type VectorMeshAudit = {
+  issues: VectorValidationIssue[];
+  vertices: number;
+  polygons: number;
+  triangles: number;
+  boundaryEdges: number;
+  nonManifoldEdges: number;
+  degenerateFaces: number;
+};
+
 export type VectorLoftOptions = {
   /** Full width on the missing Front/Side axis (world units). Default 0.6. */
   thickness?: number;
@@ -67,6 +107,349 @@ export type VectorLoftOptions = {
    */
   roundness?: number;
 };
+
+export const DEFAULT_VECTOR_PART_TRANSFORM: VectorPartTransform = {
+  position: { x: 0, y: 0, z: 0 },
+  rotationY: 0,
+  scale: { x: 1, y: 1, z: 1 },
+};
+
+function snapshotEdges(faces: number[][]): [number, number][] {
+  const seen = new Set<string>();
+  const edges: [number, number][] = [];
+  faces.forEach((face) => {
+    face.forEach((a, index) => {
+      const b = face[(index + 1) % face.length];
+      const lo = Math.min(a, b);
+      const hi = Math.max(a, b);
+      const key = `${lo}:${hi}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      edges.push([lo, hi]);
+    });
+  });
+  return edges;
+}
+
+/** Editable low-poly primitives for fast hard-surface/environment blockouts. */
+export function vectorPrimitiveToMesh(primitive: VectorPrimitive): VectorMeshSnapshot {
+  const w = Math.max(0.02, primitive.width) / 2;
+  const h = Math.max(0.02, primitive.height);
+  const d = Math.max(0.02, primitive.depth) / 2;
+  let vertices: VectorMeshSnapshot['vertices'] = [];
+  let faces: number[][] = [];
+
+  if (primitive.type === 'box' || primitive.type === 'wedge') {
+    vertices = [
+      { x: -w, y: 0, z: -d }, { x: w, y: 0, z: -d },
+      { x: w, y: 0, z: d }, { x: -w, y: 0, z: d },
+      { x: -w, y: h, z: -d }, { x: w, y: h, z: -d },
+      { x: w, y: h, z: d }, { x: -w, y: h, z: d },
+    ];
+    if (primitive.type === 'wedge') {
+      vertices[6].y = 0;
+      vertices[7].y = 0;
+    }
+    faces = primitive.type === 'box'
+      ? [[0, 1, 2, 3], [4, 7, 6, 5], [0, 4, 5, 1], [1, 5, 6, 2], [2, 6, 7, 3], [3, 7, 4, 0]]
+      : [[0, 1, 2, 3], [0, 4, 5, 1], [1, 5, 2], [3, 2, 5, 4], [0, 3, 4]];
+  } else {
+    const sides = evenRadialSegments(primitive.sides || 12, 8);
+    const capsule = primitive.type === 'capsule';
+    const ringYs = capsule ? [0, h * 0.2, h * 0.8, h] : [0, h];
+    const ringScales = capsule ? [0.18, 1, 1, 0.18] : [1, 1];
+    ringYs.forEach((y, ring) => {
+      for (let i = 0; i < sides; i++) {
+        const angle = (i / sides) * Math.PI * 2;
+        vertices.push({
+          x: Math.cos(angle) * w * ringScales[ring],
+          y,
+          z: Math.sin(angle) * d * ringScales[ring],
+        });
+      }
+    });
+    for (let ring = 0; ring < ringYs.length - 1; ring++) {
+      for (let i = 0; i < sides; i++) {
+        const next = (i + 1) % sides;
+        const a = ring * sides + i;
+        const b = ring * sides + next;
+        const c = (ring + 1) * sides + next;
+        const e = (ring + 1) * sides + i;
+        faces.push([a, b, c, e]);
+      }
+    }
+    faces.push(Array.from({ length: sides }, (_, i) => sides - 1 - i));
+    const topStart = (ringYs.length - 1) * sides;
+    faces.push(Array.from({ length: sides }, (_, i) => topStart + i));
+  }
+  return { vertices, faces, edges: snapshotEdges(faces) };
+}
+
+/** Apply localized width/depth/offset/twist controls to generated height rings. */
+export function applyVectorSectionEdits(
+  snapshot: VectorMeshSnapshot,
+  edits: VectorSectionEdit[] = [],
+): VectorMeshSnapshot {
+  if (!edits.length || !snapshot.vertices.length) return snapshot;
+  const ys = snapshot.vertices.map((v) => v.y);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const range = Math.max(1e-6, maxY - minY);
+  const vertices = snapshot.vertices.map((source) => {
+    const out = { ...source };
+    const t = (source.y - minY) / range;
+    edits.forEach((edit) => {
+      const radius = Math.max(0.02, edit.falloff);
+      const raw = Math.max(0, 1 - Math.abs(t - edit.t) / radius);
+      const weight = raw * raw * (3 - 2 * raw);
+      if (weight <= 0) return;
+      const sx = mix(1, Math.max(0.02, edit.width), weight);
+      const sz = mix(1, Math.max(0.02, edit.depth), weight);
+      const angle = edit.twist * Math.PI / 180 * weight;
+      const x = out.x * sx;
+      const z = out.z * sz;
+      out.x = x * Math.cos(angle) - z * Math.sin(angle) + edit.offsetX * weight;
+      out.z = x * Math.sin(angle) + z * Math.cos(angle) + edit.offsetZ * weight;
+    });
+    return out;
+  });
+  return { ...snapshot, vertices };
+}
+
+export function transformVectorSnapshot(
+  snapshot: VectorMeshSnapshot,
+  transform: VectorPartTransform = DEFAULT_VECTOR_PART_TRANSFORM,
+): VectorMeshSnapshot {
+  const angle = transform.rotationY * Math.PI / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return {
+    ...snapshot,
+    vertices: snapshot.vertices.map((v) => {
+      const x = v.x * transform.scale.x;
+      const y = v.y * transform.scale.y;
+      const z = v.z * transform.scale.z;
+      return {
+        x: x * cos - z * sin + transform.position.x,
+        y: y + transform.position.y,
+        z: x * sin + z * cos + transform.position.z,
+      };
+    }),
+  };
+}
+
+/** Resolve simple parented Blockout assembly transforms (Y rotation + XYZ scale). */
+export function resolveVectorPartTransform(
+  part: { id: string; parentId?: string | null; transform?: VectorPartTransform },
+  parts: Array<{ id: string; parentId?: string | null; transform?: VectorPartTransform }>,
+): VectorPartTransform {
+  let result: VectorPartTransform = part.transform
+    ? {
+        position: { ...part.transform.position },
+        rotationY: part.transform.rotationY,
+        scale: { ...part.transform.scale },
+      }
+    : {
+        position: { ...DEFAULT_VECTOR_PART_TRANSFORM.position },
+        rotationY: 0,
+        scale: { ...DEFAULT_VECTOR_PART_TRANSFORM.scale },
+      };
+  let parentId = part.parentId;
+  const visited = new Set([part.id]);
+  for (let depth = 0; parentId && depth < 16; depth++) {
+    if (visited.has(parentId)) break;
+    visited.add(parentId);
+    const parent = parts.find((candidate) => candidate.id === parentId);
+    if (!parent) break;
+    const p = parent.transform || DEFAULT_VECTOR_PART_TRANSFORM;
+    const angle = p.rotationY * Math.PI / 180;
+    const localX = result.position.x * p.scale.x;
+    const localZ = result.position.z * p.scale.z;
+    result = {
+      position: {
+        x: localX * Math.cos(angle) - localZ * Math.sin(angle) + p.position.x,
+        y: result.position.y * p.scale.y + p.position.y,
+        z: localX * Math.sin(angle) + localZ * Math.cos(angle) + p.position.z,
+      },
+      rotationY: result.rotationY + p.rotationY,
+      scale: {
+        x: result.scale.x * p.scale.x,
+        y: result.scale.y * p.scale.y,
+        z: result.scale.z * p.scale.z,
+      },
+    };
+    parentId = parent.parentId;
+  }
+  return result;
+}
+
+function segmentsIntersect(a: VectorPoint, b: VectorPoint, c: VectorPoint, d: VectorPoint) {
+  const cross = (p: VectorPoint, q: VectorPoint, r: VectorPoint) =>
+    (q.u - p.u) * (r.v - p.v) - (q.v - p.v) * (r.u - p.u);
+  const abC = cross(a, b, c);
+  const abD = cross(a, b, d);
+  const cdA = cross(c, d, a);
+  const cdB = cross(c, d, b);
+  return abC * abD < 0 && cdA * cdB < 0;
+}
+
+export function validateVectorPaths(paths: Record<VectorPlane, BezierPath>): VectorValidationIssue[] {
+  const issues: VectorValidationIssue[] = [];
+  (['front', 'side', 'top'] as VectorPlane[]).forEach((plane) => {
+    const path = paths[plane];
+    if (path.anchors.length && !path.closed) {
+      issues.push({ severity: 'warning', plane, message: `${path.name} is open.` });
+    }
+    if (path.closed && path.anchors.length < 3) {
+      issues.push({ severity: 'error', plane, message: `${path.name} needs at least 3 points.` });
+      return;
+    }
+    if (path.anchors.length > 20) {
+      issues.push({
+        severity: 'warning',
+        plane,
+        message: `${path.name} is dense (${path.anchors.length} points); landmark rings will be simplified to the mesh-detail budget.`,
+      });
+    }
+    if (!path.closed || path.anchors.length < 3) return;
+    const anchorPoints = path.anchors.map((anchor) => anchor.point);
+    const us = anchorPoints.map((p) => p.u);
+    const vs = anchorPoints.map((p) => p.v);
+    const diagonal = Math.max(
+      Math.hypot(Math.max(...us) - Math.min(...us), Math.max(...vs) - Math.min(...vs)),
+      1e-6
+    );
+    for (let index = 0; index < anchorPoints.length; index++) {
+      const current = anchorPoints[index];
+      const next = anchorPoints[(index + 1) % anchorPoints.length];
+      if (Math.hypot(next.u - current.u, next.v - current.v) < diagonal * 0.004) {
+        issues.push({
+          severity: 'warning',
+          plane,
+          message: `${path.name} has overlapping or near-duplicate points.`,
+        });
+        break;
+      }
+    }
+
+    // Check the evaluated curve, not only straight chords between control points.
+    // Aggressive Bezier handles can self-intersect even when the anchors do not.
+    const hasSelfIntersection = (points: VectorPoint[]) => {
+      for (let i = 0; i < points.length; i++) {
+        const a = points[i];
+        const b = points[(i + 1) % points.length];
+        for (let j = i + 2; j < points.length; j++) {
+          if (i === 0 && j === points.length - 1) continue;
+          const c = points[j];
+          const d = points[(j + 1) % points.length];
+          if (segmentsIntersect(a, b, c, d)) return true;
+        }
+      }
+      return false;
+    };
+    const sampled = sampleBezierPath(path, 96);
+    const sampledPoints = sampled.length > 3 ? sampled.slice(0, -1) : anchorPoints;
+    if (hasSelfIntersection(anchorPoints) || hasSelfIntersection(sampledPoints)) {
+      issues.push({ severity: 'error', plane, message: `${path.name} self-intersects.` });
+      return;
+    }
+    if (Math.min(Math.max(...us) - Math.min(...us), Math.max(...vs) - Math.min(...vs)) < 0.04) {
+      issues.push({ severity: 'warning', plane, message: `${path.name} contains an extremely thin section.` });
+    }
+  });
+  if (paths.front.closed && paths.side.closed) {
+    const frontVs = paths.front.anchors.map((anchor) => anchor.point.v);
+    const sideVs = paths.side.anchors.map((anchor) => anchor.point.v);
+    const frontMin = Math.min(...frontVs);
+    const frontMax = Math.max(...frontVs);
+    const sideMin = Math.min(...sideVs);
+    const sideMax = Math.max(...sideVs);
+    const overlap = Math.min(frontMax, sideMax) - Math.max(frontMin, sideMin);
+    const smallerHeight = Math.max(1e-6, Math.min(frontMax - frontMin, sideMax - sideMin));
+    if (overlap <= 1e-5) {
+      issues.push({
+        severity: 'error',
+        message: 'Front and Side silhouettes do not overlap in height.',
+      });
+    } else if (overlap / smallerHeight < 0.75) {
+      issues.push({
+        severity: 'warning',
+        message: 'Front and Side heights differ significantly; the shorter end profile will be extended.',
+      });
+    }
+  }
+  if (!paths.front.closed && !paths.side.closed) {
+    issues.push({ severity: 'error', message: 'Close a Front or Side silhouette before building.' });
+  }
+  return issues;
+}
+
+/** Check the generated snapshot for closed, editable game topology. */
+export function analyzeVectorMesh(mesh: VectorMeshSnapshot): VectorMeshAudit {
+  const edgeUse = new Map<string, number>();
+  let degenerateFaces = 0;
+  let triangles = 0;
+  const finiteVertices = mesh.vertices.every(
+    (vertex) => Number.isFinite(vertex.x) && Number.isFinite(vertex.y) && Number.isFinite(vertex.z)
+  );
+  const xs = mesh.vertices.map((vertex) => vertex.x);
+  const ys = mesh.vertices.map((vertex) => vertex.y);
+  const zs = mesh.vertices.map((vertex) => vertex.z);
+  const diagonal = mesh.vertices.length
+    ? Math.hypot(
+        Math.max(...xs) - Math.min(...xs),
+        Math.max(...ys) - Math.min(...ys),
+        Math.max(...zs) - Math.min(...zs)
+      )
+    : 0;
+  const areaEpsilon = Math.max(diagonal * diagonal * 1e-10, 1e-14);
+
+  for (const face of mesh.faces) {
+    triangles += Math.max(0, face.length - 2);
+    let area = 0;
+    const origin = mesh.vertices[face[0]];
+    if (!origin || face.length < 3 || new Set(face).size !== face.length) {
+      degenerateFaces++;
+      continue;
+    }
+    for (let index = 1; index < face.length - 1; index++) {
+      const a = mesh.vertices[face[index]];
+      const b = mesh.vertices[face[index + 1]];
+      if (!a || !b) continue;
+      const ab = { x: a.x - origin.x, y: a.y - origin.y, z: a.z - origin.z };
+      const ac = { x: b.x - origin.x, y: b.y - origin.y, z: b.z - origin.z };
+      const cx = ab.y * ac.z - ab.z * ac.y;
+      const cy = ab.z * ac.x - ab.x * ac.z;
+      const cz = ab.x * ac.y - ab.y * ac.x;
+      area += Math.hypot(cx, cy, cz) * 0.5;
+    }
+    if (area < areaEpsilon) degenerateFaces++;
+    for (let index = 0; index < face.length; index++) {
+      const a = face[index];
+      const b = face[(index + 1) % face.length];
+      const key = a < b ? `${a}:${b}` : `${b}:${a}`;
+      edgeUse.set(key, (edgeUse.get(key) || 0) + 1);
+    }
+  }
+
+  const boundaryEdges = [...edgeUse.values()].filter((uses) => uses === 1).length;
+  const nonManifoldEdges = [...edgeUse.values()].filter((uses) => uses > 2).length;
+  const issues: VectorValidationIssue[] = [];
+  if (!finiteVertices) issues.push({ severity: 'error', message: 'Generated mesh contains invalid vertices.' });
+  if (boundaryEdges) issues.push({ severity: 'error', message: `Generated mesh has ${boundaryEdges} open boundary edges.` });
+  if (nonManifoldEdges) issues.push({ severity: 'error', message: `Generated mesh has ${nonManifoldEdges} non-manifold edges.` });
+  if (degenerateFaces) issues.push({ severity: 'error', message: `Generated mesh has ${degenerateFaces} collapsed faces.` });
+
+  return {
+    issues,
+    vertices: mesh.vertices.length,
+    polygons: mesh.faces.length,
+    triangles,
+    boundaryEdges,
+    nonManifoldEdges,
+    degenerateFaces,
+  };
+}
 
 const mix = (a: number, b: number, t: number) => a + (b - a) * t;
 
@@ -131,6 +514,34 @@ export function sampleBezierPath(path: BezierPath, stepsPerSegment = 16): Vector
   }
   points.push({ ...(path.closed ? anchors[0].point : anchors[anchors.length - 1].point) });
   return points;
+}
+
+/**
+ * World-space centers of the two authored silhouette axes.
+ * The Front guide lives on the Side silhouette's depth center, while the
+ * Side guide lives on the Front silhouette's width center.
+ */
+export function vectorSilhouetteCenters(
+  front: BezierPath | null | undefined,
+  side: BezierPath | null | undefined
+): { x: number; z: number } {
+  const centerU = (path: BezierPath | null | undefined) => {
+    if (!path?.anchors.length) return 0;
+    const points = sampleBezierPath(path, 32);
+    if (!points.length) return 0;
+    let minU = Infinity;
+    let maxU = -Infinity;
+    points.forEach((point) => {
+      minU = Math.min(minU, point.u);
+      maxU = Math.max(maxU, point.u);
+    });
+    return (minU + maxU) / 2;
+  };
+
+  return {
+    x: centerU(front),
+    z: centerU(side),
+  };
 }
 
 /** Resample a closed path to N points evenly spaced by arc length. */
@@ -205,20 +616,40 @@ function boxRingPerimeter(
   y: number,
   sides: number,
   widthFractions: number[] = [],
-  depthFractions: number[] = []
+  depthFractions: number[] = [],
+  seamX = (x0 + x1) / 2,
+  seamZ = (z0 + z1) / 2,
 ): { x: number; y: number; z: number }[] {
-  const perEdge = Math.max(1, Math.round(sides / 4));
-  const xTs = boxEdgeSampleTs(perEdge, widthFractions);
-  const zTs = boxEdgeSampleTs(perEdge, depthFractions);
+  const nominalPerEdge = Math.max(2, Math.round(sides / 4));
+  // A face with a center seam needs an even segment count. For 12/20-sided
+  // rings, put the spare pair on Front/Back instead of creating a one-sided
+  // longitudinal column on every face.
+  const widthPerEdge =
+    nominalPerEdge % 2 === 0 ? nominalPerEdge : nominalPerEdge + 1;
+  const depthPerEdge =
+    nominalPerEdge % 2 === 0 ? nominalPerEdge : nominalPerEdge - 1;
+  // Keep longitudinal seams on the straight centers of the drawn silhouettes.
+  const xCenterT =
+    seamX > x0 && seamX < x1
+      ? Math.max(0.05, Math.min(0.95, (x1 - seamX) / (x1 - x0)))
+      : 0.5;
+  const zCenterT =
+    seamZ > z0 && seamZ < z1
+      ? Math.max(0.05, Math.min(0.95, (z1 - seamZ) / (z1 - z0)))
+      : 0.5;
+  const xTs = boxEdgeSampleTs(widthPerEdge, widthFractions, xCenterT);
+  const zTs = boxEdgeSampleTs(depthPerEdge, depthFractions, zCenterT);
+  const xBackTs = boxEdgeSampleTs(widthPerEdge, widthFractions, 1 - xCenterT);
+  const zRightTs = boxEdgeSampleTs(depthPerEdge, depthFractions, 1 - zCenterT);
   const out: { x: number; y: number; z: number }[] = [];
   // +Z: x1 → x0 (Front face — width seams)
   for (const t of xTs) out.push({ x: mix(x1, x0, t), y, z: z1 });
   // -X: z1 → z0 (Side face — depth seams)
   for (const t of zTs) out.push({ x: x0, y, z: mix(z1, z0, t) });
   // -Z: x0 → x1 (Back face)
-  for (const t of xTs) out.push({ x: mix(x0, x1, t), y, z: z0 });
+  for (const t of xBackTs) out.push({ x: mix(x0, x1, t), y, z: z0 });
   // +X: z0 → z1
-  for (const t of zTs) out.push({ x: x1, y, z: mix(z0, z1, t) });
+  for (const t of zRightTs) out.push({ x: x1, y, z: mix(z0, z1, t) });
   return out;
 }
 
@@ -227,59 +658,38 @@ function boxRingPerimeter(
  * Always keeps outer corner (0) + center (0.5), merges silhouette width features, then
  * fills to `perEdge` for a clean even count.
  */
-function boxEdgeSampleTs(perEdge: number, widthFractions: number[] = []): number[] {
-  const n = Math.max(1, Math.round(perEdge));
-  const set = new Set<number>([0]);
-  if (n >= 2) set.add(0.5);
+function boxEdgeSampleTs(
+  perEdge: number,
+  widthFractions: number[] = [],
+  centerT = 0.5,
+): number[] {
+  const n = Math.max(2, Math.round(perEdge));
+  const center = Math.max(0.05, Math.min(0.95, centerT));
+  const maxRadius = Math.min(center, 1 - center);
+  const pairCount = Math.max(0, Math.floor((n - 2) / 2));
+  const radii: number[] = [];
+
+  // Silhouette feature columns are useful only when both mirrored partners fit.
   for (const f of widthFractions) {
+    if (radii.length >= pairCount) break;
     const clamped = Math.min(0.95, Math.max(0.05, f));
-    set.add((1 - clamped) / 2);
-    set.add((1 + clamped) / 2);
-  }
-  let ts = [...set].filter((t) => t >= 0 && t < 1 - 1e-9).sort((a, b) => a - b);
-
-  const insertMidInLargestGap = () => {
-    let bestI = 0;
-    let bestGap = 0;
-    for (let i = 0; i < ts.length; i++) {
-      const a = ts[i];
-      const b = i + 1 < ts.length ? ts[i + 1] : 1;
-      const gap = b - a;
-      if (gap > bestGap) {
-        bestGap = gap;
-        bestI = i;
-      }
-    }
-    const a = ts[bestI];
-    const b = bestI + 1 < ts.length ? ts[bestI + 1] : 1;
-    ts.splice(bestI + 1, 0, (a + b) / 2);
-  };
-
-  while (ts.length < n) insertMidInLargestGap();
-
-  if (ts.length > n) {
-    const preferred = new Set<number>([0, 0.5]);
-    for (const f of widthFractions) {
-      const clamped = Math.min(0.95, Math.max(0.05, f));
-      preferred.add((1 - clamped) / 2);
-      preferred.add((1 + clamped) / 2);
-    }
-    const scored = ts.map((t) => {
-      const nearPreferred = [...preferred].some((p) => Math.abs(p - t) < 1e-4);
-      return { t, score: nearPreferred ? 0 : 1 };
-    });
-    scored.sort((a, b) => a.score - b.score || a.t - b.t);
-    ts = scored
-      .slice(0, n)
-      .map((s) => s.t)
-      .sort((a, b) => a - b);
-    if (!ts.length || Math.abs(ts[0]) > 1e-9) ts = [0, ...ts.filter((t) => t > 1e-9)];
-    while (ts.length < n) insertMidInLargestGap();
-    ts = ts.slice(0, n).sort((a, b) => a - b);
-    ts[0] = 0;
+    const radius = Math.min(maxRadius * 0.95, clamped * maxRadius);
+    if (radius < 1e-4 || radii.some((value) => Math.abs(value - radius) < 1e-4)) continue;
+    radii.push(radius);
   }
 
-  return ts;
+  // Fill any unused pair slots evenly. Never add a single unpaired column.
+  for (let index = 1; radii.length < pairCount; index++) {
+    const radius = (maxRadius * index) / (pairCount + 1);
+    if (radii.some((value) => Math.abs(value - radius) < 1e-4)) continue;
+    radii.push(radius);
+  }
+
+  const ts = [0, center];
+  radii.forEach((radius) => {
+    ts.push(center - radius, center + radius);
+  });
+  return ts.sort((a, b) => a - b);
 }
 
 /** Ray–superellipse hit: |x/rx|^n + |z/rz|^n = 1. n→∞ is boxy, n=2 is ellipse. */
@@ -313,8 +723,16 @@ function crossSectionRing(
   sides: number,
   roundness: number,
   widthFractions: number[] = [],
-  depthFractions: number[] = []
+  depthFractions: number[] = [],
+  seamX?: number,
+  seamZ?: number,
 ): { x: number; y: number; z: number }[] {
+  const cx = (x0 + x1) / 2;
+  const cz = (z0 + z1) / 2;
+  const effectiveSeamX =
+    seamX != null && seamX > x0 + 1e-6 && seamX < x1 - 1e-6 ? seamX : cx;
+  const effectiveSeamZ =
+    seamZ != null && seamZ > z0 + 1e-6 && seamZ < z1 - 1e-6 ? seamZ : cz;
   const box = boxRingPerimeter(
     x0,
     x1,
@@ -323,15 +741,16 @@ function crossSectionRing(
     y,
     sides,
     widthFractions,
-    depthFractions
+    depthFractions,
+    effectiveSeamX,
+    effectiveSeamZ,
   );
   const r = Math.max(0, Math.min(1, roundness));
   if (r < 1e-4) return box;
 
-  const cx = (x0 + x1) / 2;
-  const cz = (z0 + z1) / 2;
   const rx = Math.max((x1 - x0) / 2, 1e-6);
   const rz = Math.max((z1 - z0) / 2, 1e-6);
+  const seamEpsilon = Math.max(rx, rz) * 1e-6;
   // High exponent ≈ box with soft corners; 2 = ellipse.
   const n = mix(14, 2, Math.pow(r, 0.75));
 
@@ -339,9 +758,15 @@ function crossSectionRing(
     const angle = Math.atan2(p.z - cz, p.x - cx);
     const rounded = superellipseAtAngle(cx, cz, rx, rz, angle, n);
     return {
-      x: mix(p.x, rounded.x, r),
+      x:
+        Math.abs(p.x - effectiveSeamX) < seamEpsilon
+          ? effectiveSeamX
+          : mix(p.x, rounded.x, r),
       y,
-      z: mix(p.z, rounded.z, r),
+      z:
+        Math.abs(p.z - effectiveSeamZ) < seamEpsilon
+          ? effectiveSeamZ
+          : mix(p.z, rounded.z, r),
     };
   });
 }
@@ -488,8 +913,9 @@ export function silhouetteWidthFractions(
 
 /**
  * Build loft sample heights for game topology:
- * - Always include every silhouette key height (rings land on polygon points)
- * - Fill largest gaps until we reach verticalSegments+1 density
+ * - Prefer silhouette key heights (rings land on important polygon points)
+ * - Respect the selected vertical ring budget, even for very dense drawings
+ * - Fill remaining largest gaps for an even low/mid-poly distribution
  */
 export function buildLoftHeights(
   minY: number,
@@ -500,15 +926,32 @@ export function buildLoftHeights(
   if (maxY - minY < 1e-6) return [minY];
   const eps = Math.max((maxY - minY) * 1e-6, 1e-8);
   const quantize = (y: number) => Number(y.toFixed(6));
-  const set = new Set<number>([quantize(minY), quantize(maxY)]);
+  const target = Math.max(4, Math.round(verticalSegments) + 1);
+  const candidates = new Set<number>();
   for (const key of keyHeights) {
     if (key < minY - eps || key > maxY + eps) continue;
-    set.add(quantize(Math.min(maxY, Math.max(minY, key))));
+    const value = quantize(Math.min(maxY, Math.max(minY, key)));
+    if (value > minY + eps && value < maxY - eps) candidates.add(value);
   }
-  let heights = [...set].sort((a, b) => a - b);
+  let heights = [quantize(minY), quantize(maxY)];
 
-  // Density budget from the UI slider — never drop keys, only add fillers.
-  const target = Math.max(heights.length, Math.max(4, Math.round(verticalSegments) + 1));
+  // Farthest-point selection keeps the most spatially useful landmarks instead
+  // of allowing a cluster of tiny hand-drawn steps to explode the ring count.
+  while (heights.length < target && candidates.size) {
+    let best = 0;
+    let bestDistance = -1;
+    for (const candidate of candidates) {
+      const distance = Math.min(...heights.map((height) => Math.abs(height - candidate)));
+      if (distance > bestDistance) {
+        best = candidate;
+        bestDistance = distance;
+      }
+    }
+    candidates.delete(best);
+    heights.push(best);
+    heights.sort((a, b) => a - b);
+  }
+
   while (heights.length < target) {
     let bestI = 0;
     let bestGap = 0;
@@ -713,17 +1156,24 @@ export function vectorPathsToMesh(
 
   const frontBounds = frontPoints.length ? pathBounds(frontPoints) : null;
   const sideBounds = sidePoints.length ? pathBounds(sidePoints) : null;
-  const minY = Math.max(
-    frontBounds ? frontBounds.minV : -Infinity,
-    sideBounds ? sideBounds.minV : -Infinity
+  if (
+    frontBounds &&
+    sideBounds &&
+    Math.min(frontBounds.maxV, sideBounds.maxV) -
+      Math.max(frontBounds.minV, sideBounds.minV) <= 1e-5
+  ) {
+    return null;
+  }
+  // Use the full authored height from either silhouette. Where one view ends
+  // sooner, its nearest end profile is held through the remaining section.
+  const activeMinY = Math.min(
+    frontBounds?.minV ?? Infinity,
+    sideBounds?.minV ?? Infinity
   );
-  const maxY = Math.min(
-    frontBounds ? frontBounds.maxV : Infinity,
-    sideBounds ? sideBounds.maxV : Infinity
+  const activeMaxY = Math.max(
+    frontBounds?.maxV ?? -Infinity,
+    sideBounds?.maxV ?? -Infinity
   );
-
-  const activeMinY = Number.isFinite(minY) ? minY : frontBounds?.minV ?? sideBounds?.minV ?? 0;
-  const activeMaxY = Number.isFinite(maxY) ? maxY : frontBounds?.maxV ?? sideBounds?.maxV ?? 1;
   if (activeMaxY - activeMinY < 0.01) return null;
 
   const loftHeights = buildLoftHeights(
@@ -738,7 +1188,7 @@ export function vectorPathsToMesh(
   const widthFractions = gameTopology ? silhouetteWidthFractions(front) : [];
   const depthFractions = gameTopology ? silhouetteWidthFractions(side) : [];
   const sides = gameTopology
-    ? evenRadialSegments(radialSegments, 4)
+    ? evenRadialSegments(radialSegments, 8)
     : Math.max(4, Math.round(radialSegments));
   const epsilon = Math.max((activeMaxY - activeMinY) * 0.002, 0.0005);
   const tipFloor = 0.002;
@@ -752,6 +1202,10 @@ export function vectorPathsToMesh(
     sideBounds ? Math.min(...sidePoints.map((p) => p.u)) : -half,
     sideBounds ? Math.max(...sidePoints.map((p) => p.u)) : half,
   ];
+  // Straight longitudinal seam targets: the overall center of each authored
+  // silhouette, rather than the scene origin or a per-ring drifting midpoint.
+  const silhouetteSeamX = (baseFx[0] + baseFx[1]) / 2;
+  const silhouetteSeamZ = (baseSz[0] + baseSz[1]) / 2;
 
   // Gather per-ring extents first so we can stabilize the center spine.
   type RingExt = { y: number; fx: [number, number]; sz: [number, number] };
@@ -761,12 +1215,18 @@ export function vectorPathsToMesh(
     const t = rings === 0 ? 0.5 : row / rings;
     let fx = frontPoints.length ? extentAtHeight(frontPoints, rawY) : null;
     let sz = sidePoints.length ? extentAtHeight(sidePoints, rawY) : null;
-    if (frontPoints.length && !fx) {
-      const sampleY = Math.min(activeMaxY - epsilon, Math.max(activeMinY + epsilon, rawY));
+    if (frontPoints.length && frontBounds && !fx) {
+      const sampleY = Math.min(
+        frontBounds.maxV - epsilon,
+        Math.max(frontBounds.minV + epsilon, rawY)
+      );
       fx = extentAtHeight(frontPoints, sampleY);
     }
-    if (sidePoints.length && !sz) {
-      const sampleY = Math.min(activeMaxY - epsilon, Math.max(activeMinY + epsilon, rawY));
+    if (sidePoints.length && sideBounds && !sz) {
+      const sampleY = Math.min(
+        sideBounds.maxV - epsilon,
+        Math.max(sideBounds.minV + epsilon, rawY)
+      );
       sz = extentAtHeight(sidePoints, sampleY);
     }
     const tipProfile = Math.sin(Math.PI * t);
@@ -832,24 +1292,36 @@ export function vectorPathsToMesh(
     const x1 = cx + rx;
     const z0 = cz - rz;
     const z1 = cz + rz;
+    const rowSeamX =
+      silhouetteSeamX > x0 + 1e-6 && silhouetteSeamX < x1 - 1e-6
+        ? silhouetteSeamX
+        : cx;
+    const rowSeamZ =
+      silhouetteSeamZ > z0 + 1e-6 && silhouetteSeamZ < z1 - 1e-6
+        ? silhouetteSeamZ
+        : cz;
 
     if (topPoints.length >= 3) {
       for (let col = 0; col < sides; col++) {
         const angle = -Math.PI / 2 + (col / sides) * Math.PI * 2;
         const shape = topShapeAtAngle(angle);
+        const onFrontBackSeam = col === 0 || col === sides / 2;
+        const onSideSeam = col === sides / 4 || col === (sides * 3) / 4;
         vertices.push({
-          x: cx + shape.x * rx,
+          x: onFrontBackSeam ? rowSeamX : cx + shape.x * rx,
           y: rawY,
-          z: cz + shape.z * rz,
+          z: onSideSeam ? rowSeamZ : cz + shape.z * rz,
         });
       }
     } else if (crossSection === 'ellipse' && roundness >= 0.999) {
       for (let col = 0; col < sides; col++) {
         const angle = -Math.PI / 2 + (col / sides) * Math.PI * 2;
+        const onFrontBackSeam = col === 0 || col === sides / 2;
+        const onSideSeam = col === sides / 4 || col === (sides * 3) / 4;
         vertices.push({
-          x: cx + Math.cos(angle) * rx,
+          x: onFrontBackSeam ? rowSeamX : cx + Math.cos(angle) * rx,
           y: rawY,
-          z: cz + Math.sin(angle) * rz,
+          z: onSideSeam ? rowSeamZ : cz + Math.sin(angle) * rz,
         });
       }
     } else {
@@ -863,7 +1335,9 @@ export function vectorPathsToMesh(
           sides,
           roundness,
           widthFractions,
-          depthFractions
+          depthFractions,
+          rowSeamX,
+          rowSeamZ,
         )
       );
     }
@@ -933,6 +1407,11 @@ export function seedMeshSolidTexture(mesh: CADMesh, color = '#d2b48c', size = 25
 export type VectorCadConvertOptions = {
   /** When set, bake a solid texture so Mat / Paint / UV textured view work immediately. */
   seedTexture?: boolean | string;
+  /**
+   * Optional Blockout assembly transform. It is applied before the pivot is
+   * recentered so the recenter offset is preserved in the final world position.
+   */
+  transform?: VectorPartTransform;
 };
 
 /** Convert loft snapshot into a PolyStage CADMesh. */
@@ -941,6 +1420,7 @@ export function vectorSnapshotToCADMesh(
   name = 'Vector Blockout',
   options?: VectorCadConvertOptions
 ): CADMesh {
+  const transform = options?.transform ?? DEFAULT_VECTOR_PART_TRANSFORM;
   const vertices: Vertex[] = snapshot.vertices.map((v) => ({
     id: generateId(),
     x: v.x,
@@ -960,9 +1440,9 @@ export function vectorSnapshotToCADMesh(
   const mesh = finalizeEditableMesh({
     id: generateId(),
     name,
-    position: { x: 0, y: 0, z: 0 },
-    rotation: { x: 0, y: 0, z: 0 },
-    scale: { x: 1, y: 1, z: 1 },
+    position: { ...transform.position },
+    rotation: { x: 0, y: transform.rotationY * Math.PI / 180, z: 0 },
+    scale: { ...transform.scale },
     vertices,
     faces,
     edges: createEdgesFromFaces(faces),

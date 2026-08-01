@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import * as THREE from 'three';
 import type { BezierPath, VectorPlane, VectorPoint } from '../utils/vectorBlockout';
-import { silhouetteKeyHeights } from '../utils/vectorBlockout';
+import { silhouetteKeyHeights, vectorSilhouetteCenters } from '../utils/vectorBlockout';
 import { useVectorStore } from '../store/useVectorStore';
 import {
   getVectorViewport,
@@ -13,12 +13,19 @@ type DragTarget =
   | { type: 'handleIn' | 'handleOut'; plane: VectorPlane; index: number }
   | null;
 
-const worldPoint = (plane: VectorPlane, p: VectorPoint) =>
-  plane === 'front'
-    ? new THREE.Vector3(p.u, p.v, 0.035)
+function silhouetteCenters() {
+  const { front, side } = useVectorStore.getState().paths;
+  return vectorSilhouetteCenters(front, side);
+}
+
+const worldPoint = (plane: VectorPlane, p: VectorPoint) => {
+  const center = silhouetteCenters();
+  return plane === 'front'
+    ? new THREE.Vector3(p.u, p.v, center.z)
     : plane === 'side'
-      ? new THREE.Vector3(0.035, p.v, p.u)
+      ? new THREE.Vector3(center.x, p.v, p.u)
       : new THREE.Vector3(p.u, 0.035, p.v);
+};
 
 function projectPoint(kind: VectorViewportKind, plane: VectorPlane, p: VectorPoint) {
   const vp = getVectorViewport(kind);
@@ -63,11 +70,12 @@ function pointOnPlane(
   const ray = new THREE.Raycaster();
   ray.setFromCamera(ndc, vp.camera);
   const hit = new THREE.Vector3();
+  const center = silhouetteCenters();
   const plane3 =
     plane === 'front'
-      ? new THREE.Plane(new THREE.Vector3(0, 0, 1), 0)
+      ? new THREE.Plane(new THREE.Vector3(0, 0, 1), -center.z)
       : plane === 'side'
-        ? new THREE.Plane(new THREE.Vector3(1, 0, 0), 0)
+        ? new THREE.Plane(new THREE.Vector3(1, 0, 0), -center.x)
         : new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   if (!ray.ray.intersectPlane(plane3, hit)) return null;
   return plane === 'front'

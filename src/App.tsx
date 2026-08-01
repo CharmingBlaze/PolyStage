@@ -25,6 +25,9 @@ import { VectorPanel } from './components/VectorPanel';
 import { floodFill, hexToRgba } from './utils/pixelPaint';
 import { useVectorStore } from './store/useVectorStore';
 import {
+  applyVectorSectionEdits,
+  resolveVectorPartTransform,
+  vectorPrimitiveToMesh,
   vectorPathsToMesh,
   vectorSnapshotToCADMesh,
 } from './utils/vectorBlockout';
@@ -1139,10 +1142,42 @@ export const App: React.FC = () => {
   const handleVectorBuildAll = (built: CADMesh[]) => {
     if (!built.length) return;
     commitHistory();
-    setMeshes(built);
-    setActiveMeshId(built[0].id);
-    setSelectedMeshIds([built[0].id]);
-    setSceneSelection({ kind: 'mesh', id: built[0].id });
+    const sameVector = (
+      a: { x: number; y: number; z: number },
+      b: { x: number; y: number; z: number },
+    ) => Math.abs(a.x - b.x) < 1e-6 && Math.abs(a.y - b.y) < 1e-6 && Math.abs(a.z - b.z) < 1e-6;
+    const nextBuilt = built.map((incoming) => {
+      const existing = meshes.find(
+        (mesh) => incoming.blockoutPartId && mesh.blockoutPartId === incoming.blockoutPartId
+      );
+      if (!existing) return incoming;
+      const previousAuthored = existing.blockoutTransform;
+      const manuallyTransformed = !!previousAuthored && (
+        !sameVector(existing.position, previousAuthored.position) ||
+        !sameVector(existing.rotation, previousAuthored.rotation) ||
+        !sameVector(existing.scale, previousAuthored.scale)
+      );
+      return {
+        ...incoming,
+        id: existing.id,
+        position: manuallyTransformed ? existing.position : incoming.position,
+        rotation: manuallyTransformed ? existing.rotation : incoming.rotation,
+        scale: manuallyTransformed ? existing.scale : incoming.scale,
+        textureCanvasDataUrl: existing.textureCanvasDataUrl,
+        textureAnimation: existing.textureAnimation,
+        boneId: existing.boneId,
+        visible: existing.visible,
+        locked: existing.locked,
+        doubleSided: existing.doubleSided,
+        modifiers: existing.modifiers,
+      };
+    });
+    const retained = meshes.filter((mesh) => !mesh.blockoutPartId);
+    const nextMeshes = [...retained, ...nextBuilt];
+    setMeshes(nextMeshes);
+    setActiveMeshId(nextBuilt[0].id);
+    setSelectedMeshIds([nextBuilt[0].id]);
+    setSceneSelection({ kind: 'mesh', id: nextBuilt[0].id });
     setSelectedVertexIds([]);
     setSelectedEdgeIds([]);
     setSelectedFaceIds([]);
@@ -1162,28 +1197,46 @@ export const App: React.FC = () => {
       part.id === store.activePartId ? { ...part, paths: store.paths } : part
     );
     const generated = buildParts
-      .map((part) => ({
-        name: part.name,
-        mesh: vectorPathsToMesh(
-          part.paths.front.closed ? part.paths.front : null,
-          part.paths.side.closed ? part.paths.side : null,
-          store.verticalSegments,
-          store.radialSegments,
-          part.paths.top.closed ? part.paths.top : null,
-          {
-            thickness: store.thickness,
-            gameTopology: true,
-            capStyle: store.capStyle,
-            taperThickness: true,
-            roundness: store.roundness,
-          }
-        ),
-      }))
-      .filter((item): item is { name: string; mesh: NonNullable<typeof item.mesh> } => !!item.mesh);
+      .filter((part) => !part.hidden)
+      .map((part) => {
+        const base = part.kind === 'primitive' && part.primitive
+          ? vectorPrimitiveToMesh(part.primitive)
+          : vectorPathsToMesh(
+              part.paths.front.closed ? part.paths.front : null,
+              part.paths.side.closed ? part.paths.side : null,
+              store.verticalSegments,
+              store.radialSegments,
+              part.paths.top.closed ? part.paths.top : null,
+              {
+                thickness: store.thickness,
+                gameTopology: true,
+                capStyle: store.capStyle,
+                taperThickness: true,
+                roundness: store.roundness,
+              }
+            );
+        return { part, mesh: base ? applyVectorSectionEdits(base, part.sections || []) : null };
+      })
+      .filter((item): item is { part: (typeof buildParts)[number]; mesh: NonNullable<typeof item.mesh> } => !!item.mesh);
     if (!generated.length) return null;
-    const built = generated.map((item) =>
-      vectorSnapshotToCADMesh(item.mesh, item.name, { seedTexture: '#d2b48c' })
-    );
+    const built = generated.map((item) => {
+      const transform = resolveVectorPartTransform(item.part, buildParts);
+      const cad = vectorSnapshotToCADMesh(item.mesh, item.part.name, {
+        seedTexture: '#d2b48c',
+        transform,
+      });
+      const authored = {
+        position: { ...cad.position },
+        rotation: { ...cad.rotation },
+        scale: { ...cad.scale },
+      };
+      return {
+        ...cad,
+        blockoutPartId: item.part.id,
+        blockoutRevision: store.revision,
+        blockoutTransform: authored,
+      };
+    });
     handleVectorBuildAll(built);
     store.markBuilt();
     const totalVerts = built.reduce((n, m) => n + m.vertices.length, 0);
@@ -1195,11 +1248,44 @@ export const App: React.FC = () => {
 
   const handleVectorAddActive = (mesh: CADMesh) => {
     commitHistory();
-    // Always append as a separate object (do not merge into the active mesh).
-    updateMeshesWithHistory([...meshes, mesh]);
-    setActiveMeshId(mesh.id);
-    setSelectedMeshIds([mesh.id]);
-    setSceneSelection({ kind: 'mesh', id: mesh.id });
+    const existing = meshes.find(
+      (item) => mesh.blockoutPartId && item.blockoutPartId === mesh.blockoutPartId
+    );
+    const previousAuthored = existing?.blockoutTransform;
+    const manuallyTransformed = !!existing && !!previousAuthored && (
+      Math.abs(existing.position.x - previousAuthored.position.x) > 1e-6 ||
+      Math.abs(existing.position.y - previousAuthored.position.y) > 1e-6 ||
+      Math.abs(existing.position.z - previousAuthored.position.z) > 1e-6 ||
+      Math.abs(existing.rotation.x - previousAuthored.rotation.x) > 1e-6 ||
+      Math.abs(existing.rotation.y - previousAuthored.rotation.y) > 1e-6 ||
+      Math.abs(existing.rotation.z - previousAuthored.rotation.z) > 1e-6 ||
+      Math.abs(existing.scale.x - previousAuthored.scale.x) > 1e-6 ||
+      Math.abs(existing.scale.y - previousAuthored.scale.y) > 1e-6 ||
+      Math.abs(existing.scale.z - previousAuthored.scale.z) > 1e-6
+    );
+    const next = existing
+      ? {
+          ...mesh,
+          id: existing.id,
+          position: manuallyTransformed ? existing.position : mesh.position,
+          rotation: manuallyTransformed ? existing.rotation : mesh.rotation,
+          scale: manuallyTransformed ? existing.scale : mesh.scale,
+          textureCanvasDataUrl: existing.textureCanvasDataUrl,
+          textureAnimation: existing.textureAnimation,
+          boneId: existing.boneId,
+          visible: existing.visible,
+          locked: existing.locked,
+          modifiers: existing.modifiers,
+        }
+      : mesh;
+    updateMeshesWithHistory(
+      existing
+        ? meshes.map((item) => item.id === existing.id ? next : item)
+        : [...meshes, next]
+    );
+    setActiveMeshId(next.id);
+    setSelectedMeshIds([next.id]);
+    setSceneSelection({ kind: 'mesh', id: next.id });
     setSelectedVertexIds([]);
     setSelectedEdgeIds([]);
     setSelectedFaceIds([]);
@@ -1969,7 +2055,7 @@ export const App: React.FC = () => {
 
         <main ref={splitWorkspaceRef} className="flex-1 h-full relative overflow-hidden bg-[#252525] flex">
           <section
-            className="h-full relative overflow-hidden"
+            className={`h-full relative overflow-hidden ${activeWorkspaceMode === 'blockout' ? 'vector-panel-host' : ''}`}
             style={{ width: editorSplitOpen ? `calc(${100 - uvPanelPercent}% - 8px)` : '100%' }}
           >
           {activeWorkspaceMode === 'animation' ? (
