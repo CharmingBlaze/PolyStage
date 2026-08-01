@@ -83,6 +83,8 @@ interface Viewport3DProps {
   selectedMeshIds?: string[];
   setSelectedMeshIds?: React.Dispatch<React.SetStateAction<string[]>>;
   activeWorkspaceMode?: WorkspaceMode;
+  /** UV split keeps component editing active but still allows clicking another object to retarget it. */
+  uvObjectRetargeting?: boolean;
   activeRightTab?: string;
   onDirect3DPaintPixel?: (uvU: number, uvV: number, isFinal?: boolean, faceId?: string | null) => void;
   onSpawnDrawnPrimitive?: (newMesh: CADMesh) => void;
@@ -132,6 +134,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   selectedMeshIds = [],
   setSelectedMeshIds,
   activeWorkspaceMode = 'modeling',
+  uvObjectRetargeting = false,
   activeRightTab = 'outliner',
   onDirect3DPaintPixel,
   onSpawnDrawnPrimitive,
@@ -4113,6 +4116,34 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const mouseY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(new THREE.Vector2(mouseX, mouseY), cameraRef.current);
+
+    // UV workspace stays in Face mode for 3D↔UV selection sync, but clicking a
+    // different visible object should switch the active UV target first.
+    if (uvObjectRetargeting && meshesGroupRef.current) {
+      const hits = raycaster.intersectObjects(meshesGroupRef.current.children, true);
+      let hitMeshId: string | null = null;
+      for (const hit of hits) {
+        let current: THREE.Object3D | null = hit.object;
+        while (current && current !== meshesGroupRef.current) {
+          const meshId = current.userData?.meshId as string | undefined;
+          if (meshId) {
+            hitMeshId = meshId;
+            break;
+          }
+          current = current.parent;
+        }
+        if (hitMeshId) break;
+      }
+      if (hitMeshId && hitMeshId !== activeMeshId) {
+        setActiveMeshId(hitMeshId);
+        setSelectedMeshIds?.([hitMeshId]);
+        setSelectedFaceIds([]);
+        setSelectedVertexIds([]);
+        setSelectedEdgeIds?.([]);
+        setSceneSelection?.({ kind: 'mesh', id: hitMeshId });
+        return;
+      }
+    }
 
     // Vertex Selection
     if (toolState.editMode === 'vertex' && verticesGroupRef.current) {

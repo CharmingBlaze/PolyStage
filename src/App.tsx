@@ -2112,6 +2112,7 @@ export const App: React.FC = () => {
               selectedMeshIds={selectedMeshIds}
               setSelectedMeshIds={setSelectedMeshIds}
               activeWorkspaceMode={activeWorkspaceMode}
+              uvObjectRetargeting={uvSplitOpen}
               activeRightTab={activeRightTab}
               onDirect3DPaintPixel={handleDirect3DPaintPixel}
               onSpawnDrawnPrimitive={handleSpawnDrawnPrimitive}
