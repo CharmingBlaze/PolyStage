@@ -95,7 +95,8 @@ function makeNearestTexture(source: HTMLCanvasElement | HTMLImageElement): THREE
   texture.minFilter = THREE.NearestFilter;
   texture.generateMipmaps = false;
   texture.colorSpace = THREE.SRGBColorSpace;
-  texture.flipY = true;
+  // Match modeling viewport / UV editor (canvas top upright, no GPU V flip).
+  texture.flipY = false;
   texture.needsUpdate = true;
   return texture;
 }
@@ -145,7 +146,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
   const camerasGroupRef = useRef<THREE.Group | null>(null);
   const bonesGroupRef = useRef<THREE.Group | null>(null);
   const particleMarkersRef = useRef<THREE.Group | null>(null);
-  const ambientRef = useRef<THREE.AmbientLight | null>(null);
+  const ambientRef = useRef<THREE.HemisphereLight | null>(null);
   const sunRef = useRef<THREE.DirectionalLight | null>(null);
   const gridHelperRef = useRef<THREE.GridHelper | null>(null);
   const shadowCatcherRef = useRef<THREE.Mesh | null>(null);
@@ -420,9 +421,10 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
         const cinematic = Boolean(ctx.litPreview);
         const mat = new THREE.MeshStandardMaterial({
           map,
-          vertexColors: !map,
+          color: map ? 0xffffff : 0xa5a6a8,
+          vertexColors: false,
           // Keep DoubleSide — CAD meshes often have mixed winding; FrontSide looks inside-out.
-          roughness: cinematic ? (map ? 0.7 : 0.52) : 0.45,
+          roughness: cinematic ? (map ? 0.7 : 0.52) : 0.64,
           metalness: cinematic ? 0.28 : 0.08,
           side: THREE.DoubleSide,
         });
@@ -439,7 +441,8 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
         entry.mesh.geometry = buildThreeGeometry(skinned);
         entry.geoKey = geoKey;
         entry.mat.map = map;
-        entry.mat.vertexColors = !map;
+        entry.mat.color.set(map ? 0xffffff : 0xa5a6a8);
+        entry.mat.vertexColors = false;
         entry.mat.needsUpdate = true;
         if (entry.edges) {
           entry.edges.geometry.dispose();
@@ -452,7 +455,8 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
         }
       } else {
         entry.mat.map = map;
-        entry.mat.vertexColors = !map;
+        entry.mat.color.set(map ? 0xffffff : 0xa5a6a8);
+        entry.mat.vertexColors = false;
         entry.mat.needsUpdate = true;
       }
 
@@ -460,7 +464,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
       {
         const cinematic = Boolean(ctx.litPreview);
         entry.mat.side = THREE.DoubleSide;
-        entry.mat.roughness = cinematic ? (map ? 0.7 : 0.52) : 0.45;
+        entry.mat.roughness = cinematic ? (map ? 0.7 : 0.52) : 0.64;
         entry.mat.metalness = cinematic ? 0.28 : 0.08;
       }
 
@@ -771,12 +775,16 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
         environmentRef.current = next;
         const scene = sceneRef.current;
         if (scene) {
-          if (next.backgroundMode === 'solid') {
-            scene.background = new THREE.Color(next.backgroundColor || '#000000');
+          if (litPreviewRef.current) {
+            if (next.backgroundMode === 'solid') {
+              scene.background = new THREE.Color(next.backgroundColor || '#000000');
+            } else {
+              const top = new THREE.Color(next.skyTopColor);
+              const horizon = new THREE.Color(next.skyHorizonColor);
+              scene.background = top.clone().lerp(horizon, 0.45);
+            }
           } else {
-            const top = new THREE.Color(next.skyTopColor);
-            const horizon = new THREE.Color(next.skyHorizonColor);
-            scene.background = top.clone().lerp(horizon, 0.45);
+            scene.background = new THREE.Color('#1b1b1b');
           }
           if (next.fogDensity > 0.001) scene.fog = new THREE.FogExp2(next.fogColor, next.fogDensity);
           else scene.fog = null;
@@ -902,8 +910,8 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
     const scene = new THREE.Scene();
     sceneRef.current = scene;
 
-    const freeCam = new THREE.PerspectiveCamera(45, width / height, 0.1, 500);
-    freeCam.position.set(6, 4, 7);
+    const freeCam = new THREE.PerspectiveCamera(38, width / height, 0.01, 500);
+    freeCam.position.set(5.5, 3.5, 8);
     freeCamRef.current = freeCam;
 
     const cineCam = new THREE.PerspectiveCamera(45, width / height, 0.1, 500);
@@ -911,12 +919,13 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     renderer.setSize(width, height, false);
-    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
+    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
     renderer.domElement.style.width = '100%';
     renderer.domElement.style.height = '100%';
     renderer.domElement.style.display = 'block';
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.NoToneMapping;
     renderer.toneMappingExposure = 1;
     rendererRef.current = renderer;
@@ -929,28 +938,39 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
     const unbindNavMods = bindBlockbenchOrbitModifiers(controls, renderer.domElement);
     controlsRef.current = controls;
 
-    const ambient = new THREE.AmbientLight(0xffffff, 0.7);
+    // OutlineForge-style studio fill (edit mode). Hidden in Cinematic.
+    const ambient = new THREE.HemisphereLight(0xffffff, 0x242424, 1.45);
     ambientRef.current = ambient;
     scene.add(ambient);
-    const sun = new THREE.DirectionalLight(0xfff0dd, 1.2);
-    sun.position.set(5, 10, 4);
+    const sun = new THREE.DirectionalLight(0xffffff, 2.5);
+    sun.position.set(4, 7, 5);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.bias = -0.0002;
+    sun.shadow.normalBias = 0.02;
+    const shadowSpan = 10;
+    sun.shadow.camera.near = 0.5;
+    sun.shadow.camera.far = 40;
+    sun.shadow.camera.left = -shadowSpan;
+    sun.shadow.camera.right = shadowSpan;
+    sun.shadow.camera.top = shadowSpan;
+    sun.shadow.camera.bottom = -shadowSpan;
     sunRef.current = sun;
     scene.add(sun);
-    const grid = new THREE.GridHelper(12, 24, VIEWPORT_THEME.gridMajor, VIEWPORT_THEME.gridMinor);
+    const grid = new THREE.GridHelper(14, 28, VIEWPORT_THEME.gridMajor, VIEWPORT_THEME.gridMinor);
+    grid.position.y = -0.001;
     gridHelperRef.current = grid;
     scene.add(grid);
 
-    // Invisible floor so Key light contact shadows read in Cinematic.
+    // Soft contact-shadow catcher — always on in edit; darker in Cinematic.
     const shadowCatcher = new THREE.Mesh(
-      new THREE.PlaneGeometry(48, 48),
-      new THREE.ShadowMaterial({ opacity: 0.62, color: 0x000000 }),
+      new THREE.PlaneGeometry(14, 14),
+      new THREE.ShadowMaterial({ opacity: 0.18, color: 0x000000 }),
     );
     shadowCatcher.rotation.x = -Math.PI / 2;
-    shadowCatcher.position.y = 0;
+    shadowCatcher.position.y = -0.002;
     shadowCatcher.receiveShadow = true;
-    shadowCatcher.visible = false;
+    shadowCatcher.visible = true;
     shadowCatcherRef.current = shadowCatcher;
     scene.add(shadowCatcher);
 
@@ -1193,12 +1213,17 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
     const renderer = rendererRef.current;
     if (!scene) return;
 
-    if (environment.backgroundMode === 'solid') {
-      scene.background = new THREE.Color(environment.backgroundColor || '#000000');
+    if (litPreview) {
+      if (environment.backgroundMode === 'solid') {
+        scene.background = new THREE.Color(environment.backgroundColor || '#000000');
+      } else {
+        const top = new THREE.Color(environment.skyTopColor);
+        const horizon = new THREE.Color(environment.skyHorizonColor);
+        scene.background = top.clone().lerp(horizon, 0.45);
+      }
     } else {
-      const top = new THREE.Color(environment.skyTopColor);
-      const horizon = new THREE.Color(environment.skyHorizonColor);
-      scene.background = top.clone().lerp(horizon, 0.45);
+      // Edit mode: same charcoal LIVE 3D look as the modeling viewport.
+      scene.background = new THREE.Color('#1b1b1b');
     }
 
     if (environment.fogDensity > 0.001) {
@@ -1208,24 +1233,30 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
     }
 
     if (ambientRef.current) {
-      // Edit mode: studio fill so you can always see the mesh.
-      // Cinematic: no fill — only authored CAD lights (zero intensity = pitch black).
-      ambientRef.current.color.set(environment.ambientColor);
-      ambientRef.current.intensity = litPreview ? 0 : 0.7;
+      // Edit: soft hemisphere fill. Cinematic: off — only authored CAD lights.
+      ambientRef.current.color.set(litPreview ? environment.ambientColor : 0xffffff);
+      ambientRef.current.groundColor.set(0x242424);
+      ambientRef.current.intensity = litPreview ? 0 : 1.45;
       ambientRef.current.visible = !litPreview;
     }
     if (sunRef.current) {
-      const dir = sunDirectionFromAngles(environment.sunElevation, environment.sunAzimuth);
+      const dir = sunDirectionFromAngles(
+        litPreview ? environment.sunElevation : (environment.sunElevation ?? 48),
+        litPreview ? environment.sunAzimuth : (environment.sunAzimuth ?? 39),
+      );
       sunRef.current.position.set(dir.x * 20, dir.y * 20, dir.z * 20);
-      sunRef.current.color.set(environment.sunColor);
-      sunRef.current.intensity = litPreview ? 0 : 1.2;
+      sunRef.current.color.set(litPreview ? environment.sunColor : 0xffffff);
+      sunRef.current.intensity = litPreview ? 0 : 2.5;
       sunRef.current.visible = !litPreview;
     }
     if (gridHelperRef.current) {
       gridHelperRef.current.visible = !litPreview;
     }
     if (shadowCatcherRef.current) {
-      shadowCatcherRef.current.visible = litPreview;
+      // Soft studio contact shadow always; deeper catcher for cinematic CAD lights.
+      shadowCatcherRef.current.visible = true;
+      const mat = shadowCatcherRef.current.material as THREE.ShadowMaterial;
+      mat.opacity = litPreview ? 0.55 : 0.18;
     }
     if (camerasGroupRef.current) {
       camerasGroupRef.current.visible = !litPreview;
@@ -4088,7 +4119,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
         )}
 
         {/* Viewport */}
-        <div className="flex-1 relative bg-[#12151c] min-w-0">
+        <div className="flex-1 relative bg-[#1b1b1b] min-w-0">
           <div
             ref={containerRef}
             className="absolute inset-0"

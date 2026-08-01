@@ -143,7 +143,7 @@ export const UVEditorModal: React.FC<UVEditorModalProps> = ({
   const uvFromEvent = (e: React.PointerEvent) => {
     const rect = boardRef.current?.getBoundingClientRect();
     if (!rect) return null;
-    return { u: clamp((e.clientX - rect.left) / rect.width), v: clamp(1 - (e.clientY - rect.top) / rect.height) };
+    return { u: clamp((e.clientX - rect.left) / rect.width), v: clamp((e.clientY - rect.top) / rect.height) };
   };
 
   const apply = (fn: (m: CADMesh, ids: string[]) => CADMesh, ids = selected) => {
@@ -379,11 +379,11 @@ export const UVEditorModal: React.FC<UVEditorModalProps> = ({
                   {mesh.faces.map((face, index) => {
                     const isSelected = selected.includes(face.id);
                     const isOverlap = showOverlap && overlaps.has(face.id);
-                    const points = face.uvs.map((p) => `${p.u * 1000},${(1 - p.v) * 1000}`).join(' ');
+                    const points = face.uvs.map((p) => `${p.u * 1000},${p.v * 1000}`).join(' ');
                     return <g key={face.id}>
                       <polygon points={points} fill={isOverlap ? '#ec5b623d' : isSelected ? '#ed730038' : '#ffffff0a'} stroke={isOverlap ? '#ec5b62' : isSelected ? '#ed7300' : '#7a7a7a'} strokeWidth={isSelected ? 4 : 2}/>
-                      {isSelected && <text x={getFaceUVBounds(face.uvs).cu * 1000} y={(1 - getFaceUVBounds(face.uvs).cv) * 1000} textAnchor="middle" fill="#ffffff" fontSize="22" className="pointer-events-none">{index + 1}</text>}
-                      {mode === 'vertex' && face.uvs.map((p, i) => <circle key={i} cx={p.u * 1000} cy={(1-p.v)*1000} r={activeVertex?.faceId === face.id && activeVertex.index === i ? 11 : 7} fill={activeVertex?.faceId === face.id && activeVertex.index === i ? '#ed7300' : '#e6e6e6'} stroke="#1a1a1a" strokeWidth="3"/>)}
+                      {isSelected && <text x={getFaceUVBounds(face.uvs).cu * 1000} y={getFaceUVBounds(face.uvs).cv * 1000} textAnchor="middle" fill="#ffffff" fontSize="22" className="pointer-events-none">{index + 1}</text>}
+                      {mode === 'vertex' && face.uvs.map((p, i) => <circle key={i} cx={p.u * 1000} cy={p.v*1000} r={activeVertex?.faceId === face.id && activeVertex.index === i ? 11 : 7} fill={activeVertex?.faceId === face.id && activeVertex.index === i ? '#ed7300' : '#e6e6e6'} stroke="#1a1a1a" strokeWidth="3"/>)}
                     </g>;
                   })}
                 </svg>

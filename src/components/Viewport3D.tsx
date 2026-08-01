@@ -19,7 +19,7 @@ import {
   loopCutFactors,
   type KnifeHit,
 } from '../utils/meshCutTools';
-import { samplePaintStrokeUvs } from '../utils/bvh/picking';
+import { pickPaintUv, samplePaintStrokeUvs, setRayFromPointer } from '../utils/bvh/picking';
 import { subscribeTexturePreview, cancelTexturePreviewNotify } from '../utils/texturePreviewBus';
 import { LightwaveNavToolbar } from './LightwaveNavToolbar';
 import { deformMeshWithBones, getBoneWorldMatrices, paintVertexWeight } from '../utils/rigging';
@@ -171,7 +171,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   /** Per-mesh textures — never share one CanvasTexture across all objects. */
   const meshTexturesRef = useRef<Map<string, { key: string; texture: THREE.Texture }>>(new Map());
   const [meshTextureTick, setMeshTextureTick] = useState(0);
-  const ambientLightRef = useRef<THREE.AmbientLight | null>(null);
+  /** Hemisphere fill — OutlineForge-style soft ambient (sky / ground). */
+  const ambientLightRef = useRef<THREE.HemisphereLight | null>(null);
   const dirLightRef = useRef<THREE.DirectionalLight | null>(null);
 
   const previousGizmoPosRef = useRef<THREE.Vector3>(new THREE.Vector3());
@@ -351,10 +352,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const [cadStep, setCadStep] = useState<0 | 1 | 2>(0);
   const [placementHoverPos, setPlacementHoverPos] = useState<THREE.Vector3 | null>(null);
   const [isPainting3DActive, setIsPainting3DActive] = useState<boolean>(false);
+  /** Immediate gesture state; React state can lag behind the first pointermove after pointerdown. */
+  const isPainting3DActiveRef = useRef(false);
+  const paintPointerIdRef = useRef<number | null>(null);
   const lastPaintClientRef = useRef<{ x: number; y: number } | null>(null);
-  /** Logical face locked for the active 3D paint stroke (prevents edge-bleed double pens). */
-  const paintStrokeFaceIdRef = useRef<string | null>(null);
-  const paintStrokeLastUvRef = useRef<{ u: number; v: number } | null>(null);
   const [paintCursor, setPaintCursor] = useState<{ x: number; y: number; u: number; v: number } | null>(null);
   const paintCursorRafRef = useRef(0);
   const pendingPaintCursorRef = useRef<{ x: number; y: number; u: number; v: number } | null>(null);
@@ -530,15 +531,17 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const height = containerRef.current.clientHeight;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color('#2b2b2b');
+    // OutlineForge live-view charcoal (soft shadows read better on near-black).
+    scene.background = new THREE.Color('#1b1b1b');
     sceneRef.current = scene;
 
     let camera: THREE.PerspectiveCamera | THREE.OrthographicCamera;
     const aspect = width / height;
 
     if (cameraType === 'perspective') {
-      camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 1000);
-      camera.position.set(4, 4, 6);
+      // FOV 38 + slightly lower eye matches the OutlineForge “LIVE 3D” framing.
+      camera = new THREE.PerspectiveCamera(38, aspect, 0.01, 1000);
+      camera.position.set(5.5, 3.5, 8);
     } else {
       const zoom = 4;
       camera = new THREE.OrthographicCamera(-zoom * aspect, zoom * aspect, zoom, -zoom, 0.1, 1000);
@@ -557,9 +560,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       powerPreference: 'high-performance',
     });
     renderer.setSize(width, height);
-    renderer.setPixelRatio(window.devicePixelRatio || 1);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
     rendererRef.current = renderer;
 
     containerRef.current.appendChild(renderer.domElement);
@@ -602,9 +606,26 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     });
 
     if (cameraType === 'perspective') {
-      const gridHelper = new THREE.GridHelper(10, 20, VIEWPORT_THEME.gridMajor, VIEWPORT_THEME.gridMinor);
+      // Charcoal grid + ShadowMaterial catcher — same presentation as OutlineForge LIVE 3D.
+      const gridSize = 14;
+      const gridHelper = new THREE.GridHelper(
+        gridSize,
+        28,
+        VIEWPORT_THEME.gridMajor,
+        VIEWPORT_THEME.gridMinor
+      );
       gridHelper.position.y = -0.001;
       scene.add(gridHelper);
+
+      const shadowFloor = new THREE.Mesh(
+        new THREE.PlaneGeometry(gridSize, gridSize),
+        new THREE.ShadowMaterial({ opacity: 0.18 })
+      );
+      shadowFloor.rotation.x = -Math.PI / 2;
+      shadowFloor.position.y = -0.002;
+      shadowFloor.receiveShadow = true;
+      shadowFloor.name = 'shadowFloor';
+      scene.add(shadowFloor);
     } else {
       // 2D Orthographic Drafting Grid (aligned to the orthographic projection plane)
       const orthoGrid = new THREE.GridHelper(12, 24, VIEWPORT_THEME.gridOrthoMajor, VIEWPORT_THEME.gridOrthoMinor);
@@ -660,13 +681,27 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     scene.add(vectorRefGroup);
     vectorRefGroupRef.current = vectorRefGroup;
 
-    const ambientLight = new THREE.AmbientLight(0xffffff, renderSettings.ambientIntensity || 0.8);
-    ambientLightRef.current = ambientLight;
-    scene.add(ambientLight);
+    const hemiLight = new THREE.HemisphereLight(
+      0xffffff,
+      0x242424,
+      renderSettings.ambientIntensity ?? 1.45
+    );
+    ambientLightRef.current = hemiLight;
+    scene.add(hemiLight);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, renderSettings.lightIntensity || 1.2);
-    dirLight.position.set(5, 10, 7);
+    const dirLight = new THREE.DirectionalLight(0xffffff, renderSettings.lightIntensity ?? 2.5);
+    dirLight.position.set(4, 7, 5);
     dirLight.castShadow = true;
+    dirLight.shadow.mapSize.set(2048, 2048);
+    dirLight.shadow.bias = -0.0002;
+    dirLight.shadow.normalBias = 0.02;
+    const shadowSpan = 10;
+    dirLight.shadow.camera.near = 0.5;
+    dirLight.shadow.camera.far = 40;
+    dirLight.shadow.camera.left = -shadowSpan;
+    dirLight.shadow.camera.right = shadowSpan;
+    dirLight.shadow.camera.top = shadowSpan;
+    dirLight.shadow.camera.bottom = -shadowSpan;
     dirLightRef.current = dirLight;
     scene.add(dirLight);
 
@@ -695,7 +730,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         camera.right = halfWidth;
         camera.updateProjectionMatrix();
       }
-      renderer.setPixelRatio(window.devicePixelRatio || 1);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       renderer.setSize(w, h);
     };
 
@@ -1108,8 +1143,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       texture.minFilter = THREE.NearestFilter;
       texture.generateMipmaps = false;
       texture.colorSpace = THREE.SRGBColorSpace;
-      // Canvas top (y=0) ↔ UV v=1 — matches UV editor / Pixel Paint (OpenGL-style).
-      texture.flipY = true;
+      // Keep flipY=false so imported atlases match the UV editor (canvas top = upright image).
+      // CAD face UVs typically have v=0 on the "top" of a face, which lines up with canvas y=0.
+      texture.flipY = false;
       texture.needsUpdate = true;
       return texture;
     };
@@ -1117,7 +1153,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     meshes.forEach((m) => {
       keep.add(m.id);
 
-      if (m.id === activeMeshId && textureCanvas) {
+      if (m.id === activeMeshId && textureCanvas && textureCanvas.width > 0 && textureCanvas.height > 0) {
         const key = `live:${textureRevision}:${textureCanvas.width}x${textureCanvas.height}`;
         const prev = map.get(m.id);
         if (
@@ -1188,9 +1224,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     return subscribeTexturePreview(() => {
       const entry = meshTexturesRef.current.get(activeMeshId);
       if (!entry) return;
-      if (entry.key.startsWith('live:') || (entry.texture as THREE.CanvasTexture).isCanvasTexture) {
-        entry.texture.needsUpdate = true;
-      }
+      const image = entry.texture.image as { width?: number; height?: number } | undefined;
+      if (!image || !image.width || !image.height) return;
+      // Only refresh GPU upload — never reassign image to a stale React prop mid-stroke
+      // (that stole the live composite and made 3D paint look dead).
+      entry.texture.needsUpdate = true;
     });
   }, [activeMeshId]);
 
@@ -1199,12 +1237,12 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const scene = sceneRef.current;
     if (!scene) return;
     if (ambientLightRef.current) {
-      ambientLightRef.current.intensity = renderSettings.ambientIntensity || 0.8;
+      ambientLightRef.current.intensity = renderSettings.ambientIntensity ?? 1.45;
     }
     if (dirLightRef.current) {
-      dirLightRef.current.intensity = renderSettings.lightIntensity || 1.2;
-      const elev = renderSettings.sunElevation ?? 55;
-      const az = renderSettings.sunAzimuth ?? 35;
+      dirLightRef.current.intensity = renderSettings.lightIntensity ?? 2.5;
+      const elev = renderSettings.sunElevation ?? 48;
+      const az = renderSettings.sunAzimuth ?? 39;
       const el = (elev * Math.PI) / 180;
       const azr = (az * Math.PI) / 180;
       dirLightRef.current.position.set(
@@ -1213,7 +1251,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         Math.cos(el) * Math.cos(azr) * 20,
       );
     }
-    scene.background = new THREE.Color(renderSettings.bgColor || '#2b2b2b');
+    scene.background = new THREE.Color(renderSettings.bgColor || '#1b1b1b');
     const fogDensity = renderSettings.fogDensity ?? 0;
     if (fogDensity > 0.001) {
       scene.fog = new THREE.FogExp2(renderSettings.fogColor || '#a8b4c4', fogDensity);
@@ -2636,10 +2674,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           side: THREE.DoubleSide,
         });
       } else if (toolState.viewMode === 'textured' && meshTexture) {
-        material = new THREE.MeshStandardMaterial({
+        // Unlit textured — paint / UV preview must show the atlas even if lights are dim.
+        material = new THREE.MeshBasicMaterial({
           map: meshTexture,
-          roughness: 0.3,
-          metalness: 0.2,
+          color: 0xffffff,
+          toneMapped: false,
           wireframe: isWireframe,
           side: THREE.DoubleSide,
         });
@@ -2663,11 +2702,13 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           side: THREE.DoubleSide,
         });
       } else {
+        // OutlineForge-style clay solid when untextured (soft key + soft contact shadow).
         material = new THREE.MeshStandardMaterial({
           map: meshTexture || null,
-          vertexColors: !meshTexture,
-          roughness: 0.3,
-          metalness: 0.2,
+          color: meshTexture ? 0xffffff : 0xa5a6a8,
+          vertexColors: false,
+          roughness: 0.64,
+          metalness: 0.08,
           wireframe: isWireframe,
           side: THREE.DoubleSide,
         });
@@ -2681,6 +2722,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       }
 
       const meshObj = new THREE.Mesh(geometry, material);
+      meshObj.castShadow = !isWireframe;
+      meshObj.receiveShadow = true;
 
       let posX = m.position.x;
       let posY = m.position.y;
@@ -3554,16 +3597,19 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     return snapToGrid(fallbackY, step);
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (e?: React.PointerEvent<HTMLDivElement>) => {
     if (modalActiveRef.current || toolStateRef.current.modalTransform) return;
 
-    if (isPainting3DActive && onDirect3DPaintPixel) {
+    const activePaintPointer = paintPointerIdRef.current;
+    if (e && activePaintPointer != null && e.pointerId !== activePaintPointer) return;
+
+    if (isPainting3DActiveRef.current && onDirect3DPaintPixel) {
       onDirect3DPaintPixel(0, 0, true);
     }
+    isPainting3DActiveRef.current = false;
+    paintPointerIdRef.current = null;
     setIsPainting3DActive(false);
     lastPaintClientRef.current = null;
-    paintStrokeFaceIdRef.current = null;
-    paintStrokeLastUvRef.current = null;
     isWeightPaintingRef.current = false;
     if (paintCursorRafRef.current) {
       cancelAnimationFrame(paintCursorRafRef.current);
@@ -3691,7 +3737,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       !cur.placeOnClick &&
       !cur.modalTransform &&
       !cur.modalMeshOp &&
-      !isPainting3DActive
+      !isPainting3DActiveRef.current
     ) {
       controlsRef.current.enabled = true;
       applyStandardOrbitMouseButtons(controlsRef.current);
@@ -3707,7 +3753,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
   const handlePointerLeave = () => {
     // Keep an active paint stroke alive — pointer capture continues delivering moves.
-    if (isPainting3DActive || isWeightPaintingRef.current) {
+    if (isPainting3DActiveRef.current || isWeightPaintingRef.current) {
       if (paintCursorRafRef.current) {
         cancelAnimationFrame(paintCursorRafRef.current);
         paintCursorRafRef.current = 0;
@@ -3881,6 +3927,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
       const uv = hit?.uv;
       if (hit && uv) {
+        isPainting3DActiveRef.current = true;
+        paintPointerIdRef.current = e.pointerId;
         setIsPainting3DActive(true);
         lastPaintClientRef.current = { x: e.clientX, y: e.clientY };
         if (controlsRef.current) controlsRef.current.enabled = false;
@@ -3894,8 +3942,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         }
         const faceMap = (hit.object as THREE.Mesh).geometry?.userData?.triangleToFaceId as string[] | undefined;
         const faceId = hit.faceIndex != null ? faceMap?.[hit.faceIndex] ?? null : null;
-        paintStrokeFaceIdRef.current = faceId;
-        paintStrokeLastUvRef.current = { u: uv.x, v: uv.y };
         onDirect3DPaintPixel(uv.x, uv.y, false, faceId);
         e.preventDefault();
         e.stopPropagation();
@@ -4166,10 +4212,20 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     if (toolState.isPainting3D && activeMeshObjectRef.current) {
       const paintMesh = activeMeshObjectRef.current;
-      if (isPainting3DActive && onDirect3DPaintPixel && cameraRef.current) {
-        const from = lastPaintClientRef.current ?? { x: e.clientX, y: e.clientY };
+      if (
+        isPainting3DActiveRef.current &&
+        paintPointerIdRef.current === e.pointerId &&
+        (e.buttons & 1) !== 0 &&
+        onDirect3DPaintPixel &&
+        cameraRef.current
+      ) {
+        const from = lastPaintClientRef.current;
         const to = { x: e.clientX, y: e.clientY };
-        const skipStart = !!lastPaintClientRef.current;
+        // After a miss, don't bridge from off-mesh screen positions — that sweeps
+        // rays across the silhouette and stamps stray dots near face tops/edges.
+        const bridging = !!from;
+        const sampleFrom = from ?? to;
+        const skipStart = bridging;
         const texImage = meshTexturesRef.current.get(activeMeshId)?.texture?.image as
           | { width?: number }
           | undefined;
@@ -4182,25 +4238,28 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           cameraRef.current,
           paintMesh,
           rect,
-          from,
+          sampleFrom,
           to,
           {
             maxSteps: 64,
             textureSize: texSize,
             skipStart,
-            // Stay on the face the stroke started on — grazing rays at edges
-            // used to paint a second parallel stroke on the neighbouring face.
-            lockFaceId: paintStrokeFaceIdRef.current,
-            // With face lock, only reject true UV teleports (seam bleed), not normal face travel.
-            maxUvJump: 0.85,
-            seedUv: paintStrokeLastUvRef.current,
+            // Samples are screen-space ray hits, so crossing a real model edge is safe.
+            // Do not lock to the starting polygon or the stroke stops at face boundaries.
+            maxUvJump: 0,
+            // Imported and double-sided meshes can have reversed triangle winding.
+            // A facing filter rejects valid visible hits on those surfaces.
+            minFacing: 0,
           },
         );
-        lastPaintClientRef.current = to;
+
+        // Empty strokeHits can simply mean the pointer stayed in the same texel.
+        setRayFromPointer(raycaster, cameraRef.current, to.x, to.y, rect);
+        const endHit = pickPaintUv(raycaster, paintMesh);
 
         if (strokeHits.length > 0) {
+          lastPaintClientRef.current = to;
           const last = strokeHits[strokeHits.length - 1];
-          paintStrokeLastUvRef.current = { u: last.uv.x, v: last.uv.y };
           schedulePaintCursor({
             x: e.clientX - rect.left,
             y: e.clientY - rect.top,
@@ -4213,8 +4272,17 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           for (const sample of strokeHits) {
             onDirect3DPaintPixel(sample.uv.x, sample.uv.y, false, sample.faceId);
           }
+        } else if (endHit) {
+          lastPaintClientRef.current = to;
+          schedulePaintCursor({
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top,
+            u: endHit.uv.x,
+            v: endHit.uv.y,
+          });
         } else {
-          // Keep last client pos so the next successful hit can fill the gap from here.
+          // Left the mesh / locked face — don't gap-fill across the silhouette.
+          lastPaintClientRef.current = null;
           schedulePaintCursor(null);
         }
       } else {
@@ -4314,12 +4382,13 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const isBlockout = activeWorkspaceMode === 'blockout';
 
   return (
-    <div className="relative w-full h-full overflow-hidden bg-[#2b2b2b] select-none font-sans">
+    <div className="relative w-full h-full overflow-hidden bg-[#1b1b1b] select-none font-sans">
       <div
         ref={containerRef}
-        onPointerDown={handlePointerDown}
+        onPointerDownCapture={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
         onPointerLeave={handlePointerLeave}
         className={`w-full h-full ${
           toolState.isCadDrawing

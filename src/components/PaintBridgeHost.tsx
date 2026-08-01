@@ -63,7 +63,8 @@ export const PaintBridgeHost: React.FC<Props> = ({
         const w = canvas.width;
         const h = canvas.height;
         const x = Math.max(0, Math.min(w - 1, Math.floor(uvU * w)));
-        const y = Math.max(0, Math.min(h - 1, Math.floor((1 - uvV) * h)));
+        // flipY=false: UV.v maps straight to canvas Y (0 = top).
+        const y = Math.max(0, Math.min(h - 1, Math.floor(uvV * h)));
 
         if (paintTool === 'picker') {
           const sample = ctx.getImageData(x, y, 1, 1).data;

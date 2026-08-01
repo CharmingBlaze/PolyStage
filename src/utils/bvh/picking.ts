@@ -166,7 +166,8 @@ export function pickLogicalFace(
 /** Fast UV paint sample for 3D texture painting (first hit only). */
 export function pickPaintUv(
   raycaster: THREE.Raycaster,
-  mesh: THREE.Mesh
+  mesh: THREE.Mesh,
+  options?: { minFacing?: number }
 ): BvhPaintHit | null {
   ensureBvhPatched();
   const prev = raycaster.firstHitOnly;
@@ -176,6 +177,14 @@ export function pickPaintUv(
 
   const hit = hits[0];
   if (!hit?.uv) return null;
+
+  // Reject grazing / silhouette scrapes — they produce unstable UVs and stray edge dots.
+  const minFacing = options?.minFacing;
+  if (minFacing != null && minFacing > 0 && hit.face) {
+    const normal = hit.face.normal.clone().transformDirection(mesh.matrixWorld).normalize();
+    const facing = -raycaster.ray.direction.dot(normal);
+    if (facing < minFacing) return null;
+  }
 
   return {
     meshId: mesh.userData.meshId as string,
@@ -205,6 +214,11 @@ export type SamplePaintStrokeOptions = {
   maxUvJump?: number;
   /** UV of the last stamped sample — seeds the jump guard across pointer events. */
   seedUv?: { u: number; v: number } | null;
+  /**
+   * Minimum −dot(ray, normal). Grazing silhouette hits below this are dropped
+   * (stops random dots along the top/side edges of a face).
+   */
+  minFacing?: number;
 };
 
 /**
@@ -225,9 +239,17 @@ export function samplePaintStrokeUvs(
     textureSize,
     skipStart = false,
     lockFaceId = undefined,
-    maxUvJump = 0.35,
     seedUv = null,
+    // Mild grazing reject — high values break continuous paint on angled faces.
+    minFacing = 0.08,
   } = options;
+
+  const tex = textureSize && textureSize > 0 ? textureSize : 0;
+  // Reject seam teleports, but stay loose enough for fast hold-to-drag strokes
+  // (sparse pointer events can move tens of texels between samples).
+  const maxUvJump =
+    options.maxUvJump ??
+    (tex > 0 ? Math.max(0.22, 48 / tex) : 0.28);
 
   const dx = toClient.x - fromClient.x;
   const dy = toClient.y - fromClient.y;
@@ -236,7 +258,6 @@ export function samplePaintStrokeUvs(
   const steps = dist < 0.5 ? 0 : Math.max(1, Math.min(maxSteps, Math.ceil(dist)));
   const hits: BvhPaintHit[] = [];
   const seen = new Set<string>();
-  const tex = textureSize && textureSize > 0 ? textureSize : 0;
   const startI = skipStart && steps > 0 ? 1 : 0;
   let lastUv: THREE.Vector2 | null = seedUv
     ? new THREE.Vector2(seedUv.u, seedUv.v)
@@ -247,7 +268,7 @@ export function samplePaintStrokeUvs(
     const x = fromClient.x + dx * t;
     const y = fromClient.y + dy * t;
     setRayFromPointer(raycaster, camera, x, y, rect);
-    const hit = pickPaintUv(raycaster, mesh);
+    const hit = pickPaintUv(raycaster, mesh, { minFacing });
     if (!hit) continue;
 
     if (lockFaceId != null && hit.faceId !== lockFaceId) continue;

@@ -19,8 +19,9 @@ export const VIEWPORT_THEME = {
   axisZ: 0x6a9ec4,
   /** Hover / active gizmo axis */
   axisActive: 0xed7300,
-  gridMajor: 0xed7300,
-  gridMinor: 0x323232,
+  /** Perspective floor — charcoal like OutlineForge LIVE 3D (not orange). */
+  gridMajor: 0x565656,
+  gridMinor: 0x303030,
   gridOrthoMajor: 0xc96a00,
   gridOrthoMinor: 0x383838,
   selection: 0xe68619,

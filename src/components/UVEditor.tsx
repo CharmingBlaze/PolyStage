@@ -206,11 +206,12 @@ export const UVEditor: React.FC<UVEditorProps> = ({
 
   const uvToScreen = (uv: UVCoord): Point => {
     const v = viewRef.current;
-    return { x: v.x + uv.u*v.scale, y: v.y + (1-uv.v)*v.scale };
+    // v=0 at top — matches 3D texture.flipY=false and paint canvas Y.
+    return { x: v.x + uv.u*v.scale, y: v.y + uv.v*v.scale };
   };
   const screenToUv = (p: Point): UVCoord => {
     const v = viewRef.current;
-    return { u: (p.x-v.x)/v.scale, v: 1-(p.y-v.y)/v.scale };
+    return { u: (p.x-v.x)/v.scale, v: (p.y-v.y)/v.scale };
   };
   const eventPoint = (e: React.PointerEvent<HTMLCanvasElement> | React.WheelEvent<HTMLCanvasElement>): Point => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -232,7 +233,7 @@ export const UVEditor: React.FC<UVEditorProps> = ({
     viewRef.current = {
       scale,
       x: (cssW-scale*w)/2-minU*scale,
-      y: (cssH-scale*h)/2+(maxV-1)*scale,
+      y: (cssH-scale*h)/2-minV*scale,
     };
     setZoomPercent(Math.round(scale/Math.max(1, Math.min(cssW,cssH)-44)*100));
     drawRef.current();
@@ -560,7 +561,13 @@ export const UVEditor: React.FC<UVEditorProps> = ({
 
   /** Bake flip/rotate into the mesh texture canvas (updates 3D + paint). */
   const transformMeshTexture = (op: 'flipH' | 'flipV' | 'rotCW' | 'rotCCW') => {
-    if (!textureCanvas || !onTextureUpdated || textureLocked) return;
+    if (
+      !textureCanvas ||
+      textureCanvas.width <= 0 ||
+      textureCanvas.height <= 0 ||
+      !onTextureUpdated ||
+      textureLocked
+    ) return;
     const w = textureCanvas.width;
     const h = textureCanvas.height;
     const src = document.createElement('canvas');
@@ -666,7 +673,7 @@ export const UVEditor: React.FC<UVEditorProps> = ({
     const v=viewRef.current;
     // Neighboring tiles / checker — charcoal tones
     for(let tu=-1;tu<=1;tu++)for(let tv=-1;tv<=1;tv++){
-      const x=v.x+tu*v.scale,y=v.y-(tv)*v.scale;
+      const x=v.x+tu*v.scale,y=v.y+tv*v.scale;
       ctx.fillStyle=(tu===0&&tv===0)?'#262626':'#222222';ctx.fillRect(x,y,v.scale,v.scale);
       const tile=Math.max(8,v.scale/16);for(let yy=0;yy<v.scale;yy+=tile)for(let xx=0;xx<v.scale;xx+=tile){
         if((Math.floor(xx/tile)+Math.floor(yy/tile))%2===0){ctx.fillStyle=tu===0&&tv===0?'#303030':'#282828';ctx.fillRect(x+xx,y+yy,tile,tile)}
@@ -674,8 +681,8 @@ export const UVEditor: React.FC<UVEditorProps> = ({
       ctx.strokeStyle=tu===0&&tv===0?'#ed7300':'#3a3a3a';ctx.lineWidth=tu===0&&tv===0?2:1;ctx.strokeRect(x,y,v.scale,v.scale);
       if(tu!==0||tv!==0){ctx.fillStyle='#6a6a6a';ctx.font='10px monospace';ctx.fillText(`${1001+tu+tv*10}`,x+6,y+14)}
     }
-    if(showTexture&&textureCanvas){
-      // Atlas buffer already has v=1 at canvas top (flipY=true / paint stamps 1-v).
+    if(showTexture&&textureCanvas&&textureCanvas.width>0&&textureCanvas.height>0){
+      // Draw atlas upright. 3D uses flipY=false so canvas top matches the viewport.
       ctx.save();
       ctx.globalAlpha=.78;
       ctx.imageSmoothingEnabled=!nearest;
@@ -1051,7 +1058,7 @@ export const UVEditor: React.FC<UVEditorProps> = ({
               const factor = e.deltaY > 0 ? 0.9 : 1.1;
               viewRef.current.scale = clamp(viewRef.current.scale * factor, 24, 6000);
               viewRef.current.x = p.x - before.u * viewRef.current.scale;
-              viewRef.current.y = p.y - (1 - before.v) * viewRef.current.scale;
+              viewRef.current.y = p.y - before.v * viewRef.current.scale;
               setZoomPercent(Math.round(viewRef.current.scale / 2.6));
               drawRef.current();
             }}

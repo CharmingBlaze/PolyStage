@@ -231,6 +231,8 @@ interface PixelPaintStudioProps {
   onTextureUpdated: (canvas: HTMLCanvasElement, opts?: { encode?: boolean; immediate?: boolean; clearAnimation?: boolean }) => void;
   /** Cheap 3D preview refresh (no PNG encode). */
   onLiveTextureFlush?: () => void;
+  /** Paint hydrate / new edit buffer — parent should rebind 3D map to this canvas. */
+  onBindLiveTextureCanvas?: (canvas: HTMLCanvasElement) => void;
   textureCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
   initialDataUrl?: string | null;
   paintBridgeRef?: React.MutableRefObject<Paint3DBridge | null>;
@@ -248,7 +250,7 @@ function createLayerCanvas(w: number, h: number, fillTransparent = true): HTMLCa
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
-  const ctx = c.getContext('2d')!;
+  const ctx = c.getContext('2d', { willReadFrequently: true })!;
   ctx.imageSmoothingEnabled = false;
   if (!fillTransparent) {
     ctx.fillStyle = '#ffffff';
@@ -264,6 +266,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
   setToolState,
   onTextureUpdated,
   onLiveTextureFlush,
+  onBindLiveTextureCanvas,
   textureCanvasRef,
   initialDataUrl,
   paintBridgeRef,
@@ -346,6 +349,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
   const layerCanvasMap = useRef(new Map<string, HTMLCanvasElement>());
   const onTextureUpdatedRef = useRef(onTextureUpdated);
   const onLiveTextureFlushRef = useRef(onLiveTextureFlush);
+  const onBindLiveTextureCanvasRef = useRef(onBindLiveTextureCanvas);
   const displayRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const compositeRef = useRef<HTMLCanvasElement | null>(null);
@@ -375,6 +379,10 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
   useEffect(() => {
     onLiveTextureFlushRef.current = onLiveTextureFlush;
   }, [onLiveTextureFlush]);
+
+  useEffect(() => {
+    onBindLiveTextureCanvasRef.current = onBindLiveTextureCanvas;
+  }, [onBindLiveTextureCanvas]);
 
   const frame = frames[frameIndex] || frames[0];
   const layers = frame?.layers || [];
@@ -551,7 +559,14 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     const persist = opts?.persist === true;
     const composite = getComposite();
     if (readyToPersistRef.current || persist) {
-      textureCanvasRef.current = composite;
+      const prev = textureCanvasRef.current;
+      if (prev !== composite) {
+        // New buffer (e.g. first composite after hydrate) — rebind 3D once.
+        onBindLiveTextureCanvasRef.current?.(composite);
+      } else {
+        textureCanvasRef.current = composite;
+        onLiveTextureFlushRef.current?.();
+      }
       if (!persist || canvasSize >= LARGE_CANVAS_UNDO) {
         onLiveTextureFlushRef.current?.();
       }
@@ -619,11 +634,9 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
         c.height = 0;
       });
       layerCanvasMap.current.clear();
-      if (compositeRef.current) {
-        compositeRef.current.width = 0;
-        compositeRef.current.height = 0;
-        compositeRef.current = null;
-      }
+      // The parent keeps the composite as the live mesh texture after Paint unmounts.
+      // Clearing its dimensions here invalidates both WebGL uploads and UV drawImage.
+      compositeRef.current = null;
       paint3DStrokeMaskRef.current.clear();
     };
     // Intentionally once — capture latest via refs.
@@ -675,8 +688,8 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
         compositeRef.current.height = snapped;
       }
       // Keep live mesh texture on this canvas — do NOT encode PNG into React state here
-      // (that was freezing the tab at 1024²). Ref already drives the 3D view.
-      textureCanvasRef.current = c;
+      // (that was freezing the tab at 1024²). Parent rebinds the 3D map via onBindLiveTextureCanvas.
+      onBindLiveTextureCanvasRef.current?.(c);
       undoStack.current = [];
       redoStack.current = [];
       expectedHydrateSizeRef.current = snapped;
@@ -1127,8 +1140,8 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
         ctx.imageSmoothingEnabled = false;
 
         const x = Math.max(0, Math.min(canvasSize - 1, Math.floor(uvU * canvasSize)));
-        // Canvas top (y=0) ↔ UV v=1 — same as UV editor and texture.flipY=true.
-        const y = Math.max(0, Math.min(canvasSize - 1, Math.floor((1 - uvV) * canvasSize)));
+        // With texture.flipY=false, raycast UV.v maps directly to canvas Y (0 = top).
+        const y = Math.max(0, Math.min(canvasSize - 1, Math.floor(uvV * canvasSize)));
         if (paintTool === 'picker') {
           const sample = getComposite().getContext('2d')!.getImageData(x, y, 1, 1).data;
           if (sample[3]) setToolState((state) => ({ ...state, activeColor: rgbaToHex(sample[0], sample[1], sample[2]), drawTool: 'pencil' }));
@@ -1193,6 +1206,8 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
         // live composite without full undo push — keep textureCanvasRef on the same canvas the 3D view samples
         const composite = getComposite();
         textureCanvasRef.current = composite;
+        // Do NOT call onBindLiveTextureCanvas here — setState mid-stroke rebuilds the mesh and kills 3D paint.
+        onLiveTextureFlushRef.current?.();
         const display = displayRef.current;
         if (display) {
           const dctx = display.getContext('2d');
@@ -2182,8 +2197,8 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                   {mesh.faces.map((face) => {
                     if (face.uvs.length < 2) return null;
                     const selected = selectedFaceSet.has(face.id);
-                    // Canvas / SVG y=0 at top ↔ UV v=1 (matches UV editor).
-                    const points = face.uvs.map((p) => `${p.u},${1 - p.v}`).join(' ');
+                    // Canvas / SVG y=0 at top ↔ UV v=0 (matches 3D flipY=false + paint stamps).
+                    const points = face.uvs.map((p) => `${p.u},${p.v}`).join(' ');
                     return (
                       <polygon
                         key={face.id}

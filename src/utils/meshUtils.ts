@@ -12,6 +12,7 @@ import { createPrimitiveMesh } from './topology/primitives';
 import { triangulateFaces } from './topology/triangulate';
 import { finalizeEditableMesh } from './topology/validate';
 import { extrudeFacesOnce, insetFacesOnce } from './modalMeshOps';
+import { attachMeshBvh } from './bvh';
 
 export function snapToGrid(val: number, step: number): number {
   if (step === 0) return val;
@@ -148,7 +149,8 @@ export function buildThreeGeometry(mesh: CADMesh): THREE.BufferGeometry {
   geometry.userData.polygonCount = mesh.faces.length;
   geometry.userData.triangleCount = buffers.triangleToFaceId.length;
 
-  return geometry;
+  // BVH for fast / stable paint + pick raycasts (indirect keeps triangle→face maps valid).
+  return attachMeshBvh(geometry);
 }
 
 export function extrudeFace(mesh: CADMesh, faceId: string, depth: number = 0.5): CADMesh {

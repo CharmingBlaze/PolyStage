@@ -39,7 +39,6 @@ import type {
   TextureClipKey,
 } from '../types/cad';
 import { buildThreeGeometry, buildLogicalEdgeGeometry } from '../utils/meshUtils';
-import { attachMeshBvh } from '../utils/bvh';
 import { createEmptyClip, evaluateClipAtTime, sampleChannel, insertTextureClipKey, insertTexFrameKeyframe } from '../utils/animation';
 import { resolveMeshTextureAtTime } from '../utils/textureAnimation';
 import { deformMeshWithBones } from '../utils/rigging';
@@ -145,11 +144,11 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
     const height = containerRef.current.clientHeight;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color('#2b2b2b');
+    scene.background = new THREE.Color('#1b1b1b');
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-    camera.position.set(4, 3, 5);
+    const camera = new THREE.PerspectiveCamera(38, width / height, 0.01, 1000);
+    camera.position.set(5.5, 3.5, 8);
     camera.lookAt(0, 0, 0);
     cameraRef.current = camera;
 
@@ -159,7 +158,10 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
       powerPreference: 'high-performance',
     });
     renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
     rendererRef.current = renderer;
 
     containerRef.current.appendChild(renderer.domElement);
@@ -180,14 +182,40 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
       controls.enabled = !event.value;
     });
 
-    const gridHelper = new THREE.GridHelper(10, 20, VIEWPORT_THEME.gridMajor, VIEWPORT_THEME.gridMinor);
+    const gridSize = 14;
+    const gridHelper = new THREE.GridHelper(
+      gridSize,
+      28,
+      VIEWPORT_THEME.gridMajor,
+      VIEWPORT_THEME.gridMinor
+    );
     gridHelper.position.y = -0.001;
     scene.add(gridHelper);
 
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
-    scene.add(ambientLight);
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
-    dirLight.position.set(5, 10, 7);
+    const shadowFloor = new THREE.Mesh(
+      new THREE.PlaneGeometry(gridSize, gridSize),
+      new THREE.ShadowMaterial({ opacity: 0.18 })
+    );
+    shadowFloor.rotation.x = -Math.PI / 2;
+    shadowFloor.position.y = -0.002;
+    shadowFloor.receiveShadow = true;
+    scene.add(shadowFloor);
+
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x242424, 1.45);
+    scene.add(hemiLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 2.5);
+    dirLight.position.set(4, 7, 5);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.set(2048, 2048);
+    dirLight.shadow.bias = -0.0002;
+    dirLight.shadow.normalBias = 0.02;
+    const shadowSpan = 10;
+    dirLight.shadow.camera.near = 0.5;
+    dirLight.shadow.camera.far = 40;
+    dirLight.shadow.camera.left = -shadowSpan;
+    dirLight.shadow.camera.right = shadowSpan;
+    dirLight.shadow.camera.top = shadowSpan;
+    dirLight.shadow.camera.bottom = -shadowSpan;
     scene.add(dirLight);
 
     const mGroup = new THREE.Group();
@@ -264,14 +292,16 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
 
     posed.meshes.forEach((posedMesh) => {
       const skinnedMesh = deformMeshWithBones(posedMesh, posed.bones);
-      const geometry = attachMeshBvh(buildThreeGeometry(skinnedMesh));
+      const geometry = buildThreeGeometry(skinnedMesh);
       const isSelected = posedMesh.id === selectedMeshId;
       const track = activeClip.tracks.find((t) => t.targetId === posedMesh.id && t.targetType === 'mesh');
       const tex = resolveMeshTextureAtTime(posedMesh, track, currentTime);
       const material = new THREE.MeshStandardMaterial({
-        vertexColors: !tex.dataUrl,
-        roughness: 0.6,
-        metalness: 0.2,
+        map: null,
+        color: tex.dataUrl ? 0xffffff : 0xa5a6a8,
+        vertexColors: false,
+        roughness: 0.64,
+        metalness: 0.08,
       });
 
       if (tex.dataUrl) {
@@ -282,9 +312,10 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
           texture.minFilter = THREE.NearestFilter;
           texture.generateMipmaps = false;
           texture.colorSpace = THREE.SRGBColorSpace;
-          texture.flipY = true;
+          texture.flipY = false;
           texture.needsUpdate = true;
           material.map = texture;
+          material.color.set(0xffffff);
           material.needsUpdate = true;
           needsAnimRenderRef.current = true;
         };
@@ -292,6 +323,8 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
       }
 
       const meshObj = new THREE.Mesh(geometry, material);
+      meshObj.castShadow = true;
+      meshObj.receiveShadow = true;
       meshObj.position.set(posedMesh.position.x, posedMesh.position.y, posedMesh.position.z);
       meshObj.rotation.set(posedMesh.rotation.x, posedMesh.rotation.y, posedMesh.rotation.z);
       meshObj.scale.set(posedMesh.scale.x, posedMesh.scale.y, posedMesh.scale.z);
@@ -642,7 +675,7 @@ export const FullAnimationStudio: React.FC<FullAnimationStudioProps> = ({
           </div>
         </div>
 
-        <div ref={containerRef} className="flex-1 h-full relative bg-[#2b2b2b]">
+        <div ref={containerRef} className="flex-1 h-full relative bg-[#1b1b1b]">
           <div className="absolute top-2 left-2 flex items-center gap-2 pointer-events-none z-10 font-mono text-[10px]">
             <span className="cad-card px-2.5 py-1 text-[#ed7300] font-bold border-[#4d4d4d] uppercase flex items-center gap-1">
               <Sparkles className="w-3 h-3 text-[#ed7300]" />

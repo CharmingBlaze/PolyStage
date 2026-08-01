@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Header } from './components/Header';
 import { Toolbar } from './components/Toolbar';
 import { Viewport3D } from './components/Viewport3D';
@@ -404,17 +404,19 @@ export const App: React.FC = () => {
     dither: false,
     bloom: true,
     ssao: true,
-    ambientIntensity: 0.8,
-    lightIntensity: 1.2,
+    // OutlineForge LIVE 3D: hemisphere fill + strong soft key.
+    ambientIntensity: 1.45,
+    lightIntensity: 2.5,
     wireframeColor: '#ff9a3c',
-    bgColor: '#2b2b2b',
+    bgColor: '#1b1b1b',
     turntableSpeed: 1,
     isTurntablePlaying: false,
     weather: 'clear',
     fogDensity: 0,
     fogColor: '#a8b4c4',
-    sunElevation: 55,
-    sunAzimuth: 35,
+    // ≈ directional light at (4, 7, 5)
+    sunElevation: 48,
+    sunAzimuth: 39,
   });
 
   const [activeRightTab, setActiveRightTab] = useState<'outliner' | 'properties' | 'material' | 'rig' | 'render'>('outliner');
@@ -471,6 +473,18 @@ export const App: React.FC = () => {
     // Viewport listens via texturePreviewBus — no App setState on every stamp.
     notifyTexturePreview();
   };
+
+  /** When Paint allocates a new edit canvas, bump revision so Viewport rebinds the map. */
+  const bindLiveTextureCanvas = useCallback((canvas: HTMLCanvasElement) => {
+    const prev = textureCanvasRef.current;
+    textureCanvasRef.current = canvas;
+    notifyTexturePreview();
+    // Always bump when the caller hands us a canvas to bind (hydrate / new buffer).
+    // Compare by identity so repeat calls with the same composite are cheap no-ops.
+    if (prev !== canvas) {
+      setTextureRevision((revision) => revision + 1);
+    }
+  }, []);
 
   useEffect(() => {
     if (!toolState.isPainting3D) return;
@@ -1479,6 +1493,8 @@ export const App: React.FC = () => {
     // Large stills during live paint: preview only — encode on leave Paint / explicit encode.
     if (!wantEncode && isLarge) {
       notifyTexturePreview();
+      // Rebind when the canvas instance changed (Paint hydrate), not every stamp.
+      setTextureRevision((revision) => revision + 1);
       return;
     }
 
@@ -1605,8 +1621,8 @@ export const App: React.FC = () => {
     }
 
     const x = Math.max(0, Math.min(canvas.width - 1, Math.floor(uvU * canvas.width)));
-    // Canvas top (y=0) ↔ UV v=1 — same as UV editor and texture.flipY=true.
-    const y = Math.max(0, Math.min(canvas.height - 1, Math.floor((1 - uvV) * canvas.height)));
+    // With texture.flipY=false, raycast UV.v maps directly to canvas Y (0 = top).
+    const y = Math.max(0, Math.min(canvas.height - 1, Math.floor(uvV * canvas.height)));
     const color = toolState.activeColor || '#ff9a3c';
     const bSize = toolState.brushSize || 1;
     const tool = toolState.drawTool || 'pencil';
@@ -2143,6 +2159,7 @@ export const App: React.FC = () => {
                     setToolState={setToolState}
                     onTextureUpdated={handleTextureUpdated}
                     onLiveTextureFlush={flushLivePaintPreview}
+                    onBindLiveTextureCanvas={bindLiveTextureCanvas}
                     textureCanvasRef={textureCanvasRef}
                     initialDataUrl={activeMesh.textureCanvasDataUrl}
                     paintBridgeRef={paintBridgeRef}
