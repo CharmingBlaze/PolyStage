@@ -24,7 +24,8 @@ export const VIEWPORT_THEME = {
   gridMinor: 0x303030,
   gridOrthoMajor: 0xc96a00,
   gridOrthoMinor: 0x383838,
-  selection: 0xe68619,
+  /** Active mesh/component selection — bright brand amber, distinct from the red X axis. */
+  selection: 0xff9a3c,
   hover: 0xec5b62,
   idleHandle: 0x6a9ec4,
   boneIdle: 0xed7300,

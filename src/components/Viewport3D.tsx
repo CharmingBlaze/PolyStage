@@ -2819,10 +2819,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           color:
             activeWorkspaceMode === 'blockout'
               ? 0xe8d090
-              : isHovered
-                ? VIEWPORT_THEME.hover
-                : isSelected
-                  ? VIEWPORT_THEME.idleHandle
+              : isSelected
+                ? VIEWPORT_THEME.selection
+                : isHovered
+                  ? VIEWPORT_THEME.hover
                   : toolState.xray
                     ? 0x9a9a9a
                     : VIEWPORT_THEME.idleHandle,
