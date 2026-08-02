@@ -235,13 +235,13 @@ export const UVEditorModal: React.FC<UVEditorModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm p-3 flex items-center justify-center">
-      <div className={`adobe-workspace flex flex-col overflow-hidden rounded-md border border-[#4d4d4d] shadow-2xl ${maximized ? 'w-full h-full' : 'w-[1100px] h-[760px]'}`}>
+      <div className={`adobe-workspace flex flex-col overflow-hidden rounded-md border border-[#3b3f46] shadow-2xl ${maximized ? 'w-full h-full' : 'w-[1100px] h-[760px]'}`}>
         <header className="adobe-panel-header h-12 shrink-0 px-4 justify-between">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-8 h-8 rounded bg-[rgba(237,115,0,.18)] text-[#ed7300] flex items-center justify-center shrink-0"><Box size={17} /></div>
             <div className="min-w-0">
               <div className="font-semibold text-sm">UV Atlas Studio</div>
-              <div className="text-[10px] text-[#999999] truncate">{mesh.name} · precision unwrap, inspect and pack</div>
+              <div className="text-[10px] text-[#8b909a] truncate">{mesh.name} · precision unwrap, inspect and pack</div>
             </div>
             {meshes.length > 0 && onSelectMesh && (
               <select
@@ -268,7 +268,7 @@ export const UVEditorModal: React.FC<UVEditorModalProps> = ({
           <button className={iconButton} onClick={() => apply((m, ids) => planarProjectFaces(m, ids, 'auto'))}><Compass size={14}/> Planar</button>
           <button className={iconButton} onClick={() => setMesh(cylindricalUnwrapFaces(mesh, selected.length ? selected : undefined))}>Cylinder</button>
           <button className={iconButton} onClick={() => setMesh(sphericalUnwrapFaces(mesh, selected.length ? selected : undefined))}>Sphere</button>
-          <div className="w-px h-6 bg-[#4d4d4d] mx-1"/>
+          <div className="w-px h-6 bg-[#3b3f46] mx-1"/>
           <button className={`${iconButton} is-active`} onClick={() => setMesh(packUVIslandsGrid(mesh, selected.length ? selected : undefined, padding))}><ScanSearch size={14}/> Pack atlas</button>
           <button className={iconButton} onClick={fitSelected}><Maximize2 size={14}/> Fit</button>
           <div className="ml-auto flex items-center gap-1">
@@ -282,7 +282,7 @@ export const UVEditorModal: React.FC<UVEditorModalProps> = ({
           <aside className="adobe-inspector w-60 shrink-0 p-3 border-r overflow-y-auto text-[11px] space-y-4">
             <section>
               <div className="flex items-center justify-between mb-2">
-                <div className="text-[10px] uppercase tracking-widest text-[#999999]">Faces</div>
+                <div className="text-[10px] uppercase tracking-widest text-[#8b909a]">Faces</div>
                 <button className="text-[#ed7300] hover:text-[#ffb366]" onClick={() => setSelectedFaceIds(mesh.faces.map((f) => f.id))}>Select all</button>
               </div>
               <div className="max-h-32 overflow-y-auto grid grid-cols-2 gap-1 pr-1">
@@ -298,7 +298,7 @@ export const UVEditorModal: React.FC<UVEditorModalProps> = ({
                           ? prev.includes(face.id) ? prev.filter((id) => id !== face.id) : [...prev, face.id]
                           : [face.id]);
                       }}
-                      className={`h-7 px-2 rounded border text-left truncate ${chosen ? 'bg-[rgba(237,115,0,.25)] border-[#ed7300] text-white' : 'bg-[#262626] border-[#4d4d4d] text-[#b3b3b3] hover:text-white'}`}
+                      className={`h-7 px-2 rounded border text-left truncate ${chosen ? 'bg-[rgba(237,115,0,.25)] border-[#ed7300] text-white' : 'bg-[#191b1e] border-[#3b3f46] text-[#a6abb4] hover:text-white'}`}
                     >
                       Face {index + 1} <span className="text-[9px] opacity-60">{face.vertexIds.length}v</span>
                     </button>
@@ -307,7 +307,7 @@ export const UVEditorModal: React.FC<UVEditorModalProps> = ({
               </div>
             </section>
             <section>
-              <div className="text-[10px] uppercase tracking-widest text-[#999999] mb-2">Transform selection</div>
+              <div className="text-[10px] uppercase tracking-widest text-[#8b909a] mb-2">Transform selection</div>
               <div className="grid grid-cols-2 gap-1.5">
                 <button className={iconButton} onClick={() => rotateSelected(-90)}><RotateCcw size={14}/> −90°</button>
                 <button className={iconButton} onClick={() => rotateSelected(90)}><RotateCw size={14}/> +90°</button>
@@ -318,7 +318,7 @@ export const UVEditorModal: React.FC<UVEditorModalProps> = ({
               </div>
             </section>
             <section className="space-y-2">
-              <div className="text-[10px] uppercase tracking-widest text-[#999999]">Atlas settings</div>
+              <div className="text-[10px] uppercase tracking-widest text-[#8b909a]">Atlas settings</div>
               <label className="block text-slate-400">Pixel snap
                 <select value={snapDivisions} onChange={(e) => setSnapDivisions(+e.target.value)} className="cad-input mt-1 w-full h-8 px-2">
                   <option value={0}>Off — free movement</option><option value={16}>16 px</option><option value={32}>32 px</option><option value={64}>64 px</option><option value={128}>128 px</option>
@@ -330,17 +330,17 @@ export const UVEditorModal: React.FC<UVEditorModalProps> = ({
               <button className={`${iconButton} w-full justify-center`} onClick={() => apply((m, ids) => snapFacesToGrid(m, ids, snapDivisions))}><Grid3X3 size={14}/> Snap selection now</button>
             </section>
             <section>
-              <div className="text-[10px] uppercase tracking-widest text-[#999999] mb-2">Diagnostics</div>
+              <div className="text-[10px] uppercase tracking-widest text-[#8b909a] mb-2">Diagnostics</div>
               <div className="space-y-1.5">
-                <div className="flex justify-between p-2 rounded bg-[#3a3a3a]"><span>Selected faces</span><b className="text-[#ed7300]">{selected.length}</b></div>
-                <div className="flex justify-between p-2 rounded bg-[#2d2d2d]"><span>Overlapping faces</span><b className={overlaps.size ? 'text-rose-400' : 'text-emerald-400'}>{overlaps.size}</b></div>
-                <div className="flex justify-between p-2 rounded bg-[#2d2d2d]"><span>UV vertices</span><b>{mesh.faces.reduce((n, f) => n + f.uvs.length, 0)}</b></div>
+                <div className="flex justify-between p-2 rounded bg-[#2e3136]"><span>Selected faces</span><b className="text-[#ed7300]">{selected.length}</b></div>
+                <div className="flex justify-between p-2 rounded bg-[#212327]"><span>Overlapping faces</span><b className={overlaps.size ? 'text-rose-400' : 'text-emerald-400'}>{overlaps.size}</b></div>
+                <div className="flex justify-between p-2 rounded bg-[#212327]"><span>UV vertices</span><b>{mesh.faces.reduce((n, f) => n + f.uvs.length, 0)}</b></div>
               </div>
               <label className="mt-2 flex items-center gap-2"><input type="checkbox" checked={showOverlap} onChange={(e) => setShowOverlap(e.target.checked)} className="accent-rose-500"/> Highlight overlaps</label>
               <label className="mt-2 flex items-center gap-2"><input type="checkbox" checked={showTexture} onChange={(e) => setShowTexture(e.target.checked)} className="accent-[#ed7300]"/> Texture preview</label>
               <label className="mt-2 flex items-center gap-2"><input type="checkbox" checked={showGrid} onChange={(e) => setShowGrid(e.target.checked)} className="accent-[#ed7300]"/> Pixel grid</label>
             </section>
-            <button className="text-[#999999] hover:text-[#ec5b62]" onClick={() => setMesh(resetMeshUVs(mesh))}>Reset all UVs</button>
+            <button className="text-[#8b909a] hover:text-[#ec5b62]" onClick={() => setMesh(resetMeshUVs(mesh))}>Reset all UVs</button>
           </aside>
 
           <main
@@ -353,7 +353,7 @@ export const UVEditorModal: React.FC<UVEditorModalProps> = ({
               <button className={iconButton} onClick={() => setZoom((z) => Math.max(.35, z / 1.2))}><ZoomOut size={14}/></button>
               <button className={iconButton} onClick={() => { setZoom(1); setPan({x: 0, y: 0}); }}><Move size={14}/> Frame all</button>
             </div>
-            <div className="absolute top-3 right-3 z-20 rounded-sm bg-[#333333]/95 border border-[#4d4d4d] px-2 py-1 text-[10px] font-mono text-[#999999]">
+            <div className="absolute top-3 right-3 z-20 rounded-sm bg-[#26282d]/95 border border-[#3b3f46] px-2 py-1 text-[10px] font-mono text-[#8b909a]">
               {cursorUv ? `U ${cursorUv.u.toFixed(3)}  V ${cursorUv.v.toFixed(3)}` : 'A select all · R rotate · F fit'}
             </div>
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -366,9 +366,9 @@ export const UVEditorModal: React.FC<UVEditorModalProps> = ({
                 className="relative pointer-events-auto w-[min(72vh,72vw)] aspect-square border-2 border-[#ed7300] shadow-[0_25px_80px_#000] origin-center touch-none"
                 style={{
                   transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-                  backgroundColor: '#2b2b2b',
+                  backgroundColor: '#1e2023',
                   backgroundImage: showGrid
-                    ? 'linear-gradient(rgba(237,115,0,0.12) 1px,transparent 1px),linear-gradient(90deg,rgba(237,115,0,0.12) 1px,transparent 1px),linear-gradient(45deg,#303030 25%,transparent 25%,transparent 75%,#303030 75%),linear-gradient(45deg,#303030 25%,#262626 25%,#262626 75%,#303030 75%)'
+                    ? 'linear-gradient(rgba(237,115,0,0.12) 1px,transparent 1px),linear-gradient(90deg,rgba(237,115,0,0.12) 1px,transparent 1px),linear-gradient(45deg,#303030 25%,transparent 25%,transparent 75%,#303030 75%),linear-gradient(45deg,#303030 25%,#191b1e 25%,#191b1e 75%,#303030 75%)'
                     : undefined,
                   backgroundSize: showGrid ? `${100 / Math.max(1, snapDivisions)}% ${100 / Math.max(1, snapDivisions)}%,${100 / Math.max(1, snapDivisions)}% ${100 / Math.max(1, snapDivisions)}%,24px 24px,24px 24px` : undefined,
                   backgroundPosition: showGrid ? '0 0,0 0,0 0,12px 12px' : undefined,
@@ -383,7 +383,7 @@ export const UVEditorModal: React.FC<UVEditorModalProps> = ({
                     return <g key={face.id}>
                       <polygon points={points} fill={isOverlap ? '#ec5b623d' : isSelected ? '#ed730038' : '#ffffff0a'} stroke={isOverlap ? '#ec5b62' : isSelected ? '#ed7300' : '#7a7a7a'} strokeWidth={isSelected ? 4 : 2}/>
                       {isSelected && <text x={getFaceUVBounds(face.uvs).cu * 1000} y={getFaceUVBounds(face.uvs).cv * 1000} textAnchor="middle" fill="#ffffff" fontSize="22" className="pointer-events-none">{index + 1}</text>}
-                      {mode === 'vertex' && face.uvs.map((p, i) => <circle key={i} cx={p.u * 1000} cy={p.v*1000} r={activeVertex?.faceId === face.id && activeVertex.index === i ? 11 : 7} fill={activeVertex?.faceId === face.id && activeVertex.index === i ? '#ed7300' : '#e6e6e6'} stroke="#1a1a1a" strokeWidth="3"/>)}
+                      {mode === 'vertex' && face.uvs.map((p, i) => <circle key={i} cx={p.u * 1000} cy={p.v*1000} r={activeVertex?.faceId === face.id && activeVertex.index === i ? 11 : 7} fill={activeVertex?.faceId === face.id && activeVertex.index === i ? '#ed7300' : '#e6e6e6'} stroke="#101114" strokeWidth="3"/>)}
                     </g>;
                   })}
                 </svg>

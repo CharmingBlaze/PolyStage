@@ -41,15 +41,38 @@ export function bindBlockbenchOrbitModifiers(
 }
 
 /**
- * 3D Brush / paint: keep default camera mouse map.
- * LMB on the mesh is stolen by the paint handler; empty LMB still orbits.
- *   LMB   — orbit (empty space) / paint (mesh hit)
+ * 3D Brush / paint: LMB is reserved for painting — never orbit.
+ * OrbitControls fighting LMB was the main cause of "only dots, no drag stroke".
+ *   LMB   — paint (handled by Viewport3D; disabled here)
  *   MMB   — dolly
  *   RMB   — pan
  *   Wheel — zoom
+ *   Alt+LMB — orbit (Viewport temporarily re-enables LEFT rotate)
  */
 export function applyPaintOrbitMouseButtons(controls: OrbitControls | null | undefined) {
-  applyStandardOrbitMouseButtons(controls);
+  if (!controls) return;
+  // LMB must stay unbound for the entire paint workspace — not only mid-stroke.
+  // Re-applying STANDARD buttons while idle was re-arming orbit and stealing drags.
+  controls.mouseButtons = {
+    LEFT: -1 as unknown as THREE.MOUSE,
+    MIDDLE: THREE.MOUSE.DOLLY,
+    RIGHT: THREE.MOUSE.PAN,
+  };
+  controls.enableZoom = true;
+  controls.enablePan = true;
+  controls.screenSpacePanning = true;
+}
+
+/** Arm Alt+LMB orbit for a single gesture while staying in paint mode. */
+export function applyPaintAltOrbitMouseButtons(controls: OrbitControls | null | undefined) {
+  if (!controls) return;
+  controls.enabled = true;
+  controls.enableRotate = true;
+  controls.mouseButtons = {
+    LEFT: THREE.MOUSE.ROTATE,
+    MIDDLE: THREE.MOUSE.DOLLY,
+    RIGHT: THREE.MOUSE.PAN,
+  };
 }
 
 /**
@@ -106,11 +129,15 @@ export function applyDrawToolOrbitMouseButtons(
 }
 
 /** Clear a stuck OrbitControls gesture (pointer list desync after conflicting capture). */
-export function resetOrbitPointerState(controls: OrbitControls | null | undefined) {
+export function resetOrbitPointerState(
+  controls: OrbitControls | null | undefined,
+  opts?: { enable?: boolean },
+) {
   if (!controls) return;
   const c = controls as OrbitControls & {
     _pointers?: number[];
     _pointerPositions?: Record<string, unknown>;
+    _controlActive?: boolean;
     state?: number;
   };
   if (c._pointers?.length) {
@@ -122,14 +149,36 @@ export function resetOrbitPointerState(controls: OrbitControls | null | undefine
     }
   }
   if (typeof c.state === 'number') c.state = 0; // NONE
-  controls.enabled = true;
+  if (typeof c._controlActive === 'boolean') c._controlActive = false;
+  // Default keeps prior behavior for non-paint callers; paint must pass enable:false
+  // so we don't re-arm orbit mid-stroke.
+  if (opts?.enable != null) {
+    controls.enabled = opts.enable;
+  }
+}
+
+/**
+ * Full paint-idle nav restore: clear stuck gestures, rebind paint mouse buttons,
+ * and ensure zoom/pan/rotate flags are healthy (fixes "zoom stuck after paint").
+ */
+export function restorePaintOrbitControls(
+  controls: OrbitControls | null | undefined,
+  opts?: { enable?: boolean; allowRotate?: boolean },
+) {
+  if (!controls) return;
+  resetOrbitPointerState(controls, { enable: opts?.enable ?? true });
+  applyPaintOrbitMouseButtons(controls);
+  controls.enableZoom = true;
+  controls.enablePan = true;
+  controls.enableRotate = opts?.allowRotate ?? true;
+  controls.screenSpacePanning = true;
 }
 
 
 /** Short HUD / status hint shared by 3D views */
 export const STANDARD_NAV_HINT = 'LMB orbit · RMB pan · MMB/Wheel zoom';
 
-export const PAINT_NAV_HINT = 'LMB paint · empty LMB orbit · RMB pan · MMB/Wheel zoom';
+export const PAINT_NAV_HINT = 'LMB drag paint · Alt+LMB orbit · RMB pan · [ ] size';
 
 /** @deprecated alias */
 export const BLOCKBENCH_NAV_HINT = STANDARD_NAV_HINT;

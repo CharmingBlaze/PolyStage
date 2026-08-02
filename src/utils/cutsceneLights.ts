@@ -94,6 +94,64 @@ export function createDramaticThreePointLights(): CADLight[] {
   return [key, fill, rim];
 }
 
+/** Softer Key / Fill / Rim for dialogue and character close-ups. */
+export function createSoftThreePointLights(): CADLight[] {
+  const keyPos = v(4.2, 5.5, 5);
+  const key = createCADLight('area', 'Soft Key', keyPos);
+  key.color = '#fff2e0';
+  key.intensity = 5.5;
+  key.width = 4;
+  key.height = 3;
+  key.castShadow = false;
+  key.rotation = aimLightRotation(keyPos, v(0, 1.2, 0));
+
+  const fillPos = v(-3.8, 2.4, 3.5);
+  const fill = createCADLight('area', 'Soft Fill', fillPos);
+  fill.color = '#c8d8ff';
+  fill.intensity = 2.2;
+  fill.width = 3;
+  fill.height = 2.5;
+  fill.castShadow = false;
+  fill.rotation = aimLightRotation(fillPos, v(0, 1.1, 0));
+
+  const rimPos = v(-2.5, 4.5, -4.5);
+  const rim = createCADLight('spot', 'Hair / Rim', rimPos);
+  rim.color = '#ffe0c8';
+  rim.intensity = 1.8;
+  rim.distance = 18;
+  rim.angle = Math.PI / 6;
+  rim.penumbra = 0.55;
+  rim.castShadow = false;
+  rim.rotation = aimLightRotation(rimPos, v(0, 1.4, 0));
+
+  return [key, fill, rim];
+}
+
+/** Cool night / moonlight cinematic kit. */
+export function createNightLights(): CADLight[] {
+  const moonPos = v(-6, 9, -3);
+  const moon = createCADLight('directional', 'Moon', moonPos);
+  moon.color = '#a8c4ff';
+  moon.intensity = 2.1;
+  moon.castShadow = true;
+  moon.rotation = aimLightRotation(moonPos, v(0, 0.5, 0));
+
+  const fillPos = v(3, 1.5, 4);
+  const fill = createCADLight('point', 'Night Fill', fillPos);
+  fill.color = '#3a5080';
+  fill.intensity = 0.35;
+  fill.distance = 14;
+  fill.castShadow = false;
+
+  const practical = createCADLight('point', 'Practical', v(0.8, 1.2, 1.5));
+  practical.color = '#ffb060';
+  practical.intensity = 0.55;
+  practical.distance = 6;
+  practical.castShadow = false;
+
+  return [moon, fill, practical];
+}
+
 function configureShadow(light: THREE.DirectionalLight | THREE.SpotLight | THREE.PointLight) {
   light.shadow.mapSize.set(2048, 2048);
   light.shadow.bias = -0.00015;

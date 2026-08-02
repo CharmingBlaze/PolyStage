@@ -105,7 +105,7 @@ export const AnimationPanel: React.FC<AnimationPanelProps> = ({ meshes, setMeshe
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#333333] text-[#e8e8e8] font-sans text-xs select-none p-2 space-y-3">
+    <div className="flex flex-col h-full bg-[#26282d] text-[#eaedf1] font-sans text-xs select-none p-2 space-y-3">
       <div className="flex items-center justify-between">
         <span className="font-bold font-mono text-[#ed7300] text-xs uppercase flex items-center gap-1.5">
           <Film className="w-4 h-4 text-[#ed7300]" />
@@ -117,7 +117,7 @@ export const AnimationPanel: React.FC<AnimationPanelProps> = ({ meshes, setMeshe
       </div>
 
       <div className="cad-card p-2 space-y-2">
-        <label className="block text-[10px] font-mono text-[#8c8c8c]">Active Clip</label>
+        <label className="block text-[10px] font-mono text-[#858a93]">Active Clip</label>
         <select
           value={activeClipId}
           onChange={(e) => {
@@ -127,7 +127,7 @@ export const AnimationPanel: React.FC<AnimationPanelProps> = ({ meshes, setMeshe
           className="w-full cad-input p-1 font-mono text-xs text-[#ed7300]"
         >
           {clips.map((clip) => (
-            <option key={clip.id} value={clip.id} className="bg-[#333333]">
+            <option key={clip.id} value={clip.id} className="bg-[#26282d]">
               {clip.name} ({clip.duration}s)
             </option>
           ))}

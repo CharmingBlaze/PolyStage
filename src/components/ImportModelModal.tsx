@@ -112,7 +112,7 @@ export const ImportModelModal: React.FC<ImportModelModalProps> = ({
 
   return (
     <div
-      className="fixed z-50 shadow-2xl rounded-xl border border-[#4d4d4d] bg-[#2a2a2a]/95 backdrop-blur-lg font-mono text-[11px] select-none text-[#cccccc] flex flex-col overflow-hidden"
+      className="fixed z-50 shadow-2xl rounded-xl border border-[#3b3f46] bg-[#202226]/95 backdrop-blur-lg font-mono text-[11px] select-none text-[#c6cad1] flex flex-col overflow-hidden"
       style={{
         left: `${position.x}px`,
         top: `${position.y}px`,
@@ -122,24 +122,24 @@ export const ImportModelModal: React.FC<ImportModelModalProps> = ({
     >
       <div
         onMouseDown={handleMouseDown}
-        className="h-10 px-3 flex items-center justify-between border-b border-[#1a1a1a] bg-[#222222] cursor-grab active:cursor-grabbing flex-shrink-0"
+        className="h-10 px-3 flex items-center justify-between border-b border-[#101114] bg-[#222222] cursor-grab active:cursor-grabbing flex-shrink-0"
       >
         <div className="flex items-center gap-2 font-bold text-[#ff9a3c]">
-          <GripHorizontal className="w-4 h-4 text-[#666666]" />
+          <GripHorizontal className="w-4 h-4 text-[#51565f]" />
           <Upload className="w-4 h-4 text-[#ed7300]" />
           <span>IMPORT 3D MODEL</span>
         </div>
         <div className="flex items-center gap-1">
           <button
             onClick={() => setIsMinimized(!isMinimized)}
-            className="p-1 hover:bg-[#333333] rounded text-[#888888] hover:text-white"
+            className="p-1 hover:bg-[#26282d] rounded text-[#7e838c] hover:text-white"
             title={isMinimized ? 'Expand Dialog' : 'Minimize Dialog'}
           >
             {isMinimized ? <Maximize2 className="w-3.5 h-3.5" /> : <Minus className="w-3.5 h-3.5" />}
           </button>
           <button
             onClick={onClose}
-            className="p-1 hover:bg-rose-900/40 hover:text-rose-400 rounded text-[#888888]"
+            className="p-1 hover:bg-rose-900/40 hover:text-rose-400 rounded text-[#7e838c]"
             title="Close Dialog"
           >
             <X className="w-3.5 h-3.5" />
@@ -148,7 +148,7 @@ export const ImportModelModal: React.FC<ImportModelModalProps> = ({
       </div>
 
       {!isMinimized && (
-        <div className="flex-1 p-4 flex flex-col justify-between overflow-hidden bg-[#2a2a2a]">
+        <div className="flex-1 p-4 flex flex-col justify-between overflow-hidden bg-[#202226]">
           <div
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
@@ -159,7 +159,7 @@ export const ImportModelModal: React.FC<ImportModelModalProps> = ({
                 ? 'border-[#ed7300] bg-[#ed7300]/10 text-white'
                 : preview
                   ? 'border-emerald-500/50 bg-emerald-950/20 text-emerald-300'
-                  : 'border-[#4d4d4d] hover:border-[#ed7300] bg-[#2e2e2e] text-[#888888]'
+                  : 'border-[#3b3f46] hover:border-[#ed7300] bg-[#24262b] text-[#7e838c]'
             }`}
           >
             <input
@@ -195,7 +195,7 @@ export const ImportModelModal: React.FC<ImportModelModalProps> = ({
               <div className="flex flex-col items-center gap-2 text-center">
                 <Upload className="w-10 h-10 text-[#ed7300]" />
                 <div className="font-bold text-white text-xs">Drag & Drop 3D Model File Here</div>
-                <div className="text-[9px] text-[#888888]">
+                <div className="text-[9px] text-[#7e838c]">
                   OBJ, STL, PLY, glTF/GLB, JSON, bbmodel
                 </div>
                 <button className="mt-2 px-3 py-1 bg-[#ed7300] text-white font-bold text-[10px] rounded-lg hover:bg-[#ff9a3c] transition shadow">
@@ -205,8 +205,8 @@ export const ImportModelModal: React.FC<ImportModelModalProps> = ({
             )}
           </div>
 
-          <div className="mt-4 flex items-center justify-between flex-shrink-0 pt-3 border-t border-[#1a1a1a]">
-            <span className="text-[9px] text-[#666666]">Formats: .OBJ .STL .PLY .GLTF .GLB .JSON .BBMODEL</span>
+          <div className="mt-4 flex items-center justify-between flex-shrink-0 pt-3 border-t border-[#101114]">
+            <span className="text-[9px] text-[#51565f]">Formats: .OBJ .STL .PLY .GLTF .GLB .JSON .BBMODEL</span>
             <div className="flex gap-2">
               <button
                 onClick={onClose}
@@ -220,7 +220,7 @@ export const ImportModelModal: React.FC<ImportModelModalProps> = ({
                 className={`px-4 py-1.5 rounded-lg font-bold text-xs transition ${
                   preview
                     ? 'bg-[#ed7300] text-white hover:bg-[#ff9a3c] shadow-md shadow-[#ed7300]/30'
-                    : 'bg-[#2a2a2a] text-[#555555] cursor-not-allowed'
+                    : 'bg-[#202226] text-[#555555] cursor-not-allowed'
                 }`}
               >
                 Import to Scene

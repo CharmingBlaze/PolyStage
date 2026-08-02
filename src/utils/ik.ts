@@ -167,12 +167,12 @@ export function applyLookAt(bones: CADBone[]): CADBone[] {
  * For IK: the bone that owns the constraint is the tip; targetBoneId is the goal bone/effector.
  */
 export function evaluateConstraints(bones: CADBone[]): CADBone[] {
-  let result = bones.map((b) => ({
+  let result: CADBone[] = bones.map((b) => ({
     ...b,
     position: cloneV(b.position),
     rotation: cloneV(b.rotation),
     scale: cloneV(b.scale),
-    constraints: b.constraints ? [...b.constraints] : undefined,
+    ...(b.constraints ? { constraints: [...b.constraints] } : {}),
   }));
 
   // Solve IK first

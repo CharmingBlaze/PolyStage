@@ -93,6 +93,14 @@ export interface MeshTextureAnimation {
   frames: MeshTextureAnimFrame[];
   clips?: MeshTextureAnimClip[];
   defaultClipId?: string | null;
+  /**
+   * Ambient mode: loop the full frame strip during animation playback without
+   * keyframes (idle flames, water, blinking signs). Explicit texFrame /
+   * texture-clip keys still override.
+   */
+  autoPlay?: boolean;
+  /** Uniform playback rate for autoPlay; falls back to per-frame durationMs. */
+  autoPlayFps?: number;
 }
 
 export interface TextureClipKey {

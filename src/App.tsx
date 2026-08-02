@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { Header } from './components/Header';
 import { Toolbar } from './components/Toolbar';
 import { Viewport3D } from './components/Viewport3D';
@@ -8,7 +8,17 @@ import { UVEditorModal } from './components/UVEditorModal';
 import { PropertiesPanel } from './components/PropertiesPanel';
 import { RenderExportPanel } from './components/RenderExportPanel';
 import { OutlinerPanel } from './components/OutlinerPanel';
-import { CutsceneStudio } from './components/CutsceneStudio';
+/**
+ * The animation and paint studios are the two heaviest modules in the app and each
+ * is only reachable from its own workspace, so they load on demand instead of
+ * inflating the initial bundle. Types are imported separately (erased at build time).
+ */
+const CutsceneStudio = lazy(() =>
+  import('./components/CutsceneStudio').then((m) => ({ default: m.CutsceneStudio })),
+);
+const PixelPaintStudio = lazy(() =>
+  import('./components/PixelPaintStudio').then((m) => ({ default: m.PixelPaintStudio })),
+);
 import { ParticleStudioModal } from './components/ParticleStudioModal';
 import { RiggingPanel } from './components/RiggingPanel';
 import { MaterialPanel } from './components/MaterialPanel';
@@ -18,11 +28,11 @@ import { ShortcutsModal } from './components/ShortcutsModal';
 import { AssetBrowserModal } from './components/AssetBrowserModal';
 import { ImportModelModal } from './components/ImportModelModal';
 import { SpriteSheetModal } from './components/SpriteSheetModal';
-import { PixelPaintStudio, type Paint3DBridge, type PaintTool as StudioPaintTool } from './components/PixelPaintStudio';
+import type { PaintTool as StudioPaintTool } from './components/PixelPaintStudio';
+import { paint3dBridge } from './utils/paint3dSurface';
 import { PaintBridgeHost } from './components/PaintBridgeHost';
-import { notifyTexturePreview } from './utils/texturePreviewBus';
+import { notifyTexturePreview, setLiveTextureCanvas } from './utils/texturePreviewBus';
 import { VectorPanel } from './components/VectorPanel';
-import { floodFill, hexToRgba } from './utils/pixelPaint';
 import { useVectorStore } from './store/useVectorStore';
 import {
   applyVectorSectionEdits,
@@ -34,9 +44,9 @@ import {
 import type {
   CADMesh, SceneGroup, CADBone, ToolState, RenderSettings, PrimitiveType, CADScene, AnimationClip,
   CADCamera, CADLight, ParticleEmitter, EnvironmentSettings, SceneSelection,
-  WorkspaceMode, HeaderWorkspace, RigMode,
+  WorkspaceMode, HeaderWorkspace, RigMode, EditMode,
 } from './types/cad';
-import { generateId, generatePrimitive, extrudeFaces, insetFaces, createEdgesFromFaces } from './utils/meshUtils';
+import { generateId, generatePrimitive, createEdgesFromFaces } from './utils/meshUtils';
 import { separateSelectedFaces, separateLooseParts } from './utils/meshSeparate';
 import { import3DModelFromFile } from './utils/importers';
 import { finalizeEditableMesh } from './utils/topology/validate';
@@ -60,7 +70,19 @@ import {
   pasteClipboardMeshes,
 } from './utils/clipboard';
 import { magnetSnapSelectedVertices } from './utils/vertexSnap';
-import { subdivideFaces, fillSelectedVerticesFace, bevelSelectedEdges } from './utils/advancedMeshTools';
+import { subdivideFaces, fillSelectedVerticesFace } from './utils/advancedMeshTools';
+import {
+  convertSelection,
+  EMPTY_SELECTION,
+  growSelection,
+  invertSelection,
+  selectedIdsFor,
+  selectLinked,
+  shrinkSelection,
+  withSelectedIds,
+  type ComponentMode,
+  type ComponentSelection,
+} from './utils/selection';
 import { applyLoopCut, applyKnifeCut, type KnifeHit } from './utils/meshCutTools';
 import type { MirrorAxis } from './types/cad';
 import { createDefaultClip, autoKeyTarget } from './utils/animation';
@@ -72,6 +94,16 @@ import type { CutsceneSequence } from './types/sequence';
 import { deleteBoneBranch } from './utils/rigging';
 
 import { Sliders, Palette, Sparkles, Layers, Bone } from 'lucide-react';
+
+/** Placeholder shown while a lazily-loaded workspace chunk arrives. */
+const WorkspaceLoading: React.FC<{ label: string }> = ({ label }) => (
+  <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-[#252525] text-[11px] text-[#858a93]">
+    <div className="sp-workspace-spinner" aria-hidden />
+    <span>
+      Loading <b className="text-[#c6cad1]">{label}</b>…
+    </span>
+  </div>
+);
 
 export const App: React.FC = () => {
   const [scenes, setScenes] = useState<CADScene[]>(() => {
@@ -126,7 +158,7 @@ export const App: React.FC = () => {
   const [activeSceneId, setActiveSceneId] = useState<string>('scene_main');
   const [activeWorkspaceMode, setActiveWorkspaceMode] = useState<WorkspaceMode>('modeling');
   const [blockoutStatus, setBlockoutStatus] = useState(
-    'Close a Front or Side silhouette for height. Top is optional and shapes the XZ cross-section.'
+    'Trace Front, close it → Side cage seeds automatically. Drag width/depth, then Update for clean game quads.'
   );
   const [activeMeshId, setActiveMeshId] = useState<string>('');
 
@@ -383,10 +415,10 @@ export const App: React.FC = () => {
     viewMode: 'lit',
     viewportLayout: 'single',
     activeColor: '#ff9a3c',
-    brushSize: 1,
+    brushSize: 3,
     drawTool: 'pencil',
     paintOpacity: 1,
-    paintSpacing: 0.25,
+    paintSpacing: 0.12,
     paintMirrorU: false,
     uvSnapToPixel: true,
     placeOnClick: false,
@@ -401,6 +433,8 @@ export const App: React.FC = () => {
     mirrorBones: false,
     xray: false,
   });
+  const toolStatePaintRef = useRef(toolState);
+  toolStatePaintRef.current = toolState;
 
   const [renderSettings, setRenderSettings] = useState<RenderSettings>({
     pixelScale: 1,
@@ -411,7 +445,7 @@ export const App: React.FC = () => {
     ambientIntensity: 1.45,
     lightIntensity: 2.5,
     wireframeColor: '#ff9a3c',
-    bgColor: '#1b1b1b',
+    bgColor: '#141518',
     turntableSpeed: 1,
     isTurntablePlaying: false,
     weather: 'clear',
@@ -469,11 +503,12 @@ export const App: React.FC = () => {
   const textureCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [textureRevision, setTextureRevision] = useState(0);
   const loadedTextureRef = useRef<{ meshId: string; dataUrl?: string }>({ meshId: '' });
-  const lastPaintUvRef = useRef<{ u: number; v: number; px: number; py: number; faceId: string | null } | null>(null);
-  const paintBridgeRef = useRef<Paint3DBridge | null>(null);
+  /** Always the module singleton — never nulled by React effect cleanup. */
+  const paintBridgeRef = useRef(paint3dBridge);
 
   const flushLivePaintPreview = () => {
     // Viewport listens via texturePreviewBus — no App setState on every stamp.
+    if (textureCanvasRef.current) setLiveTextureCanvas(textureCanvasRef.current);
     notifyTexturePreview();
   };
 
@@ -481,6 +516,7 @@ export const App: React.FC = () => {
   const bindLiveTextureCanvas = useCallback((canvas: HTMLCanvasElement) => {
     const prev = textureCanvasRef.current;
     textureCanvasRef.current = canvas;
+    setLiveTextureCanvas(canvas);
     notifyTexturePreview();
     // Always bump when the caller hands us a canvas to bind (hydrate / new buffer).
     // Compare by identity so repeat calls with the same composite are cheap no-ops.
@@ -502,6 +538,7 @@ export const App: React.FC = () => {
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     textureCanvasRef.current = canvas;
+    setLiveTextureCanvas(canvas);
     // Deferred: handleTextureUpdated defined below; use direct live canvas for now.
     notifyTexturePreview();
     setTextureRevision((r) => r + 1);
@@ -625,6 +662,92 @@ export const App: React.FC = () => {
     else handleSelectAll();
   };
 
+  /** Sub-object mode Tab returns to when toggling back out of Object mode. */
+  const lastComponentModeRef = useRef<ComponentMode>('vertex');
+  /**
+   * Component selection stashed while in Object mode, so Tab-ing out and back in
+   * restores it. Held in a ref rather than state because the rest of the app treats a
+   * non-empty component selection as "we are in a sub-object mode".
+   */
+  const stashedComponentSelectionRef = useRef<ComponentSelection | null>(null);
+
+  const currentComponentSelection = (): ComponentSelection => ({
+    vertexIds: selectedVertexIds,
+    edgeIds: selectedEdgeIds,
+    faceIds: selectedFaceIds,
+  });
+
+  const applyComponentSelection = (next: ComponentSelection) => {
+    setSelectedVertexIds(next.vertexIds);
+    setSelectedEdgeIds(next.edgeIds);
+    setSelectedFaceIds(next.faceIds);
+  };
+
+  /**
+   * Switch between Object / Vertex / Edge / Face.
+   *
+   * Moving between two sub-object modes converts the selection through the mesh
+   * topology instead of discarding it, so the user keeps their work when pressing
+   * 1/2/3/4 (widening takes everything touched, narrowing only fully-enclosed
+   * components — the Blender rule).
+   */
+  const enterEditMode = (mode: EditMode) => {
+    if (workspaceModeRef.current === 'rigging') {
+      setActiveWorkspaceMode('modeling');
+      setActiveRightTab((tab) => (tab === 'rig' ? 'outliner' : tab));
+    }
+
+    const prev = toolState.editMode;
+    const isComponent = (m: EditMode): m is ComponentMode =>
+      m === 'vertex' || m === 'edge' || m === 'face';
+
+    // Read before updating: this is the mode any stashed selection belongs to.
+    const stashedMode = lastComponentModeRef.current;
+    if (isComponent(mode)) lastComponentModeRef.current = mode;
+
+    if (isComponent(mode) && isComponent(prev) && activeMesh) {
+      applyComponentSelection(convertSelection(activeMesh, prev, mode, currentComponentSelection()));
+    } else if (isComponent(mode)) {
+      // Coming back from Object/Bone mode: restore what was stashed on the way out,
+      // converted if the target mode differs from the one we left.
+      const stashed = stashedComponentSelectionRef.current;
+      stashedComponentSelectionRef.current = null;
+      applyComponentSelection(
+        stashed && activeMesh
+          ? convertSelection(activeMesh, stashedMode, mode, stashed)
+          : EMPTY_SELECTION,
+      );
+    } else {
+      // Leaving for Object/Bone mode — stash so Tab can bring the selection back.
+      if (isComponent(prev)) stashedComponentSelectionRef.current = currentComponentSelection();
+      applyComponentSelection(EMPTY_SELECTION);
+    }
+
+    setToolState((s) => ({
+      ...s,
+      editMode: mode,
+      isPainting3D: false,
+      modalTransform: null,
+      modalMeshOp: null,
+      ...(s.editMode === 'bone' || workspaceModeRef.current === 'rigging' ? { showBones: false } : {}),
+    }));
+  };
+
+  /** Tab toggles between Object mode and the sub-object mode you were last in. */
+  const toggleEditMode = () => {
+    enterEditMode(toolState.editMode === 'object' ? lastComponentModeRef.current : 'object');
+  };
+
+  /** Run a selection operator against whichever sub-object mode is active. */
+  const runSelectionOperator = (
+    operator: (mesh: CADMesh, mode: ComponentMode, ids: string[]) => string[],
+  ) => {
+    const mode = toolState.editMode;
+    if (!activeMesh || (mode !== 'vertex' && mode !== 'edge' && mode !== 'face')) return;
+    const ids = selectedIdsFor(currentComponentSelection(), mode);
+    applyComponentSelection(withSelectedIds(mode, operator(activeMesh, mode, ids)));
+  };
+
   const modalTransformRef = useRef(toolState.modalTransform);
   modalTransformRef.current = toolState.modalTransform;
   const modalMeshOpRef = useRef(toolState.modalMeshOp);
@@ -637,27 +760,6 @@ export const App: React.FC = () => {
     faceIds: string[];
     edgeIds: string[];
   } | null>(null);
-
-  const applyModalMeshAmount = (amount: number) => {
-    const snap = modalMeshSnapshotRef.current;
-    if (!snap) return;
-    if (snap.type === 'loopCut' || snap.type === 'knife') return;
-    // Extrude/inset/bevel preview is owned by Viewport (live Three + vert movers).
-    // Keep this path for any legacy callers / quad sync edge cases.
-    let next: CADMesh = snap.baseMesh;
-    if (snap.type === 'extrude') {
-      next = extrudeFaces(snap.baseMesh, snap.faceIds, amount);
-    } else if (snap.type === 'inset') {
-      next = insetFaces(snap.baseMesh, snap.faceIds, Math.max(0, Math.min(0.95, amount)));
-    } else if (snap.type === 'bevel') {
-      if (snap.edgeIds.length > 0) {
-        next = bevelSelectedEdges(snap.baseMesh, snap.edgeIds, Math.max(0.002, Math.min(0.45, amount)));
-      } else if (snap.faceIds.length > 0) {
-        next = insetFaces(snap.baseMesh, snap.faceIds, Math.max(0, Math.min(0.95, amount)));
-      }
-    }
-    setMeshes((prev) => prev.map((m) => (m.id === snap.baseMesh.id ? next : m)));
-  };
 
   const confirmModalMeshOp = () => {
     modalMeshSnapshotRef.current = null;
@@ -719,8 +821,6 @@ export const App: React.FC = () => {
     }));
   };
 
-  const applyModalMeshAmountRef = useRef(applyModalMeshAmount);
-  applyModalMeshAmountRef.current = applyModalMeshAmount;
   const confirmModalMeshOpRef = useRef(confirmModalMeshOp);
   confirmModalMeshOpRef.current = confirmModalMeshOp;
   const cancelModalMeshOpRef = useRef(cancelModalMeshOp);
@@ -768,6 +868,12 @@ export const App: React.FC = () => {
         if (!e.ctrlKey && !e.metaKey && !e.altKey) return;
       }
 
+      /** Selection operators only apply while a sub-object mode is active. */
+      const inComponentMode =
+        toolState.editMode === 'vertex'
+        || toolState.editMode === 'edge'
+        || toolState.editMode === 'face';
+
       if (e.key === 'Escape') {
         // Blender: Esc cancels modal ops first (viewport restores via capture).
         if (modalTransformRef.current || modalMeshOpRef.current) {
@@ -794,68 +900,69 @@ export const App: React.FC = () => {
         setToolState((s) => ({ ...s, xray: !s.xray }));
       } else if (e.key.toLowerCase() === 'a' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
         handleToggleSelectAll();
-      } else if (e.key === '1') {
-        if (workspaceModeRef.current === 'rigging') {
-          setActiveWorkspaceMode('modeling');
-          setActiveRightTab((tab) => (tab === 'rig' ? 'outliner' : tab));
-        }
+      } else if (
+        (e.ctrlKey || e.metaKey)
+        && e.key.toLowerCase() === 'i'
+        && inComponentMode
+      ) {
+        // In a sub-object mode Ctrl+I inverts (Blender); Object mode keeps Import.
+        e.preventDefault();
+        runSelectionOperator((mesh, mode, ids) => invertSelection(mesh, mode, ids));
+      } else if (
+        e.key.toLowerCase() === 'l'
+        && !e.altKey
+        && inComponentMode
+      ) {
+        // L / Ctrl+L both grow the selection to the whole connected island.
+        e.preventDefault();
+        runSelectionOperator(selectLinked);
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === '+' || e.key === '=') && inComponentMode) {
+        e.preventDefault();
+        runSelectionOperator(growSelection);
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === '-' || e.key === '_') && inComponentMode) {
+        e.preventDefault();
+        runSelectionOperator(shrinkSelection);
+      } else if (
+        (inPaintWorkspace || toolState.isPainting3D)
+        && !e.ctrlKey && !e.metaKey && !e.altKey
+        && ['b', 'e', 'i'].includes(e.key.toLowerCase())
+      ) {
+        // 3D paint tool hotkeys — keep them working while the mesh viewport is focused.
+        e.preventDefault();
+        const paintHotkey = e.key.toLowerCase();
+        const nextTool =
+          paintHotkey === 'b' ? 'pencil' : paintHotkey === 'e' ? 'eraser' : 'picker';
         setToolState((s) => ({
           ...s,
+          drawTool: nextTool,
+          isPainting3D: true,
+          viewMode: 'textured',
           editMode: 'object',
-          isPainting3D: false,
-          modalTransform: null,
-          modalMeshOp: null,
-          ...(s.editMode === 'bone' || workspaceModeRef.current === 'rigging' ? { showBones: false } : {}),
         }));
-        setSelectedVertexIds([]);
-        setSelectedEdgeIds([]);
-        setSelectedFaceIds([]);
-      } else if (e.key === '2') {
-        if (workspaceModeRef.current === 'rigging') {
-          setActiveWorkspaceMode('modeling');
-          setActiveRightTab((tab) => (tab === 'rig' ? 'outliner' : tab));
-        }
+      } else if (
+        (inPaintWorkspace || toolState.isPainting3D)
+        && !e.ctrlKey && !e.metaKey && !e.altKey
+        && (e.key === '[' || e.key === ']')
+      ) {
+        e.preventDefault();
+        const delta = e.key === ']' ? 1 : -1;
         setToolState((s) => ({
           ...s,
-          editMode: 'vertex',
-          isPainting3D: false,
-          modalTransform: null,
-          modalMeshOp: null,
-          ...(s.editMode === 'bone' || workspaceModeRef.current === 'rigging' ? { showBones: false } : {}),
+          brushSize: Math.max(1, Math.min(16, (s.brushSize || 1) + delta)),
         }));
-        setSelectedEdgeIds([]);
-        setSelectedFaceIds([]);
-      } else if (e.key === '3') {
-        if (workspaceModeRef.current === 'rigging') {
-          setActiveWorkspaceMode('modeling');
-          setActiveRightTab((tab) => (tab === 'rig' ? 'outliner' : tab));
-        }
-        setToolState((s) => ({
-          ...s,
-          editMode: 'edge',
-          isPainting3D: false,
-          modalTransform: null,
-          modalMeshOp: null,
-          ...(s.editMode === 'bone' || workspaceModeRef.current === 'rigging' ? { showBones: false } : {}),
-        }));
-        setSelectedVertexIds([]);
-        setSelectedFaceIds([]);
-      } else if (e.key === '4') {
-        if (workspaceModeRef.current === 'rigging') {
-          setActiveWorkspaceMode('modeling');
-          setActiveRightTab((tab) => (tab === 'rig' ? 'outliner' : tab));
-        }
-        setToolState((s) => ({
-          ...s,
-          editMode: 'face',
-          isPainting3D: false,
-          modalTransform: null,
-          modalMeshOp: null,
-          ...(s.editMode === 'bone' || workspaceModeRef.current === 'rigging' ? { showBones: false } : {}),
-        }));
-        setSelectedVertexIds([]);
-        setSelectedEdgeIds([]);
-      } else if (e.key === '5') {
+      } else if (!inPaintWorkspace && e.key === '1') {
+        enterEditMode('object');
+      } else if (!inPaintWorkspace && e.key === '2') {
+        enterEditMode('vertex');
+      } else if (!inPaintWorkspace && e.key === '3') {
+        enterEditMode('edge');
+      } else if (!inPaintWorkspace && e.key === '4') {
+        enterEditMode('face');
+      } else if (!inPaintWorkspace && e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        // Blender-style in/out of edit mode. Must preventDefault or focus walks the UI.
+        e.preventDefault();
+        toggleEditMode();
+      } else if (!inPaintWorkspace && e.key === '5') {
         setActiveWorkspaceMode('rigging');
         setUvSplitOpen(false);
         setIsToolWindowOpen(false);
@@ -928,11 +1035,11 @@ export const App: React.FC = () => {
       } else if (!inPaintWorkspace && e.key.toLowerCase() === 'k' && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         startModalMeshOp('knife');
-      } else if (e.key.toLowerCase() === 'f') {
+      } else if (!inPaintWorkspace && e.key.toLowerCase() === 'f') {
         if (activeMesh && selectedVertexIds.length >= 3) editActiveMesh(fillSelectedVerticesFace(activeMesh, selectedVertexIds));
-      } else if (e.key.toLowerCase() === 'm' && !e.ctrlKey) handleMergeVertices();
-      else if (e.shiftKey && e.key.toLowerCase() === 's') handleMagnetSnap();
-      else if (e.altKey && e.key.toLowerCase() === 'x') handleMirrorSymmetry();
+      } else if (!inPaintWorkspace && e.key.toLowerCase() === 'm' && !e.ctrlKey) handleMergeVertices();
+      else if (!inPaintWorkspace && e.shiftKey && e.key.toLowerCase() === 's') handleMagnetSnap();
+      else if (!inPaintWorkspace && e.altKey && e.key.toLowerCase() === 'x') handleMirrorSymmetry();
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
         e.preventDefault();
         handleCopy();
@@ -955,6 +1062,7 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
     toolState.editMode,
+    toolState.isPainting3D,
     selectedFaceIds,
     selectedEdgeIds,
     selectedVertexIds,
@@ -1501,7 +1609,9 @@ export const App: React.FC = () => {
     setToolState((s) => ({ ...s, editMode: 'object' }));
   };
 
-  const handleKeyPoseToClip = () => {
+  const handleKeyPoseToClip = (opts?: { time?: number; selectedOnly?: boolean }) => {
+    const keyTime = Math.max(0, opts?.time ?? 0);
+    const selectedOnly = opts?.selectedOnly === true;
     let clipId = activeClipId;
     setClips((prev) => {
       let clipsNext = prev;
@@ -1513,23 +1623,32 @@ export const App: React.FC = () => {
       }
       const targetId = clipId || clipsNext[0]?.id;
       if (!targetId) return clipsNext;
+      const bonesToKey = selectedOnly && selectedBoneId
+        ? bones.filter((bone) => bone.id === selectedBoneId)
+        : bones;
       return clipsNext.map((clip) => {
         if (clip.id !== targetId) return clip;
         let next = clip;
-        bones.forEach((bone) => {
+        // Extend clip duration if keying past the end.
+        if (keyTime > next.duration) {
+          next = { ...next, duration: Math.ceil(keyTime * 10) / 10 + 0.5 };
+        }
+        bonesToKey.forEach((bone) => {
           next = autoKeyTarget(next, bone.id, 'bone', bone.name, {
             position: bone.position,
             rotation: bone.rotation,
             scale: bone.scale,
-          }, 0);
+          }, keyTime);
         });
-        meshes.forEach((mesh) => {
-          next = autoKeyTarget(next, mesh.id, 'mesh', mesh.name, {
-            position: mesh.position,
-            rotation: mesh.rotation,
-            scale: mesh.scale,
-          }, 0);
-        });
+        if (!selectedOnly) {
+          meshes.forEach((mesh) => {
+            next = autoKeyTarget(next, mesh.id, 'mesh', mesh.name, {
+              position: mesh.position,
+              rotation: mesh.rotation,
+              scale: mesh.scale,
+            }, keyTime);
+          });
+        }
         return next;
       });
     });
@@ -1571,6 +1690,7 @@ export const App: React.FC = () => {
     opts?: { clearAnimation?: boolean; immediate?: boolean; encode?: boolean },
   ) => {
     textureCanvasRef.current = canvas;
+    setLiveTextureCanvas(canvas);
     setToolState((state) => (state.viewMode === 'textured' ? state : { ...state, viewMode: 'textured' }));
 
     const isLarge = Math.max(canvas.width, canvas.height) >= 256;
@@ -1671,111 +1791,33 @@ export const App: React.FC = () => {
   }, [activeMesh.id, activeMesh.textureCanvasDataUrl, activeWorkspaceMode]);
 
   const handleDirect3DPaintPixel = (uvU: number, uvV: number, isFinal = false, faceId: string | null = null) => {
-    const bridge = paintBridgeRef.current;
-    if (bridge) {
-      const studioTool: StudioPaintTool =
-        toolState.drawTool === 'rectangle' ? 'rect' :
-        toolState.drawTool === 'select' ? 'pencil' :
-        toolState.drawTool as StudioPaintTool;
-      if (isFinal) {
-        bridge.endStroke();
-        return;
-      }
-      bridge.paintUv(
-        uvU,
-        uvV,
-        toolState.activeColor || '#ff9a3c',
-        toolState.brushSize || 1,
-        studioTool,
-        toolState.paintOpacity ?? 1,
-        faceId,
-      );
-      flushLivePaintPreview();
+    const ts = toolStatePaintRef.current;
+    const drawTool = ts.drawTool || 'pencil';
+    // Select is for picking meshes — never stamp paint.
+    if (drawTool === 'select') {
+      if (isFinal) paint3dBridge.endStroke();
       return;
     }
-    const canvas = textureCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
+    const studioTool: StudioPaintTool =
+      drawTool === 'rectangle' ? 'rect' :
+      (drawTool as StudioPaintTool);
     if (isFinal) {
-      lastPaintUvRef.current = null;
-      const large = Math.max(canvas.width, canvas.height) >= 256;
-      if (large) flushLivePaintPreview();
-      else handleTextureUpdated(canvas);
+      paint3dBridge.endStroke();
       return;
     }
-
-    const x = Math.max(0, Math.min(canvas.width - 1, Math.floor(uvU * canvas.width)));
-    // With texture.flipY=false, raycast UV.v maps directly to canvas Y (0 = top).
-    const y = Math.max(0, Math.min(canvas.height - 1, Math.floor(uvV * canvas.height)));
-    const color = toolState.activeColor || '#ff9a3c';
-    const bSize = toolState.brushSize || 1;
-    const tool = toolState.drawTool || 'pencil';
-
-    if (tool === 'picker') {
-      const pData = ctx.getImageData(x, y, 1, 1).data;
-      const hex = `#${((1 << 24) + (pData[0] << 16) + (pData[1] << 8) + pData[2]).toString(16).slice(1)}`;
-      if (toolState.activeColor !== hex) {
-        setToolState((s) => ({ ...s, activeColor: hex }));
-      }
-      lastPaintUvRef.current = null;
-      return;
-    }
-
-    const stamp = (px: number, py: number) => {
-      const half = Math.floor(bSize / 2);
-      const stampAt = (cx: number) => {
-        ctx.save();
-        ctx.globalAlpha = toolState.paintOpacity ?? 1;
-        if (tool === 'eraser') ctx.globalCompositeOperation = 'destination-out';
-        ctx.fillStyle = tool === 'eraser' ? '#000000' : color;
-        if (tool === 'spray') {
-          const radius = Math.max(2, bSize * 1.8);
-          for (let i = 0; i < Math.max(8, bSize * 5); i++) {
-            const angle = Math.random() * Math.PI * 2;
-            const distance = Math.sqrt(Math.random()) * radius;
-            ctx.fillRect(Math.round(cx + Math.cos(angle) * distance), Math.round(py + Math.sin(angle) * distance), 1, 1);
-          }
-        } else {
-          for (let by = 0; by < bSize; by++) for (let bx = 0; bx < bSize; bx++) {
-            const sx = cx - half + bx, sy = py - half + by;
-            if (sx < 0 || sy < 0 || sx >= canvas.width || sy >= canvas.height) continue;
-            if (tool !== 'dither' || (sx + sy) % 2 === 0) ctx.fillRect(sx, sy, 1, 1);
-          }
-        }
-        ctx.restore();
-      };
-      stampAt(px);
-      if (toolState.paintMirrorU === true) stampAt(canvas.width - 1 - px);
-    };
-
-    if (tool === 'fill') {
-      floodFillCanvas(ctx, x, y, color);
-      const large = Math.max(canvas.width, canvas.height) >= 256;
-      if (large) flushLivePaintPreview();
-      else handleTextureUpdated(canvas);
-      lastPaintUvRef.current = { u: uvU, v: uvV, px: x, py: y, faceId };
-      return;
-    } else {
-      const previous = lastPaintUvRef.current;
-      // Screen-space stroke sampling already walks the mesh — stamp this texel only.
-      if (previous && previous.px === x && previous.py === y) {
-        // same texel
-      } else {
-        stamp(x, y);
-      }
-    }
-    lastPaintUvRef.current = { u: uvU, v: uvV, px: x, py: y, faceId };
+    // Module singleton — immune to React remounts / history / layers effect cleanup.
+    paint3dBridge.paintUv(
+      uvU,
+      uvV,
+      ts.activeColor || '#ff9a3c',
+      ts.brushSize || 1,
+      studioTool,
+      ts.paintOpacity ?? 1,
+      faceId,
+    );
+    // GitHub main always flushed after stamp so the Viewport CanvasTexture uploads
+    // even if the host refresh path is briefly unbound mid-workspace switch.
     flushLivePaintPreview();
-  };
-
-  const floodFillCanvas = (ctx: CanvasRenderingContext2D, startX: number, startY: number, fillColorHex: string) => {
-    const width = ctx.canvas.width;
-    const height = ctx.canvas.height;
-    const imgData = ctx.getImageData(0, 0, width, height);
-    floodFill(imgData, startX, startY, hexToRgba(fillColorHex));
-    ctx.putImageData(imgData, 0, 0);
   };
 
   const handleLoadJSON = (jsonStr: string) => {
@@ -1915,6 +1957,8 @@ export const App: React.FC = () => {
       setActiveWorkspaceMode('paint');
       setUvSplitOpen(false);
       setIsToolWindowOpen(false);
+      // Give the 3D mesh more room; pixel editor stays usable on the right.
+      setUvPanelPercent(38);
       leaveRigOverlay();
       setToolState((state) => ({
         ...state,
@@ -1923,6 +1967,10 @@ export const App: React.FC = () => {
         viewMode: 'textured',
         viewportLayout: 'single',
         drawTool: 'pencil',
+        // Usable 3D brush defaults — larger soft brush, tight spacing for continuous feel.
+        brushSize: Math.max(state.brushSize || 1, 3),
+        paintSpacing: Math.min(state.paintSpacing ?? 0.12, 0.12),
+        paintOpacity: state.paintOpacity ?? 1,
         isCadDrawing: false,
         placeOnClick: false,
         showBones: false,
@@ -1981,7 +2029,7 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-[#2b2b2b] text-[#cccccc] overflow-hidden font-sans select-none app-shell">
+    <div className="flex flex-col h-screen w-screen bg-[#1e2023] text-[#c6cad1] overflow-hidden font-sans select-none app-shell">
       <Header
         toolState={toolState}
         setToolState={setToolState}
@@ -2059,6 +2107,7 @@ export const App: React.FC = () => {
             style={{ width: editorSplitOpen ? `calc(${100 - uvPanelPercent}% - 8px)` : '100%' }}
           >
           {activeWorkspaceMode === 'animation' ? (
+              <Suspense fallback={<WorkspaceLoading label="Animation Studio" />}>
               <CutsceneStudio
                 sceneName={activeScene.name}
                 scenes={scenes.map((s) => ({ id: s.id, name: s.name, meshCount: s.meshes.length }))}
@@ -2088,6 +2137,7 @@ export const App: React.FC = () => {
                 textureRevision={textureRevision}
                 activeMeshId={activeMeshId}
               />
+              </Suspense>
           ) : toolState.viewportLayout === 'single' && activeWorkspaceMode !== 'blockout' ? (
             <Viewport3D
               meshes={meshes}
@@ -2117,7 +2167,6 @@ export const App: React.FC = () => {
               onDirect3DPaintPixel={handleDirect3DPaintPixel}
               onSpawnDrawnPrimitive={handleSpawnDrawnPrimitive}
               onOpenUVModal={() => setIsUVModalOpen(true)}
-              onModalMeshPreview={(amount) => applyModalMeshAmountRef.current(amount)}
               onModalMeshConfirm={() => confirmModalMeshOpRef.current()}
               onModalMeshCancel={() => cancelModalMeshOpRef.current()}
               onModalLoopCutConfirm={(loopEdgeIds, factors) => confirmModalLoopCutRef.current(loopEdgeIds, factors)}
@@ -2153,8 +2202,9 @@ export const App: React.FC = () => {
               setSelectedFaceIds={setSelectedFaceIds}
               selectedMeshIds={selectedMeshIds}
               setSelectedMeshIds={setSelectedMeshIds}
+              onDirect3DPaintPixel={handleDirect3DPaintPixel}
+              onSpawnDrawnPrimitive={handleSpawnDrawnPrimitive}
               onOpenUVModal={() => setIsUVModalOpen(true)}
-              onModalMeshPreview={(amount) => applyModalMeshAmountRef.current(amount)}
               onModalMeshConfirm={() => confirmModalMeshOpRef.current()}
               onModalMeshCancel={() => cancelModalMeshOpRef.current()}
               onModalLoopCutConfirm={(loopEdgeIds, factors) => confirmModalLoopCutRef.current(loopEdgeIds, factors)}
@@ -2228,18 +2278,19 @@ export const App: React.FC = () => {
                 className="adobe-divider group relative z-30 w-2 shrink-0 cursor-col-resize border-x touch-none"
                 title="Drag to resize · Double-click to reset"
               >
-                <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-[#4d4d4d] group-hover:w-0.5 group-hover:bg-[#ed7300]" />
+                <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-[#3b3f46] group-hover:w-0.5 group-hover:bg-[#ed7300]" />
                 <div className="adobe-divider-handle absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-14 w-3 flex flex-col items-center justify-center gap-1">
-                  <span className="w-0.5 h-0.5 rounded-full bg-[#4d4d4d]" />
-                  <span className="w-0.5 h-0.5 rounded-full bg-[#4d4d4d]" />
-                  <span className="w-0.5 h-0.5 rounded-full bg-[#4d4d4d]" />
+                  <span className="w-0.5 h-0.5 rounded-full bg-[#3b3f46]" />
+                  <span className="w-0.5 h-0.5 rounded-full bg-[#3b3f46]" />
+                  <span className="w-0.5 h-0.5 rounded-full bg-[#3b3f46]" />
                 </div>
               </div>
               <section
-                className="min-w-0 h-full bg-[#2b2b2b]"
+                className="min-w-0 h-full bg-[#1e2023]"
                 style={{ width: `${uvPanelPercent}%` }}
               >
                 {activeWorkspaceMode === 'paint' ? (
+                  <Suspense fallback={<WorkspaceLoading label="Pixel Paint" />}>
                   <PixelPaintStudio
                     key={activeMesh.id}
                     toolState={toolState}
@@ -2263,6 +2314,7 @@ export const App: React.FC = () => {
                       }));
                     }}
                   />
+                  </Suspense>
                 ) : (
                   <UVEditor
                     mesh={activeMesh}
@@ -2298,6 +2350,7 @@ export const App: React.FC = () => {
             setToolState={setToolState}
             textureCanvasRef={textureCanvasRef}
             paintBridgeRef={paintBridgeRef}
+            onBindLiveCanvas={bindLiveTextureCanvas}
             onStrokeEnd={(canvas) => {
               const large = Math.max(canvas.width, canvas.height) >= 256;
               if (large) {
@@ -2309,9 +2362,9 @@ export const App: React.FC = () => {
           />
         )}
 
-        {!editorSplitOpen && activeWorkspaceMode !== 'animation' && activeWorkspaceMode !== 'blockout' && <aside className="w-80 bg-[#333333] border-l border-[#1a1a1a] flex flex-col z-20 panel-surface">
+        {!editorSplitOpen && activeWorkspaceMode !== 'animation' && activeWorkspaceMode !== 'blockout' && <aside className="w-80 bg-[#26282d] border-l border-[#101114] flex flex-col z-20 panel-surface">
           {activeWorkspaceMode === 'rigging' ? (
-            <div className="flex-1 overflow-hidden bg-[#333333]">
+            <div className="flex-1 overflow-hidden bg-[#26282d]">
               <RiggingPanel
                 bones={bones}
                 setBones={setBones}
@@ -2329,7 +2382,7 @@ export const App: React.FC = () => {
             </div>
           ) : (
           <>
-          <div className="h-9 bg-[#262626] border-b border-[#4d4d4d] flex items-stretch px-1 text-xs">
+          <div className="h-9 bg-[#191b1e] border-b border-[#3b3f46] flex items-stretch px-1 text-xs">
             <button
               onClick={() => {
                 setActiveRightTab('outliner');
@@ -2401,7 +2454,7 @@ export const App: React.FC = () => {
             </button>
           </div>
 
-          <div className="flex-1 overflow-hidden bg-[#333333] p-1">
+          <div className="flex-1 overflow-hidden bg-[#26282d] p-1">
             {activeRightTab === 'outliner' && (
               <OutlinerPanel
                 meshes={meshes}
@@ -2505,7 +2558,7 @@ export const App: React.FC = () => {
 
       <footer className="adobe-statusbar z-30 select-none justify-between">
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 font-bold text-[#e3e3e3]">
+          <div className="flex items-center gap-1.5 font-bold text-[#e4e7eb]">
             <span className="w-2 h-2 rounded-full bg-[#ed7300]" />
             <span>PolyStage</span>
           </div>
@@ -2520,7 +2573,7 @@ export const App: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-3 text-[#888888]">
+        <div className="flex items-center gap-3 text-[#7e838c]">
           {activeWorkspaceMode === 'rigging' ? (
             <>
               <span className="text-[#ed7300] font-bold">Easy Rig</span>
@@ -2539,8 +2592,8 @@ export const App: React.FC = () => {
             </>
           ) : (
             <>
-              <button onClick={() => setIsUVModalOpen(true)} className="text-[#ff9a3c] font-bold hover:underline">
-                [U] UV Studio
+              <button onClick={() => setIsUVModalOpen(true)} className="inline-flex items-center gap-1 text-[#ff9a3c] font-bold hover:underline">
+                <kbd>U</kbd> UV Studio
               </button>
               <button
                 onClick={() => {
@@ -2551,18 +2604,18 @@ export const App: React.FC = () => {
               >
                 Primitives
               </button>
-              <span>[Esc] Cancel Draw</span>
-              <span>[Ctrl+Z] Undo</span>
-              <span>[Ctrl+Y] Redo</span>
-              <span>[Ctrl+C/V] Copy/Paste</span>
-              <span>[G] Move</span>
-              <span>[R] Rotate</span>
-              <span>[S] Scale</span>
-              <span>[E] Extrude</span>
-              <span>[I] Inset</span>
-              <span>[Shift+D] Dup</span>
-              <span>[P] Separate</span>
-              <span>[Alt+X] Mirror</span>
+              <span className="kbd-hint"><kbd>Esc</kbd> Cancel</span>
+              <span className="kbd-hint"><kbd>Ctrl+Z</kbd> Undo</span>
+              <span className="kbd-hint"><kbd>Ctrl+Y</kbd> Redo</span>
+              <span className="kbd-hint"><kbd>Ctrl+C/V</kbd> Copy/Paste</span>
+              <span className="kbd-hint"><kbd>G</kbd> Move</span>
+              <span className="kbd-hint"><kbd>R</kbd> Rotate</span>
+              <span className="kbd-hint"><kbd>S</kbd> Scale</span>
+              <span className="kbd-hint"><kbd>E</kbd> Extrude</span>
+              <span className="kbd-hint"><kbd>I</kbd> Inset</span>
+              <span className="kbd-hint"><kbd>Shift+D</kbd> Dup</span>
+              <span className="kbd-hint"><kbd>P</kbd> Separate</span>
+              <span className="kbd-hint"><kbd>Alt+X</kbd> Mirror</span>
             </>
           )}
         </div>

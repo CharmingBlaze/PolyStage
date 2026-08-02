@@ -1,21 +1,30 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useLayoutEffect, useRef } from 'react';
 import type { ToolState } from '../types/cad';
-import { floodFill, hexToRgba, rgbaToHex } from '../utils/pixelPaint';
-import { notifyTexturePreview } from '../utils/texturePreviewBus';
-import { StrokeTexelMask } from '../utils/strokeTexelMask';
-import type { Paint3DBridge, PaintTool } from './PixelPaintStudio';
+import { setLiveTextureCanvas } from '../utils/texturePreviewBus';
+import {
+  bindPaint3DHost,
+  paint3dBridge,
+  type Paint3DBridge,
+  type Paint3DTool,
+} from '../utils/paint3dSurface';
 
 type Props = {
   toolState: ToolState;
   setToolState: React.Dispatch<React.SetStateAction<ToolState>>;
   textureCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
-  paintBridgeRef: React.MutableRefObject<Paint3DBridge | null>;
+  paintBridgeRef: React.MutableRefObject<Paint3DBridge>;
   /** Encode / commit mesh texture after a finished 3D stroke (optional). */
   onStrokeEnd?: (canvas: HTMLCanvasElement) => void;
+  /**
+   * Called when a paint canvas is created so the viewport can bind a live
+   * CanvasTexture (ref mutation alone does not re-render App).
+   */
+  onBindLiveCanvas?: (canvas: HTMLCanvasElement) => void;
 };
 
 function ensurePaintCanvas(
   textureCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>,
+  onCreated?: (canvas: HTMLCanvasElement) => void,
   w = 64,
   h = 64,
 ): HTMLCanvasElement {
@@ -31,12 +40,13 @@ function ensurePaintCanvas(
     ctx.fillRect(0, 0, w, h);
   }
   textureCanvasRef.current = c;
+  onCreated?.(c);
   return c;
 }
 
 /**
- * Minimal 3D-paint bridge: stamps directly onto textureCanvasRef.
- * Used outside the Paint workspace so we do not mount a full PixelPaintStudio.
+ * Binds the module-level 3D paint surface when PixelPaintStudio is not mounted.
+ * Does not own stroke state — see paint3dSurface.ts.
  */
 export const PaintBridgeHost: React.FC<Props> = ({
   toolState,
@@ -44,108 +54,54 @@ export const PaintBridgeHost: React.FC<Props> = ({
   textureCanvasRef,
   paintBridgeRef,
   onStrokeEnd,
+  onBindLiveCanvas,
 }) => {
-  const strokeActiveRef = useRef(false);
-  const stampedMaskRef = useRef(new StrokeTexelMask(64, 64));
-  const fillDoneRef = useRef(false);
   const mirrorRef = useRef(!!toolState.paintMirrorU);
   mirrorRef.current = !!toolState.paintMirrorU;
   const onStrokeEndRef = useRef(onStrokeEnd);
   onStrokeEndRef.current = onStrokeEnd;
+  const onBindLiveCanvasRef = useRef(onBindLiveCanvas);
+  onBindLiveCanvasRef.current = onBindLiveCanvas;
+  const setToolStateRef = useRef(setToolState);
+  setToolStateRef.current = setToolState;
+  const textureCanvasRefStable = textureCanvasRef;
 
-  useEffect(() => {
-    paintBridgeRef.current = {
-      paintUv: (uvU, uvV, color, size, paintTool, opacity) => {
-        const canvas = ensurePaintCanvas(textureCanvasRef);
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        ctx.imageSmoothingEnabled = false;
-        const w = canvas.width;
-        const h = canvas.height;
-        const x = Math.max(0, Math.min(w - 1, Math.floor(uvU * w)));
-        // flipY=false: UV.v maps straight to canvas Y (0 = top).
-        const y = Math.max(0, Math.min(h - 1, Math.floor(uvV * h)));
+  useLayoutEffect(() => {
+    paintBridgeRef.current = paint3dBridge;
+    // Ensure + bind BEFORE the first stamp so the viewport shows live pixels.
+    const canvas = ensurePaintCanvas(textureCanvasRefStable, (c) => {
+      onBindLiveCanvasRef.current?.(c);
+    });
+    // Existing canvas still needs a revision bump if the viewport never saw it.
+    onBindLiveCanvasRef.current?.(canvas);
 
-        if (paintTool === 'picker') {
-          const sample = ctx.getImageData(x, y, 1, 1).data;
-          if (sample[3]) {
-            setToolState((state) => ({
-              ...state,
-              activeColor: rgbaToHex(sample[0], sample[1], sample[2]),
-              drawTool: 'pencil',
-            }));
-          }
-          return;
-        }
-
-        if (!strokeActiveRef.current) {
-          strokeActiveRef.current = true;
-          stampedMaskRef.current.reset(w, h);
-          fillDoneRef.current = false;
-        }
-
-        if (paintTool === 'fill') {
-          if (fillDoneRef.current) return;
-          fillDoneRef.current = true;
-          const image = ctx.getImageData(0, 0, w, h);
-          floodFill(image, x, y, hexToRgba(color, Math.round(opacity * 255)));
-          ctx.putImageData(image, 0, 0);
-          notifyTexturePreview();
-          return;
-        }
-
-        const stampAt = (cx: number, cy: number) => {
-          if (!stampedMaskRef.current.add(cx, cy)) return;
-          const half = Math.floor(size / 2);
-          ctx.save();
-          ctx.globalAlpha = opacity;
-          if (paintTool === 'eraser') ctx.globalCompositeOperation = 'destination-out';
-          ctx.fillStyle = paintTool === 'eraser' ? '#000000' : color;
-          if (paintTool === 'spray') {
-            const radius = Math.max(2, size * 1.8);
-            for (let i = 0; i < Math.max(8, size * 5); i++) {
-              const angle = Math.random() * Math.PI * 2;
-              const distance = Math.sqrt(Math.random()) * radius;
-              ctx.fillRect(
-                Math.round(cx + Math.cos(angle) * distance),
-                Math.round(cy + Math.sin(angle) * distance),
-                1,
-                1,
-              );
-            }
-          } else {
-            for (let by = 0; by < size; by++) {
-              for (let bx = 0; bx < size; bx++) {
-                const sx = cx - half + bx;
-                const sy = cy - half + by;
-                if (sx < 0 || sy < 0 || sx >= w || sy >= h) continue;
-                if (paintTool !== 'dither' || (sx + sy) % 2 === 0) ctx.fillRect(sx, sy, 1, 1);
-              }
-            }
-          }
-          ctx.restore();
-        };
-
-        stampAt(x, y);
-        if (mirrorRef.current === true) stampAt(w - 1 - x, y);
-        notifyTexturePreview();
+    return bindPaint3DHost({
+      getTargetCanvas: () =>
+        ensurePaintCanvas(textureCanvasRefStable, (c) => {
+          onBindLiveCanvasRef.current?.(c);
+        }),
+      refreshPreview: () => {
+        // Same canvas we stamp — publish identity; paint3dSurface sync-notifies.
+        const c = textureCanvasRefStable.current;
+        if (c) setLiveTextureCanvas(c);
       },
-      endStroke: () => {
-        strokeActiveRef.current = false;
-        fillDoneRef.current = false;
-        stampedMaskRef.current.clear();
-        const canvas = textureCanvasRef.current;
-        if (canvas) onStrokeEndRef.current?.(canvas);
+      onStrokeEnd: () => {
+        const c = textureCanvasRefStable.current;
+        if (c) onStrokeEndRef.current?.(c);
       },
-    };
-
-    return () => {
-      paintBridgeRef.current = null;
-      stampedMaskRef.current.clear();
-    };
-  }, [paintBridgeRef, textureCanvasRef, setToolState]);
+      getMirrorU: () => mirrorRef.current === true,
+      onPickColor: (hex) => {
+        setToolStateRef.current((state) => ({
+          ...state,
+          activeColor: hex,
+          drawTool: 'pencil',
+        }));
+      },
+    });
+  }, [paintBridgeRef, textureCanvasRefStable]);
 
   return null;
 };
 
-export type { PaintTool };
+export type { Paint3DTool as PaintTool };
+export type { Paint3DBridge };

@@ -212,6 +212,13 @@ export async function exportToGLTF(mesh: CADMesh): Promise<string> {
   return JSON.stringify(json, null, 2);
 }
 
+/** Node fallback for `btoa`, reached only under Vitest. Avoids a hard @types/node dep. */
+function nodeBase64(bytes: Uint8Array): string {
+  const nodeBuffer = (globalThis as { Buffer?: { from(input: Uint8Array): { toString(enc: string): string } } }).Buffer;
+  if (!nodeBuffer) throw new Error('No base64 encoder available in this environment.');
+  return nodeBuffer.from(bytes).toString('base64');
+}
+
 /** Vitest / Node lack browser FileReader; GLTFExporter embeds buffers via data URLs. */
 function ensureFileReaderPolyfill() {
   if (typeof globalThis.FileReader !== 'undefined') return;
@@ -228,10 +235,7 @@ function ensureFileReaderPolyfill() {
         for (let i = 0; i < bytes.length; i += chunk) {
           binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
         }
-        const b64 =
-          typeof btoa === 'function'
-            ? btoa(binary)
-            : Buffer.from(bytes).toString('base64');
+        const b64 = typeof btoa === 'function' ? btoa(binary) : nodeBase64(bytes);
         this.result = `data:application/octet-stream;base64,${b64}`;
         this.onloadend?.();
       });
@@ -296,7 +300,6 @@ export function exportToBlockbench(mesh: CADMesh): string {
     polystage_mesh: {
       id: mesh.id,
       name: mesh.name,
-      type: mesh.type || 'custom',
       position: mesh.position,
       rotation: mesh.rotation,
       scale: mesh.scale,

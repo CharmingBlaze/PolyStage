@@ -51,7 +51,7 @@ export const EnvironmentSettingsModal: React.FC<EnvironmentSettingsModalProps> =
 
   return (
     <div
-      className="absolute z-40 shadow-2xl rounded-lg border border-[#4d4d4d] bg-[#1a1a1a]/95 backdrop-blur-md font-mono text-[10px] text-[#cccccc] select-none"
+      className="absolute z-40 shadow-2xl rounded-lg border border-[#3b3f46] bg-[#101114]/95 backdrop-blur-md font-mono text-[10px] text-[#c6cad1] select-none"
       style={{ left: position.x, top: position.y, width: minimized ? 220 : 280 }}
     >
       <div
@@ -60,15 +60,15 @@ export const EnvironmentSettingsModal: React.FC<EnvironmentSettingsModalProps> =
           setDragging(true);
           dragStart.current = { x: e.clientX - position.x, y: e.clientY - position.y };
         }}
-        className="h-7 px-2 flex items-center justify-between border-b border-[#333] bg-[#242424] cursor-grab active:cursor-grabbing rounded-t-lg"
+        className="h-7 px-2 flex items-center justify-between border-b border-[#26282d] bg-[#242424] cursor-grab active:cursor-grabbing rounded-t-lg"
       >
         <div className="flex items-center gap-1.5 font-bold text-[#6a9fd8]">
-          <GripHorizontal className="w-3 h-3 text-[#666]" />
+          <GripHorizontal className="w-3 h-3 text-[#51565f]" />
           <CloudRain className="w-3 h-3" />
           <span>ENVIRONMENT</span>
         </div>
         <div className="flex items-center gap-0.5">
-          <button type="button" className="p-1 rounded hover:bg-[#4d4d4d] text-[#aaa]" onClick={() => setMinimized((v) => !v)}>
+          <button type="button" className="p-1 rounded hover:bg-[#3b3f46] text-[#aaa]" onClick={() => setMinimized((v) => !v)}>
             {minimized ? <Maximize2 className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
           </button>
           <button type="button" className="p-1 rounded hover:bg-rose-900/40 text-[#aaa] hover:text-rose-400" onClick={onClose}>
@@ -88,7 +88,7 @@ export const EnvironmentSettingsModal: React.FC<EnvironmentSettingsModalProps> =
                 className={`h-6 rounded text-[9px] capitalize border ${
                   environment.weather === w
                     ? 'border-[#ed7300] bg-[#ed7300]/20 text-[#8ec5ff]'
-                    : 'border-[#1a1a1a] text-[#888] hover:text-white'
+                    : 'border-[#101114] text-[#7e838c] hover:text-white'
                 }`}
               >
                 {w}
@@ -97,7 +97,7 @@ export const EnvironmentSettingsModal: React.FC<EnvironmentSettingsModalProps> =
           </div>
 
           <div className="space-y-1.5">
-            <div className="text-[8px] uppercase tracking-wider text-[#666]">Fog</div>
+            <div className="text-[8px] uppercase tracking-wider text-[#51565f]">Fog</div>
             <Row label="Density">
               <SmoothSlider min={0} max={0.12} step={0.001} value={environment.fogDensity}
                 onChange={(fogDensity) => patch({ fogDensity })} />
@@ -109,7 +109,7 @@ export const EnvironmentSettingsModal: React.FC<EnvironmentSettingsModalProps> =
           </div>
 
           <div className="space-y-1.5">
-            <div className="text-[8px] uppercase tracking-wider text-[#666]">Sun</div>
+            <div className="text-[8px] uppercase tracking-wider text-[#51565f]">Sun</div>
             <Row label="Elevation">
               <SmoothSlider min={-10} max={90} step={1} value={environment.sunElevation} accent="#e68619"
                 onChange={(sunElevation) => patch({ sunElevation })} />
@@ -125,7 +125,7 @@ export const EnvironmentSettingsModal: React.FC<EnvironmentSettingsModalProps> =
           </div>
 
           <div className="space-y-1.5">
-            <div className="text-[8px] uppercase tracking-wider text-[#666]">Sky / Ambient</div>
+            <div className="text-[8px] uppercase tracking-wider text-[#51565f]">Sky / Ambient</div>
             <Row label="Top">
               <input type="color" value={environment.skyTopColor} className="h-6 w-10 bg-transparent border-0"
                 onChange={(e) => patch({ skyTopColor: e.target.value })} />
@@ -144,7 +144,7 @@ export const EnvironmentSettingsModal: React.FC<EnvironmentSettingsModalProps> =
                 className={`h-6 rounded text-[9px] border ${
                   environment.backgroundMode !== 'solid'
                     ? 'border-[#ed7300] bg-[#ed7300]/20 text-[#8ec5ff]'
-                    : 'border-[#1a1a1a] text-[#888] hover:text-white'
+                    : 'border-[#101114] text-[#7e838c] hover:text-white'
                 }`}
                 onClick={() => patch({ backgroundMode: 'sky' })}
               >
@@ -155,7 +155,7 @@ export const EnvironmentSettingsModal: React.FC<EnvironmentSettingsModalProps> =
                 className={`h-6 rounded text-[9px] border ${
                   environment.backgroundMode === 'solid'
                     ? 'border-[#ed7300] bg-[#ed7300]/20 text-[#8ec5ff]'
-                    : 'border-[#1a1a1a] text-[#888] hover:text-white'
+                    : 'border-[#101114] text-[#7e838c] hover:text-white'
                 }`}
                 onClick={() => patch({ backgroundMode: 'solid', backgroundColor: environment.backgroundColor || '#000000' })}
               >

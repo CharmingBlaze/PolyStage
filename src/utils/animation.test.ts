@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   createDefaultClip,
+  createGameClip,
+  duplicateClip,
   evaluateClipAtTime,
   sampleChannel,
   wrapTime,
@@ -77,6 +79,22 @@ describe('animation sampling', () => {
     clip = insertKeyframe(clip, mesh.id, 'mesh', 'pos', 0.5, { x: 1, y: 2, z: 3 });
     const track = clip.tracks.find((t) => t.targetId === mesh.id);
     expect(track?.posKeyframes.some((kf) => Math.abs(kf.time - 0.5) < 1e-4)).toBe(true);
+  });
+
+  it('creates game clip presets with loop settings', () => {
+    const walk = createGameClip([mesh], [], 'walk');
+    expect(walk.name).toBe('Walk');
+    expect(walk.loopMode).toBe('loop');
+    expect(walk.duration).toBe(1);
+    expect(walk.tracks[0].posKeyframes).toHaveLength(1);
+  });
+
+  it('duplicates clips with fresh ids', () => {
+    const clip = createDefaultClip([mesh], [], 'Idle');
+    const copy = duplicateClip(clip);
+    expect(copy.id).not.toBe(clip.id);
+    expect(copy.name).toBe('Idle Copy');
+    expect(copy.tracks[0].posKeyframes[0].id).not.toBe(clip.tracks[0].posKeyframes[0].id);
   });
 
   it('rebases clip tracks when model rest transform changes', () => {

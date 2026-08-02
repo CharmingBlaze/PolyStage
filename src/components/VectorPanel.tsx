@@ -7,6 +7,7 @@ import {
   resolveVectorPartTransform,
   segmentsToQuality,
   validateVectorPaths,
+  VECTOR_DENSITY_PRESETS,
   vectorPrimitiveToMesh,
   vectorPathsToMesh,
   vectorSnapshotToCADMesh,
@@ -126,11 +127,11 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
     (activePath.closed || selected.index < activePath.anchors.length - 1);
   const polyQuality = segmentsToQuality(vertical, radial);
   const qualityLabel =
-    polyQuality <= 20
-      ? 'Game Low'
-      : polyQuality <= 45
+    polyQuality <= 18
+      ? 'Low'
+      : polyQuality <= 40
         ? 'Game'
-        : polyQuality <= 70
+        : polyQuality <= 65
           ? 'Solid'
           : 'Dense';
   const applyMeshQuality = (quality: number) => {
@@ -142,13 +143,16 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
   ).length;
   const missingAxis =
     (paths.front.closed ? 0 : 1) + (paths.side.closed ? 0 : 1) === 1;
+  // Game caps: inset ring + diameter strip (no poles/tris). Pointed: pole fans.
+  const tipVerts = capStyle === 'game' ? 2 * radial : 2;
+  const tipFaces =
+    capStyle === 'game'
+      ? 2 * (radial + Math.max(0, radial / 2 - 1))
+      : 2 * radial;
   const estimatedVertices =
-    ((vertical + 1) * radial + (capStyle === 'game' ? 2 * radial + 2 : 2)) *
-    Math.max(validPartCount, 1);
+    ((vertical + 1) * radial + tipVerts) * Math.max(validPartCount, 1);
   const estimatedFaces =
-    (2 * radial * vertical +
-      (capStyle === 'game' ? 2 * radial * 2 + 2 * radial : 2 * radial)) *
-    Math.max(validPartCount, 1);
+    (radial * vertical + tipFaces) * Math.max(validPartCount, 1);
 
   const refPlane = activePlane === 'top' ? 'front' : activePlane;
   const activeRef = refPlane === 'front' || refPlane === 'side' ? refImages[refPlane] : null;
@@ -336,8 +340,8 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
     const totalFaces = meshes.reduce((n, m) => n + m.faces.length, 0);
     onStatus?.(
       andEdit
-        ? `Built ${meshes.length} object${meshes.length === 1 ? '' : 's'} (${totalVerts} verts) — opening MODEL.`
-        : `Built ${meshes.length} object${meshes.length === 1 ? '' : 's'} · ${totalVerts} verts · ${totalFaces} faces. Switch to MODEL to edit.`
+        ? `Built ${meshes.length} game mesh${meshes.length === 1 ? '' : 'es'} (${totalVerts} verts · ${totalFaces} quads) — opening MODEL.`
+        : `Built ${meshes.length} · ${qualityLabel} ${vertical}×${radial} · ${totalVerts} verts · ${totalFaces} faces (all-quad tips).`
     );
     if (andEdit) onBuildAndEdit?.(meshes);
   };
@@ -393,22 +397,35 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
     return (
       <div className="vector-panel vector-panel-dockbar" aria-label="Vector Blockout dock">
         <div className="vector-dock-brand">
-          <span>Vector Blockout</span>
-          <button type="button" onClick={() => setDocked(false)}>Float Panel</button>
+          <span>Blockout</span>
+          <button type="button" onClick={() => setDocked(false)} title="Open the full floating panel">
+            Panel
+          </button>
         </div>
 
         <div className="vector-dock-group" aria-label="Active silhouette">
-          {(['front', 'side', 'top'] as const).map((plane) => (
-            <button
-              key={plane}
-              type="button"
-              className={activePlane === plane ? 'active' : ''}
-              onClick={() => setActivePlane(plane)}
-              title={`${plane[0].toUpperCase()}${plane.slice(1)} silhouette`}
-            >
-              {plane === 'front' ? 'F' : plane === 'side' ? 'S' : 'T'}
-            </button>
-          ))}
+          {(['front', 'side', 'top'] as const).map((plane) => {
+            const ready = paths[plane].closed;
+            const started = paths[plane].anchors.length > 0;
+            return (
+              <button
+                key={plane}
+                type="button"
+                className={`${activePlane === plane ? 'active' : ''}${ready ? ' is-ready' : started ? ' is-drawing' : ''}`}
+                onClick={() => setActivePlane(plane)}
+                title={
+                  ready
+                    ? `${plane} closed — ready`
+                    : started
+                      ? `${plane} open — keep drawing or close`
+                      : `Draw ${plane} silhouette`
+                }
+              >
+                {plane === 'front' ? 'F' : plane === 'side' ? 'S' : 'T'}
+                {ready ? '✓' : ''}
+              </button>
+            );
+          })}
         </div>
 
         <div className="vector-dock-group">
@@ -440,8 +457,9 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
         <div className="vector-dock-group">
           <button
             type="button"
-            className={pointEditMode === 'mirror' ? 'active' : ''}
-            onClick={() => setPointEditMode('mirror')}
+            className={pointEditMode === 'symmetric' ? 'active' : ''}
+            onClick={() => setPointEditMode('symmetric')}
+            title="Mirror Move — paired points stay even when Mirror Width is on"
           >
             Mirror
           </button>
@@ -449,6 +467,7 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
             type="button"
             className={pointEditMode === 'free' ? 'active' : ''}
             onClick={() => setPointEditMode('free')}
+            title="Free Move — drag one point at a time"
           >
             Free
           </button>
@@ -483,9 +502,17 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
 
         <span
           className={`vector-dock-status ${hasBlockingIssue ? 'error' : 'ok'}`}
-          title={activeValidationIssues[0]?.message || 'Active part is build-ready'}
+          title={
+            hasBlockingIssue
+              ? activeValidationIssues[0]?.message
+              : `${qualityLabel} topology · ${vertical}×${radial} · ~${estimatedFaces} faces`
+          }
         >
           {hasBlockingIssue ? '!' : '✓'}
+        </span>
+
+        <span className="vector-dock-poly" title="Estimated game mesh size">
+          {vertical}×{radial}
         </span>
 
         <button
@@ -1058,7 +1085,7 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
                   </strong>
                 </div>
                 <div className="vector-quality-scale">
-                  <span>Game Low</span>
+                  <span>Low</span>
                   <span>Dense</span>
                 </div>
                 <input
@@ -1073,33 +1100,25 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
                   onChange={(e) => applyMeshQuality(Number(e.target.value))}
                 />
                 <div className="vector-thickness-hint">
-                  Live preview updates as you drag. Game Low = boxy 8-side; Dense adds rings + seams.
+                  All-quad game loft · {estimatedFaces} faces · {estimatedVertices} verts (est.)
                 </div>
                 <div className="vector-quality-presets">
-                  <button
-                    type="button"
-                    className={polyQuality <= 25 ? 'active' : ''}
-                    onClick={() => setSegments(8, 8)}
-                    title="Low-poly box: outer + center seams"
-                  >
-                    Game
-                  </button>
-                  <button
-                    type="button"
-                    className={polyQuality > 25 && polyQuality <= 55 ? 'active' : ''}
-                    onClick={() => setSegments(10, 12)}
-                    title="Mid-poly: center + side seams"
-                  >
-                    Solid
-                  </button>
-                  <button
-                    type="button"
-                    className={polyQuality > 55 ? 'active' : ''}
-                    onClick={() => setSegments(14, 16)}
-                    title="Denser rings, still game-friendly"
-                  >
-                    Dense
-                  </button>
+                  {(Object.keys(VECTOR_DENSITY_PRESETS) as Array<keyof typeof VECTOR_DENSITY_PRESETS>).map((key) => {
+                    const preset = VECTOR_DENSITY_PRESETS[key];
+                    const active =
+                      vertical === preset.vertical && radial === preset.radial;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        className={active ? 'active' : ''}
+                        onClick={() => setSegments(preset.vertical, preset.radial)}
+                        title={preset.hint}
+                      >
+                        {preset.label}
+                      </button>
+                    );
+                  })}
                 </div>
 
                 <div className="vector-thickness">
@@ -1158,8 +1177,8 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
                 </div>
                 <div className="vector-thickness-hint">
                   {capStyle === 'game'
-                    ? 'Mostly-quad tips — better for UV, bevel, and game cleanup.'
-                    : 'Organic pointed tips with a pole fan.'}
+                    ? 'All-quad tips (inset loop + diameter strip) — clean for UV, bevel, and game export.'
+                    : 'Organic pointed tips with a pole fan (uses triangles).'}
                 </div>
               </div>
             )}

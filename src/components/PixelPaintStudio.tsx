@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  bindPaint3DHost,
+  paint3dBridge,
+  type Paint3DBridge,
+} from '../utils/paint3dSurface';
+import { setLiveTextureCanvas } from '../utils/texturePreviewBus';
 import {
   Pencil,
   Eraser,
@@ -42,24 +48,17 @@ import {
   Star,
   Sliders,
   Sparkles,
-  Crop,
   ArrowUp,
   ArrowDown,
-  Lock,
-  Unlock,
-  Combine,
-  Sun,
-  Wand,
 } from 'lucide-react';
 import type { CADMesh, MeshTextureAnimation, ToolState } from '../types/cad';
 import {
   applyPhotoAdjustments,
-  cleanPixelPerfectPath,
   DEFAULT_ADJUSTMENTS,
-  drawDitheredGradient,
-  blendPixel,
+  isPixelPerfectCorner,
   type ImageAdjustmentSettings,
   type LayerBlendMode,
+  type PixelPoint,
 } from '../utils/pixelPhotoFilters';
 import {
   drawBresenham,
@@ -68,8 +67,8 @@ import {
   hexToRgba,
   rgbaToHex,
 } from '../utils/pixelPaint';
+import { islandUvBoundsForFace } from '../utils/paintStroke';
 import { isStandard2DPanButton } from '../utils/viewportNav';
-import { StrokeTexelMask } from '../utils/strokeTexelMask';
 import {
   getPaintPalette,
   PAINT_PALETTES,
@@ -212,18 +211,7 @@ type ImportPrompt = {
   naturalH: number;
 };
 
-export type Paint3DBridge = {
-  paintUv: (
-    uvU: number,
-    uvV: number,
-    color: string,
-    brushSize: number,
-    paintTool: PaintTool,
-    opacity: number,
-    faceId?: string | null,
-  ) => void;
-  endStroke: () => void;
-};
+export type { Paint3DBridge };
 
 interface PixelPaintStudioProps {
   toolState: ToolState;
@@ -235,7 +223,7 @@ interface PixelPaintStudioProps {
   onBindLiveTextureCanvas?: (canvas: HTMLCanvasElement) => void;
   textureCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
   initialDataUrl?: string | null;
-  paintBridgeRef?: React.MutableRefObject<Paint3DBridge | null>;
+  paintBridgeRef?: React.MutableRefObject<Paint3DBridge>;
   mesh?: CADMesh | null;
   selectedFaceIds?: string[];
   /** Persist multi-frame strip + clips onto the mesh. */
@@ -289,6 +277,8 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     }
   });
   const [onionSkin, setOnionSkin] = useState(true);
+  const [onionOpacity, setOnionOpacity] = useState(0.28);
+  const [cursorPixel, setCursorPixel] = useState<{ x: number; y: number } | null>(null);
   const [pixelPerfect, setPixelPerfect] = useState(true);
   const [adjustmentsModalOpen, setAdjustmentsModalOpen] = useState(false);
   const [adjustments, setAdjustments] = useState<ImageAdjustmentSettings>(DEFAULT_ADJUSTMENTS);
@@ -355,6 +345,9 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
   const compositeRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef(false);
   const lastStrokePixelRef = useRef<{ x: number; y: number } | null>(null);
+  /** Pixel-Perfect bookkeeping: last drawn pixel and the one still awaiting its successor. */
+  const ppCommittedRef = useRef<PixelPoint | null>(null);
+  const ppPendingRef = useRef<PixelPoint | null>(null);
   const shapeStartRef = useRef<{ x: number; y: number } | null>(null);
   const snapshotBeforeStrokeRef = useRef<ImageData | null>(null);
   const panDragRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
@@ -365,11 +358,10 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
   /** Large-canvas: baseline captured at stroke start, committed to undo on stroke end. */
   const largeStrokeBaselineRef = useRef<ImageData | null>(null);
   const largeStrokeDirtyRef = useRef(false);
-  const paint3DStrokeRef = useRef<{ u: number; v: number; px: number; py: number; faceId: string | null } | null>(null);
-  /** Texels stamped this 3D stroke — prevents double-pen overdraw across samples. */
-  const paint3DStrokeMaskRef = useRef(new StrokeTexelMask(32, 32));
   const paintMirrorURef = useRef(!!toolState.paintMirrorU);
   paintMirrorURef.current = !!toolState.paintMirrorU;
+  const meshRef = useRef(mesh);
+  meshRef.current = mesh;
   const [, bumpUndoUi] = useState(0);
 
   useEffect(() => {
@@ -435,7 +427,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     return out;
   }, [canvasSize, layers, ensureLayerCanvas]);
 
-  const pushHistory = useCallback(() => {
+  const pushHistory = useCallback((opts?: { silent?: boolean }) => {
     const layer = layers.find((l) => l.id === activeLayerId);
     if (!layer) return;
     const c = ensureLayerCanvas(layer.id);
@@ -462,7 +454,9 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     }
     if (undoStack.current.length > SMALL_UNDO_MAX) undoStack.current.shift();
     redoStack.current = [];
-    bumpUndoUi((n) => n + 1);
+    // Silent on 3D stroke begin — bumpUndoUi mid-down caused React churn that
+    // felt like a frozen/looping stroke response.
+    if (!opts?.silent) bumpUndoUi((n) => n + 1);
   }, [activeLayerId, layers, ensureLayerCanvas, canvasSize]);
 
   const beginLargeStrokeUndo = useCallback(() => {
@@ -588,7 +582,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
 
     if (onionSkin && frameIndex > 0) {
       const prev = frames[frameIndex - 1];
-      dctx.globalAlpha = 0.28;
+      dctx.globalAlpha = onionOpacity;
       prev.layers.forEach((layer) => {
         if (!layer.visible) return;
         dctx.drawImage(ensureLayerCanvas(layer.id), 0, 0);
@@ -602,6 +596,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     textureCanvasRef,
     canvasSize,
     onionSkin,
+    onionOpacity,
     frameIndex,
     frames,
     ensureLayerCanvas,
@@ -637,7 +632,6 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       // The parent keeps the composite as the live mesh texture after Paint unmounts.
       // Clearing its dimensions here invalidates both WebGL uploads and UV drawImage.
       compositeRef.current = null;
-      paint3DStrokeMaskRef.current.clear();
     };
     // Intentionally once — capture latest via refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -835,7 +829,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     return [...map.entries()];
   }, []);
 
-  const applyImportedImage = (mode: 'keep' | 'resize', size?: number) => {
+  const applyImportedImage = (mode: 'keep' | 'resize', size?: PixelCanvasSize) => {
     if (!importPrompt) return;
     const dataUrl = importPrompt.dataUrl;
     const { naturalW, naturalH } = importPrompt;
@@ -963,7 +957,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     // Skip until hydrate finishes — otherwise empty default layers replace the UV texture.
     if (!readyToPersistRef.current) return;
     paint();
-  }, [frameIndex, layers, canvasSize, onionSkin, paint]);
+  }, [frameIndex, layers, canvasSize, onionSkin, onionOpacity, paint]);
 
   // Animation playback (supports previewing a specific clip)
   useEffect(() => {
@@ -1109,10 +1103,11 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     dither = false
   ) => {
     const color = toolState.activeColor || '#ed7300';
+    const half = Math.floor(brushSize / 2);
     for (let by = 0; by < brushSize; by++) {
       for (let bx = 0; bx < brushSize; bx++) {
-        const x = px + bx;
-        const y = py + by;
+        const x = px - half + bx;
+        const y = py - half + by;
         if (x < 0 || y < 0 || x >= canvasSize || y >= canvasSize) continue;
         if (erase) {
           ctx.clearRect(x, y, 1, 1);
@@ -1129,106 +1124,80 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     }
   };
 
-  useEffect(() => {
-    if (!paintBridgeRef) return;
-    paintBridgeRef.current = {
-      paintUv: (uvU, uvV, color, size, paintTool, opacity, faceId = null) => {
-        const canvas = activeLayerCanvas();
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        ctx.imageSmoothingEnabled = false;
-
-        const x = Math.max(0, Math.min(canvasSize - 1, Math.floor(uvU * canvasSize)));
-        // With texture.flipY=false, raycast UV.v maps directly to canvas Y (0 = top).
-        const y = Math.max(0, Math.min(canvasSize - 1, Math.floor(uvV * canvasSize)));
-        if (paintTool === 'picker') {
-          const sample = getComposite().getContext('2d')!.getImageData(x, y, 1, 1).data;
-          if (sample[3]) setToolState((state) => ({ ...state, activeColor: rgbaToHex(sample[0], sample[1], sample[2]), drawTool: 'pencil' }));
-          return;
+  // Stable 3D paint host: callbacks live in a ref bag so layers/history re-renders
+  // never tear down the module-level stroke surface (see paint3dSurface.ts).
+  const paint3dHostRef = useRef<{
+    getTargetCanvas: () => HTMLCanvasElement | null;
+    refreshPreview: () => void;
+    onStrokeBegin: () => void;
+    onStrokeEnd: () => void;
+    getMirrorU: () => boolean;
+    getIslandBounds: (faceId: string | null) => ReturnType<typeof islandUvBoundsForFace>;
+    onPickColor: (hex: string) => void;
+  }>({
+    getTargetCanvas: () => null,
+    refreshPreview: () => {},
+    onStrokeBegin: () => {},
+    onStrokeEnd: () => {},
+    getMirrorU: () => false,
+    getIslandBounds: () => null,
+    onPickColor: () => {},
+  });
+  paint3dHostRef.current = {
+    getTargetCanvas: () => {
+      const layer = layers.find((l) => l.id === activeLayerId) || layers[0];
+      if (!layer) return null;
+      return ensureLayerCanvas(layer.id);
+    },
+    refreshPreview: () => {
+      largeStrokeDirtyRef.current = true;
+      const composite = getComposite();
+      // Publish live canvas identity for Viewport (may differ from last React prop
+      // snapshot). Do NOT bump textureRevision here — subscriber rebinds in place.
+      textureCanvasRef.current = composite;
+      setLiveTextureCanvas(composite);
+      onLiveTextureFlushRef.current?.();
+      const display = displayRef.current;
+      if (display) {
+        const dctx = display.getContext('2d');
+        if (dctx) {
+          dctx.imageSmoothingEnabled = false;
+          dctx.clearRect(0, 0, canvasSize, canvasSize);
+          dctx.drawImage(composite, 0, 0);
         }
+      }
+    },
+    onStrokeBegin: () => {
+      beginLargeStrokeUndo();
+      // Snapshot undo without React setState mid-pointerdown.
+      pushHistory({ silent: true });
+    },
+    onStrokeEnd: () => {
+      endLargeStrokeUndo();
+      paint({ persist: true });
+      bumpUndoUi((n) => n + 1);
+    },
+    getMirrorU: () => paintMirrorURef.current === true,
+    getIslandBounds: (faceId) => islandUvBoundsForFace(meshRef.current, faceId),
+    onPickColor: (hex) => {
+      setToolState((state) => ({ ...state, activeColor: hex, drawTool: 'pencil' }));
+    },
+  };
 
-        if (!paint3DStrokeRef.current) {
-          paint3DStrokeMaskRef.current.reset(canvasSize, canvasSize);
-          beginLargeStrokeUndo();
-          pushHistory();
-        }
-        if (paintTool === 'fill') {
-          // One flood per stroke — pointer-move must not re-run fill.
-          if (paint3DStrokeRef.current) return;
-          const image = ctx.getImageData(0, 0, canvasSize, canvasSize);
-          floodFill(image, x, y, hexToRgba(color, Math.round(opacity * 255)));
-          ctx.putImageData(image, 0, 0);
-          paint3DStrokeRef.current = { u: uvU, v: uvV, px: x, py: y, faceId: faceId ?? null };
-          largeStrokeDirtyRef.current = true;
-          paint();
-          return;
-        } else {
-          largeStrokeDirtyRef.current = true;
-          const stamp = (px: number, py: number) => {
-            const stampAt = (cx: number) => {
-              if (!paint3DStrokeMaskRef.current.add(cx, py)) return;
-
-              const half = Math.floor(size / 2);
-              ctx.save();
-              ctx.globalAlpha = opacity;
-              if (paintTool === 'eraser') ctx.globalCompositeOperation = 'destination-out';
-              ctx.fillStyle = paintTool === 'eraser' ? '#000000' : color;
-              if (paintTool === 'spray') {
-                const radius = Math.max(2, size * 1.8);
-                for (let i = 0; i < Math.max(8, size * 5); i++) {
-                  const angle = Math.random() * Math.PI * 2;
-                  const distance = Math.sqrt(Math.random()) * radius;
-                  ctx.fillRect(Math.round(cx + Math.cos(angle) * distance), Math.round(py + Math.sin(angle) * distance), 1, 1);
-                }
-              } else {
-                for (let by = 0; by < size; by++) for (let bx = 0; bx < size; bx++) {
-                  const sx = cx - half + bx;
-                  const sy = py - half + by;
-                  if (sx < 0 || sy < 0 || sx >= canvasSize || sy >= canvasSize) continue;
-                  if (paintTool !== 'dither' || (sx + sy) % 2 === 0) ctx.fillRect(sx, sy, 1, 1);
-                }
-              }
-              ctx.restore();
-            };
-            stampAt(px);
-            // Read Mirror U from live tool state — never as a positional arg (spacing/faceId
-            // truthiness previously looked like "two pens" with Mirror U Off).
-            if (paintMirrorURef.current === true) stampAt(canvasSize - 1 - px);
-          };
-
-          // 3D strokes are already densified in screen space (samplePaintStrokeUvs).
-          // Never Bresenham/UV-lerp between samples — that paints texels the ray never hit
-          // (looks like a fat blob when brush size is 1).
-          stamp(x, y);
-          paint3DStrokeRef.current = { u: uvU, v: uvV, px: x, py: y, faceId: faceId ?? null };
-        }
-        // live composite without full undo push — keep textureCanvasRef on the same canvas the 3D view samples
-        const composite = getComposite();
-        textureCanvasRef.current = composite;
-        // Do NOT call onBindLiveTextureCanvas here — setState mid-stroke rebuilds the mesh and kills 3D paint.
-        onLiveTextureFlushRef.current?.();
-        const display = displayRef.current;
-        if (display) {
-          const dctx = display.getContext('2d');
-          if (dctx) {
-            dctx.imageSmoothingEnabled = false;
-            dctx.clearRect(0, 0, canvasSize, canvasSize);
-            dctx.drawImage(composite, 0, 0);
-          }
-        }
-      },
-      endStroke: () => {
-        paint3DStrokeRef.current = null;
-        paint3DStrokeMaskRef.current.clear();
-        endLargeStrokeUndo();
-        paint({ persist: true });
-      },
-    };
-    return () => {
-      paintBridgeRef.current = null;
-    };
-  }, [paintBridgeRef, activeLayerId, canvasSize, layers, getComposite, paint, textureCanvasRef, pushHistory, beginLargeStrokeUndo, endLargeStrokeUndo, setToolState, ensureLayerCanvas]);
+  useLayoutEffect(() => {
+    if (paintBridgeRef) paintBridgeRef.current = paint3dBridge;
+    return bindPaint3DHost({
+      getTargetCanvas: () => paint3dHostRef.current.getTargetCanvas(),
+      refreshPreview: () => paint3dHostRef.current.refreshPreview(),
+      onStrokeBegin: () => paint3dHostRef.current.onStrokeBegin(),
+      onStrokeEnd: () => paint3dHostRef.current.onStrokeEnd(),
+      getMirrorU: () => paint3dHostRef.current.getMirrorU(),
+      getIslandBounds: (faceId) => paint3dHostRef.current.getIslandBounds(faceId),
+      onPickColor: (hex) => paint3dHostRef.current.onPickColor(hex),
+    });
+    // Bind once per mount — host fns always read paint3dHostRef (never layers deps).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paintBridgeRef]);
 
   const applyToolAt = (px: number, py: number) => {
     const canvas = activeLayerCanvas();
@@ -1259,13 +1228,14 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       paint();
       return;
     }
-    if (tool === 'shade' || tool === 'lighten' || tool === 'noise') {
+    if (tool === 'shade' || tool === 'lighten' || tool === 'dodge' || tool === 'burn' || tool === 'noise') {
       const img = ctx.getImageData(0, 0, canvasSize, canvasSize);
       const d = img.data;
+      const half = Math.floor(brushSize / 2);
       for (let by = 0; by < brushSize; by++) {
         for (let bx = 0; bx < brushSize; bx++) {
-          const x = px + bx;
-          const y = py + by;
+          const x = px - half + bx;
+          const y = py - half + by;
           if (x < 0 || y < 0 || x >= canvasSize || y >= canvasSize) continue;
           const i = (y * canvasSize + x) * 4;
           if (tool === 'noise') {
@@ -1275,7 +1245,11 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
             d[i + 2] = n;
             d[i + 3] = 255;
           } else if (d[i + 3] > 0) {
-            const f = tool === 'shade' ? 0.85 : 1.15;
+            let f = 1;
+            if (tool === 'shade') f = 0.85;
+            else if (tool === 'lighten') f = 1.15;
+            else if (tool === 'burn') f = 0.72;
+            else if (tool === 'dodge') f = 1.28;
             d[i] = Math.max(0, Math.min(255, Math.round(d[i] * f)));
             d[i + 1] = Math.max(0, Math.min(255, Math.round(d[i + 1] * f)));
             d[i + 2] = Math.max(0, Math.min(255, Math.round(d[i + 2] * f)));
@@ -1299,6 +1273,49 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     // pencil default
     plotBrush(ctx, px, py, false);
     paint();
+  };
+
+  /** Pixel-Perfect only makes sense for a 1px hard-edged pencil / eraser stroke. */
+  const pixelPerfectActive = () =>
+    pixelPerfect && brushSize === 1 && (tool === 'pencil' || tool === 'eraser');
+
+  /**
+   * Feed one raw pixel of the active freehand stroke.
+   *
+   * With Pixel-Perfect on, a pixel is held back until its successor is known, so an
+   * L-shaped corner can be dropped before it is ever drawn (Aseprite behaviour).
+   * Undo already snapshots the whole stroke, so the one-pixel delay is invisible.
+   */
+  const feedStrokePixel = (px: number, py: number) => {
+    if (!pixelPerfectActive()) {
+      applyToolAt(px, py);
+      return;
+    }
+    const committed = ppCommittedRef.current;
+    if (!committed) {
+      applyToolAt(px, py);
+      ppCommittedRef.current = { x: px, y: py };
+      return;
+    }
+    const pending = ppPendingRef.current;
+    if (!pending) {
+      ppPendingRef.current = { x: px, y: py };
+      return;
+    }
+    if (pending.x === px && pending.y === py) return;
+    if (!isPixelPerfectCorner(committed, pending, { x: px, y: py })) {
+      applyToolAt(pending.x, pending.y);
+      ppCommittedRef.current = pending;
+    }
+    ppPendingRef.current = { x: px, y: py };
+  };
+
+  /** Draw the pixel still held back by the Pixel-Perfect one-step delay. */
+  const flushStrokePixels = () => {
+    const pending = ppPendingRef.current;
+    if (pending) applyToolAt(pending.x, pending.y);
+    ppPendingRef.current = null;
+    ppCommittedRef.current = null;
   };
 
   const beginPan = (e: React.PointerEvent, target: HTMLElement) => {
@@ -1371,7 +1388,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
 
     drawingRef.current = true;
 
-    if (tool === 'line' || tool === 'rect' || tool === 'ellipse') {
+    if (tool === 'line' || tool === 'rect' || tool === 'ellipse' || tool === 'gradient') {
       beginLargeStrokeUndo();
       pushHistory();
       const c = activeLayerCanvas();
@@ -1383,7 +1400,9 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     beginLargeStrokeUndo();
     pushHistory();
     lastStrokePixelRef.current = coords;
-    applyToolAt(coords.x, coords.y);
+    ppCommittedRef.current = null;
+    ppPendingRef.current = null;
+    feedStrokePixel(coords.x, coords.y);
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -1395,8 +1414,11 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       });
       return;
     }
+    const hover = toPixel(e);
+    if (hover) setCursorPixel(hover);
+    else setCursorPixel(null);
     if (!drawingRef.current) return;
-    const coords = toPixel(e);
+    const coords = hover;
     if (!coords) return;
 
     const selDrag = selectionDragRef.current;
@@ -1457,7 +1479,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       return;
     }
 
-    if ((tool === 'line' || tool === 'rect' || tool === 'ellipse') && shapeStartRef.current) {
+    if ((tool === 'line' || tool === 'rect' || tool === 'ellipse' || tool === 'gradient') && shapeStartRef.current) {
       const c = activeLayerCanvas();
       if (!c || !snapshotBeforeStrokeRef.current) return;
       const ctx = c.getContext('2d')!;
@@ -1467,7 +1489,39 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       ctx.fillStyle = color;
       ctx.strokeStyle = color;
 
-      if (tool === 'line') {
+      if (tool === 'gradient') {
+        const img = ctx.getImageData(0, 0, canvasSize, canvasSize);
+        const d = img.data;
+        const dx = coords.x - s.x;
+        const dy = coords.y - s.y;
+        const len2 = dx * dx + dy * dy || 1;
+        const rgba = hexToRgba(color);
+        const endR = Math.round(rgba[0] * 0.15);
+        const endG = Math.round(rgba[1] * 0.15);
+        const endB = Math.round(rgba[2] * 0.15);
+        const minX = Math.max(0, Math.min(s.x, coords.x) - 1);
+        const maxX = Math.min(canvasSize - 1, Math.max(s.x, coords.x) + 1);
+        const minY = Math.max(0, Math.min(s.y, coords.y) - 1);
+        const maxY = Math.min(canvasSize - 1, Math.max(s.y, coords.y) + 1);
+        // Soft band along the drag axis — fills a strip perpendicular to the gradient.
+        const halfW = Math.max(brushSize, Math.ceil(Math.hypot(dx, dy) * 0.35));
+        for (let y = Math.max(0, minY - halfW); y <= Math.min(canvasSize - 1, maxY + halfW); y++) {
+          for (let x = Math.max(0, minX - halfW); x <= Math.min(canvasSize - 1, maxX + halfW); x++) {
+            const vx = x - s.x;
+            const vy = y - s.y;
+            const t = Math.max(0, Math.min(1, (vx * dx + vy * dy) / len2));
+            const perp = Math.abs((-dy * vx + dx * vy) / Math.sqrt(len2));
+            if (perp > halfW) continue;
+            const i = (y * canvasSize + x) * 4;
+            const fall = 1 - perp / halfW;
+            d[i] = Math.round(rgba[0] + (endR - rgba[0]) * t);
+            d[i + 1] = Math.round(rgba[1] + (endG - rgba[1]) * t);
+            d[i + 2] = Math.round(rgba[2] + (endB - rgba[2]) * t);
+            d[i + 3] = Math.max(d[i + 3], Math.round(255 * fall));
+          }
+        }
+        ctx.putImageData(img, 0, 0);
+      } else if (tool === 'line') {
         drawBresenham(ctx, s.x, s.y, coords.x, coords.y, brushSize, (x, y) => {
           ctx.fillRect(x, y, 1, 1);
         });
@@ -1517,13 +1571,13 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
           const ctx = canvas.getContext('2d')!;
           drawBresenham(ctx, prev.x, prev.y, coords.x, coords.y, 1, (x, y) => {
             if (x === prev.x && y === prev.y) return;
-            applyToolAt(x, y);
+            feedStrokePixel(x, y);
           });
         } else {
-          applyToolAt(coords.x, coords.y);
+          feedStrokePixel(coords.x, coords.y);
         }
       } else if (!prev) {
-        applyToolAt(coords.x, coords.y);
+        feedStrokePixel(coords.x, coords.y);
       }
       lastStrokePixelRef.current = coords;
     }
@@ -1532,6 +1586,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
   const onPointerUp = (e: React.PointerEvent) => {
     panDragRef.current = null;
     const wasDrawing = drawingRef.current;
+    if (wasDrawing) flushStrokePixels();
     drawingRef.current = false;
     lastStrokePixelRef.current = null;
     shapeStartRef.current = null;
@@ -1854,6 +1909,8 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       { id: 'spray', icon: <SprayCan className="w-3.5 h-3.5" />, title: 'Spray', group: 'draw' },
       { id: 'shade', icon: <span className="text-[10px] font-bold">Dk</span>, title: 'Shade / darken', group: 'draw' },
       { id: 'lighten', icon: <span className="text-[10px] font-bold">Lt</span>, title: 'Lighten', group: 'draw' },
+      { id: 'burn', icon: <span className="text-[10px] font-bold">Bn</span>, title: 'Burn (strong darken)', group: 'draw' },
+      { id: 'dodge', icon: <span className="text-[10px] font-bold">Dg</span>, title: 'Dodge (strong lighten)', group: 'draw' },
       { id: 'noise', icon: <span className="text-[10px] font-bold">Nz</span>, title: 'Noise', group: 'draw' },
       { id: 'select', icon: <MousePointer2 className="w-3.5 h-3.5" />, title: 'Marquee Select (V)', group: 'select' },
       { id: 'wand', icon: <Wand2 className="w-3.5 h-3.5" />, title: 'Magic Wand (W)', group: 'select' },
@@ -1861,6 +1918,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       { id: 'line', icon: <Slash className="w-3.5 h-3.5" />, title: 'Line (L)', group: 'shape' },
       { id: 'rect', icon: <Square className="w-3.5 h-3.5" />, title: 'Rectangle (U)', group: 'shape' },
       { id: 'ellipse', icon: <Circle className="w-3.5 h-3.5" />, title: 'Ellipse (C)', group: 'shape' },
+      { id: 'gradient', icon: <Contrast className="w-3.5 h-3.5" />, title: 'Gradient — drag to paint a soft ramp', group: 'shape' },
       { id: 'hand', icon: <Hand className="w-3.5 h-3.5" />, title: 'Hand / Pan (Space hold · RMB · MMB · Alt+LMB)', group: 'nav' },
     ],
     []
@@ -1875,6 +1933,12 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       (dt as PaintTool);
     if (tools.some((t) => t.id === mapped)) setTool(mapped);
   }, [toolState.drawTool, tools]);
+
+  // Keep 2D brush size in sync with the 3D paint panel / global tool state.
+  useEffect(() => {
+    const next = Math.max(1, Math.round(toolState.brushSize || 1));
+    if (next !== brushSize) setBrushSize(next);
+  }, [toolState.brushSize]);
 
   const displayPx = canvasSize * zoom;
   const selectedFaceSet = useMemo(() => new Set(selectedFaceIds), [selectedFaceIds]);
@@ -2169,12 +2233,13 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                 ref={displayRef}
                 width={canvasSize}
                 height={canvasSize}
-                className="w-full h-full cursor-crosshair"
+                className="w-full h-full cursor-none"
                 style={{ imageRendering: 'pixelated' }}
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
                 onPointerCancel={onPointerUp}
+                onPointerLeave={() => setCursorPixel(null)}
                 onContextMenu={(e) => e.preventDefault()}
               />
               {showGrid && (
@@ -2214,12 +2279,23 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
               )}
               {selection && selection.w > 0 && selection.h > 0 && (
                 <div
-                  className="absolute pointer-events-none border border-dashed border-[#e68619] bg-[#e68619]/12"
+                  className="pixel-paint__selection absolute pointer-events-none"
                   style={{
                     left: `${(selection.x / canvasSize) * 100}%`,
                     top: `${(selection.y / canvasSize) * 100}%`,
                     width: `${(selection.w / canvasSize) * 100}%`,
                     height: `${(selection.h / canvasSize) * 100}%`,
+                  }}
+                />
+              )}
+              {cursorPixel && tool !== 'hand' && tool !== 'select' && tool !== 'wand' && tool !== 'move' && (
+                <div
+                  className="pixel-paint__brush-cursor absolute pointer-events-none"
+                  style={{
+                    left: `${((cursorPixel.x - Math.floor(brushSize / 2)) / canvasSize) * 100}%`,
+                    top: `${((cursorPixel.y - Math.floor(brushSize / 2)) / canvasSize) * 100}%`,
+                    width: `${(brushSize / canvasSize) * 100}%`,
+                    height: `${(brushSize / canvasSize) * 100}%`,
                   }}
                 />
               )}
@@ -2233,9 +2309,21 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
             <button type="button" className={`pixel-paint__hud-btn ${showUvOverlay ? 'is-active' : ''}`} onClick={toggleUvOverlay}>
               UV
             </button>
-            <button type="button" className={`pixel-paint__hud-btn ${onionSkin ? 'is-active' : ''}`} onClick={() => setOnionSkin((v) => !v)}>
+            <button type="button" className={`pixel-paint__hud-btn ${onionSkin ? 'is-active' : ''}`} onClick={() => setOnionSkin((v) => !v)} title="Onion skin previous frame">
               Onion
             </button>
+            {onionSkin && (
+              <label className="pixel-paint__onion-op" title="Onion skin opacity">
+                <input
+                  type="range"
+                  min={0.08}
+                  max={0.6}
+                  step={0.02}
+                  value={onionOpacity}
+                  onChange={(e) => setOnionOpacity(Number(e.target.value))}
+                />
+              </label>
+            )}
             <div className="pixel-paint__vdiv" />
             <button type="button" className="pixel-paint__hud-btn is-square" onClick={() => setZoom((z) => nudgeZoom(z, -1))} title="Zoom out">
               <ZoomOut className="w-3.5 h-3.5" />
@@ -2244,6 +2332,14 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
             <button type="button" className="pixel-paint__hud-btn is-square" onClick={() => setZoom((z) => nudgeZoom(z, 1))} title="Zoom in">
               <ZoomIn className="w-3.5 h-3.5" />
             </button>
+            {cursorPixel && (
+              <>
+                <div className="pixel-paint__vdiv" />
+                <span className="pixel-paint__coord-label" title="Cursor texel">
+                  {cursorPixel.x},{cursorPixel.y}
+                </span>
+              </>
+            )}
           </div>
         </div>
 
@@ -2251,7 +2347,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
         <aside className="pixel-paint__inspector shrink-0 flex flex-col min-h-0">
           <div className="pixel-paint__section-head">
             <span>Palette</span>
-            <span className="text-[9px] font-mono normal-case tracking-normal text-[#666]">
+            <span className="text-[9px] font-mono normal-case tracking-normal text-[#51565f]">
               {activePalette.colors.length}
             </span>
           </div>
@@ -2291,7 +2387,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                           ))}
                         </span>
                         <span className="truncate flex-1 text-left">{p.name}</span>
-                        <span className="font-mono text-[9px] text-[#666]">{p.colors.length}</span>
+                        <span className="font-mono text-[9px] text-[#51565f]">{p.colors.length}</span>
                       </button>
                     ))}
                   </div>
@@ -2366,7 +2462,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                       )
                     );
                   }}
-                  className="bg-[#2b2b2b] text-[#b0b0b0] text-[8px] rounded px-0.5 py-0.5 outline-none border border-[#4d4d4d]"
+                  className="bg-[#1e2023] text-[#b0b0b0] text-[8px] rounded px-0.5 py-0.5 outline-none border border-[#3b3f46]"
                   title="Layer Blend Mode"
                 >
                   <option value="normal">Norm</option>
@@ -2405,7 +2501,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
 
                 <button
                   type="button"
-                  className="p-0.5 text-[#8c8c8c] hover:text-white"
+                  className="p-0.5 text-[#858a93] hover:text-white"
                   title="Move Layer Up"
                   onClick={(e) => {
                     e.stopPropagation();
@@ -2427,7 +2523,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
 
                 <button
                   type="button"
-                  className="p-0.5 text-[#8c8c8c] hover:text-white"
+                  className="p-0.5 text-[#858a93] hover:text-white"
                   title="Move Layer Down"
                   onClick={(e) => {
                     e.stopPropagation();
@@ -2462,9 +2558,9 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
           </div>
 
           {/* UV Texture Animation Clips Panel */}
-          <div className="border-t border-[#1a1a1a] px-2 py-2 space-y-2">
+          <div className="border-t border-[#101114] px-2 py-2 space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-[9px] uppercase tracking-[0.12em] text-[#8c8c8c] font-bold flex items-center gap-1">
+              <span className="text-[9px] uppercase tracking-[0.12em] text-[#858a93] font-bold flex items-center gap-1">
                 <Film className="w-3 h-3 text-[#ed7300]" /> Clips & Animations
               </span>
               <div className="flex items-center gap-1">
@@ -2489,7 +2585,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
 
             <div className="space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar">
               {texClips.length === 0 ? (
-                <div className="text-[10px] text-[#666] italic py-1">
+                <div className="text-[10px] text-[#51565f] italic py-1">
                   No animation clips created. Tag frames or click + Clip to create one.
                 </div>
               ) : (
@@ -2502,7 +2598,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                       className={`p-1.5 rounded border text-[10px] flex items-center justify-between transition ${
                         isPreviewing
                           ? 'bg-[#ed7300]/20 border-[#ed7300] text-[#ed7300]'
-                          : 'bg-[#212121] border-[#4d4d4d] text-[#d8d8d8]'
+                          : 'bg-[#212121] border-[#3b3f46] text-[#d8d8d8]'
                       }`}
                     >
                       <div className="flex items-center gap-1.5 truncate flex-1">
@@ -2517,7 +2613,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                               setIsPlaying(true);
                             }
                           }}
-                          className={`p-0.5 rounded ${isPreviewing ? 'text-[#ed7300]' : 'text-[#8c8c8c] hover:text-white'}`}
+                          className={`p-0.5 rounded ${isPreviewing ? 'text-[#ed7300]' : 'text-[#858a93] hover:text-white'}`}
                           title={isPreviewing ? 'Stop Preview' : 'Play Clip Preview'}
                         >
                           {isPreviewing ? <Pause className="w-3 h-3" /> : <PlayCircle className="w-3 h-3" />}
@@ -2532,7 +2628,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                       </div>
 
                       <div className="flex items-center gap-1 shrink-0">
-                        <span className="text-[8px] px-1 py-0.2 bg-[#2a2a2a] text-[#8c8c8c] rounded font-mono">
+                        <span className="text-[8px] px-1 py-0.2 bg-[#202226] text-[#858a93] rounded font-mono">
                           {c.frameIds.length}f · {c.loop ? 'loop' : 'once'}
                         </span>
 
@@ -2542,7 +2638,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                             setEditingClip(c);
                             setClipModalOpen(true);
                           }}
-                          className="p-1 text-[#8c8c8c] hover:text-white"
+                          className="p-1 text-[#858a93] hover:text-white"
                           title="Edit Clip"
                         >
                           <Edit2 className="w-2.5 h-2.5" />
@@ -2555,7 +2651,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                             if (defaultClipId === c.id) setDefaultClipId(null);
                             if (previewClipId === c.id) setPreviewClipId(null);
                           }}
-                          className="p-1 text-[#8c8c8c] hover:text-rose-400"
+                          className="p-1 text-[#858a93] hover:text-rose-400"
                           title="Delete Clip"
                         >
                           <Trash2 className="w-2.5 h-2.5" />
@@ -2738,7 +2834,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       {clipModalOpen && editingClip && (
         <div className="pixel-paint__modal-backdrop">
           <div className="pixel-paint__modal w-96 max-w-full" role="dialog">
-            <div className="flex items-center justify-between pb-2 border-b border-[#4d4d4d]">
+            <div className="flex items-center justify-between pb-2 border-b border-[#3b3f46]">
               <div className="flex items-center gap-2 font-bold text-white text-sm">
                 <Film className="w-4 h-4 text-[#ed7300]" />
                 <span>Edit Animation Clip</span>
@@ -2746,7 +2842,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
               <button
                 type="button"
                 onClick={() => setClipModalOpen(false)}
-                className="p-1 text-[#8c8c8c] hover:text-white"
+                className="p-1 text-[#858a93] hover:text-white"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -2754,36 +2850,36 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
 
             <div className="py-3 space-y-3 font-mono text-xs">
               <label className="block space-y-1">
-                <span className="text-[#8c8c8c] text-[10px] uppercase">Clip Name</span>
+                <span className="text-[#858a93] text-[10px] uppercase">Clip Name</span>
                 <input
                   type="text"
                   value={editingClip.name}
                   onChange={(e) => setEditingClip({ ...editingClip, name: e.target.value })}
                   placeholder="e.g. Talk Happy, Blink Loop, Dialog Laugh"
-                  className="w-full bg-[#2b2b2b] border border-[#4d4d4d] rounded px-2 py-1 text-white outline-none focus:border-[#ed7300]"
+                  className="w-full bg-[#1e2023] border border-[#3b3f46] rounded px-2 py-1 text-white outline-none focus:border-[#ed7300]"
                 />
               </label>
 
-              <div className="flex items-center justify-between py-1 border-t border-b border-[#1a1a1a]">
+              <div className="flex items-center justify-between py-1 border-t border-b border-[#101114]">
                 <div>
                   <div className="font-bold text-white">Loop Animation</div>
-                  <div className="text-[9px] text-[#8c8c8c]">Repeats infinitely vs plays once</div>
+                  <div className="text-[9px] text-[#858a93]">Repeats infinitely vs plays once</div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setEditingClip({ ...editingClip, loop: !editingClip.loop })}
                   className={`px-2 py-1 rounded font-bold text-[10px] ${
-                    editingClip.loop ? 'bg-[#ed7300] text-white' : 'bg-[#404040] text-[#8c8c8c]'
+                    editingClip.loop ? 'bg-[#ed7300] text-white' : 'bg-[#34383f] text-[#858a93]'
                   }`}
                 >
                   {editingClip.loop ? 'LOOP' : 'ONCE'}
                 </button>
               </div>
 
-              <div className="flex items-center justify-between py-1 border-b border-[#1a1a1a]">
+              <div className="flex items-center justify-between py-1 border-b border-[#101114]">
                 <div>
                   <div className="font-bold text-white">Default Mesh Clip</div>
-                  <div className="text-[9px] text-[#8c8c8c]">Plays when no animation key is active</div>
+                  <div className="text-[9px] text-[#858a93]">Plays when no animation key is active</div>
                 </div>
                 <button
                   type="button"
@@ -2795,7 +2891,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                     }
                   }}
                   className={`p-1 rounded ${
-                    defaultClipId === editingClip.id ? 'text-amber-400 bg-amber-400/20' : 'text-[#8c8c8c] bg-[#404040]'
+                    defaultClipId === editingClip.id ? 'text-amber-400 bg-amber-400/20' : 'text-[#858a93] bg-[#34383f]'
                   }`}
                 >
                   <Star className="w-3.5 h-3.5 fill-current" />
@@ -2817,14 +2913,14 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                     <button
                       type="button"
                       onClick={() => setEditingClip({ ...editingClip, frameIds: [frames[0]?.id].filter(Boolean) })}
-                      className="text-[#8c8c8c] hover:underline"
+                      className="text-[#858a93] hover:underline"
                     >
                       First
                     </button>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-4 gap-1.5 max-h-36 overflow-y-auto custom-scrollbar p-1 bg-[#2b2b2b] rounded border border-[#1a1a1a]">
+                <div className="grid grid-cols-4 gap-1.5 max-h-36 overflow-y-auto custom-scrollbar p-1 bg-[#1e2023] rounded border border-[#101114]">
                   {frames.map((f, i) => {
                     const included = editingClip.frameIds.includes(f.id);
                     return (
@@ -2840,7 +2936,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                         className={`p-1.5 rounded border flex flex-col items-center justify-center transition ${
                           included
                             ? 'bg-[#ed7300]/20 border-[#ed7300] text-white font-bold'
-                            : 'bg-[#212121] border-[#4d4d4d] text-[#8c8c8c] opacity-60'
+                            : 'bg-[#212121] border-[#3b3f46] text-[#858a93] opacity-60'
                         }`}
                       >
                         <span className="text-[10px]">f{i + 1}</span>
@@ -2852,7 +2948,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
               </div>
             </div>
 
-            <div className="pixel-paint__modal-actions pt-2 border-t border-[#4d4d4d]">
+            <div className="pixel-paint__modal-actions pt-2 border-t border-[#3b3f46]">
               <button
                 type="button"
                 className="pixel-paint__modal-btn is-primary"
@@ -2882,7 +2978,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       {adjustmentsModalOpen && (
         <div className="pixel-paint__modal-backdrop">
           <div className="pixel-paint__modal w-[480px] max-w-full" role="dialog">
-            <div className="flex items-center justify-between pb-2 border-b border-[#4d4d4d]">
+            <div className="flex items-center justify-between pb-2 border-b border-[#3b3f46]">
               <div className="flex items-center gap-2 font-bold text-white text-sm">
                 <Sliders className="w-4 h-4 text-amber-400" />
                 <span>Photo Editing & Image Adjustments</span>
@@ -2890,7 +2986,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
               <button
                 type="button"
                 onClick={() => setAdjustmentsModalOpen(false)}
-                className="p-1 text-[#8c8c8c] hover:text-white"
+                className="p-1 text-[#858a93] hover:text-white"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -2898,39 +2994,39 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
 
             <div className="py-3 space-y-3 font-mono text-xs max-h-[420px] overflow-y-auto custom-scrollbar">
               {/* Preset Buttons */}
-              <div className="flex items-center gap-1.5 flex-wrap pb-2 border-b border-[#1a1a1a]">
+              <div className="flex items-center gap-1.5 flex-wrap pb-2 border-b border-[#101114]">
                 <button
                   type="button"
                   onClick={() => setAdjustments(DEFAULT_ADJUSTMENTS)}
-                  className="px-2 py-0.5 bg-[#2a2a2a] hover:bg-[#4d4d4d] text-white rounded text-[10px]"
+                  className="px-2 py-0.5 bg-[#202226] hover:bg-[#3b3f46] text-white rounded text-[10px]"
                 >
                   Reset All
                 </button>
                 <button
                   type="button"
                   onClick={() => setAdjustments({ ...DEFAULT_ADJUSTMENTS, grayscale: true })}
-                  className="px-2 py-0.5 bg-[#2a2a2a] hover:bg-[#4d4d4d] text-white rounded text-[10px]"
+                  className="px-2 py-0.5 bg-[#202226] hover:bg-[#3b3f46] text-white rounded text-[10px]"
                 >
                   Grayscale
                 </button>
                 <button
                   type="button"
                   onClick={() => setAdjustments({ ...DEFAULT_ADJUSTMENTS, sepia: true })}
-                  className="px-2 py-0.5 bg-[#2a2a2a] hover:bg-[#4d4d4d] text-amber-300 rounded text-[10px]"
+                  className="px-2 py-0.5 bg-[#202226] hover:bg-[#3b3f46] text-amber-300 rounded text-[10px]"
                 >
                   Sepia
                 </button>
                 <button
                   type="button"
                   onClick={() => setAdjustments({ ...DEFAULT_ADJUSTMENTS, posterizeLevels: 8 })}
-                  className="px-2 py-0.5 bg-[#2a2a2a] hover:bg-[#4d4d4d] text-emerald-400 rounded text-[10px]"
+                  className="px-2 py-0.5 bg-[#202226] hover:bg-[#3b3f46] text-emerald-400 rounded text-[10px]"
                 >
                   8-Color Pixel Quantize
                 </button>
                 <button
                   type="button"
                   onClick={() => setAdjustments({ ...DEFAULT_ADJUSTMENTS, edgeDetection: true, edgeThreshold: 45 })}
-                  className="px-2 py-0.5 bg-[#2a2a2a] hover:bg-[#4d4d4d] text-cyan-400 rounded text-[10px]"
+                  className="px-2 py-0.5 bg-[#202226] hover:bg-[#3b3f46] text-cyan-400 rounded text-[10px]"
                 >
                   Sobel Pixel Lineart
                 </button>
@@ -2939,7 +3035,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
               {/* Sliders Grid */}
               <div className="space-y-2">
                 <label className="block">
-                  <div className="flex justify-between text-[#8c8c8c] text-[10px]">
+                  <div className="flex justify-between text-[#858a93] text-[10px]">
                     <span>Brightness</span>
                     <span className="text-white">{adjustments.brightness}</span>
                   </div>
@@ -2954,7 +3050,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                 </label>
 
                 <label className="block">
-                  <div className="flex justify-between text-[#8c8c8c] text-[10px]">
+                  <div className="flex justify-between text-[#858a93] text-[10px]">
                     <span>Contrast</span>
                     <span className="text-white">{adjustments.contrast}</span>
                   </div>
@@ -2969,7 +3065,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                 </label>
 
                 <label className="block">
-                  <div className="flex justify-between text-[#8c8c8c] text-[10px]">
+                  <div className="flex justify-between text-[#858a93] text-[10px]">
                     <span>Hue Shift</span>
                     <span className="text-white">{adjustments.hue}°</span>
                   </div>
@@ -2984,7 +3080,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                 </label>
 
                 <label className="block">
-                  <div className="flex justify-between text-[#8c8c8c] text-[10px]">
+                  <div className="flex justify-between text-[#858a93] text-[10px]">
                     <span>Saturation</span>
                     <span className="text-white">{adjustments.saturation}</span>
                   </div>
@@ -2999,7 +3095,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                 </label>
 
                 <label className="block">
-                  <div className="flex justify-between text-[#8c8c8c] text-[10px]">
+                  <div className="flex justify-between text-[#858a93] text-[10px]">
                     <span>Posterize (Color Levels)</span>
                     <span className="text-white">{adjustments.posterizeLevels || 'Off'}</span>
                   </div>
@@ -3014,7 +3110,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                 </label>
 
                 <label className="block">
-                  <div className="flex justify-between text-[#8c8c8c] text-[10px]">
+                  <div className="flex justify-between text-[#858a93] text-[10px]">
                     <span>Threshold (B&W Cutoff)</span>
                     <span className="text-white">{adjustments.threshold || 'Off'}</span>
                   </div>
@@ -3030,7 +3126,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
               </div>
 
               {/* Checkbox Toggles */}
-              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[#1a1a1a]">
+              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[#101114]">
                 <label className="flex items-center gap-1.5 cursor-pointer text-white">
                   <input
                     type="checkbox"
@@ -3073,7 +3169,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
               </div>
             </div>
 
-            <div className="pixel-paint__modal-actions pt-2 border-t border-[#4d4d4d]">
+            <div className="pixel-paint__modal-actions pt-2 border-t border-[#3b3f46]">
               <button
                 type="button"
                 className="pixel-paint__modal-btn is-primary"

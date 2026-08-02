@@ -1,9 +1,10 @@
 /**
  * Vector Blockout — dual-silhouette loft (Front X × Side Z, optional Top XZ).
- * Matches Low Poly Character Modeler blockout:
+ * Built for low/mid-poly game meshes:
  *   - Height rings follow Front/Side curves (taper to tips)
  *   - Missing axis uses configurable thickness (default 0.6 full width)
- *   - Side walls are quads; caps use an inner ring + pole (game-friendlier edge flow)
+ *   - Side walls are quads; game caps are all-quad (inset loop + diameter strip)
+ *   - Radial count snaps to multiples of 4 for mirror / UV seams
  *   - Top is optional and shapes the XZ cross-section (Front or Side required for height)
  */
 import type { CADMesh, Face, Vertex } from '../types/cad';
@@ -84,8 +85,8 @@ export type VectorLoftOptions = {
    */
   gameTopology?: boolean;
   /**
-   * `game` — inset quad ring + small tip (editable, good for games).
-   * `pointed` — single pole fan (organic tips).
+   * `game` — inset quad ring + diameter-strip fill (all quads, soft dome tip).
+   * `pointed` — single pole fan (organic tips, uses tris).
    * Default `game`.
    */
   capStyle?: VectorCapStyle;
@@ -470,19 +471,28 @@ export function qualityToSegments(quality: number): {
   radial: number;
 } {
   const t = Math.max(0, Math.min(1, quality / 100));
-  // Ease slightly so the mid of the slider stays in the game/solid sweet spot.
+  // Ease so the left/mid of the slider stays in the game sweet spot longer.
   const eased = t * t * (3 - 2 * t);
-  const vertical = Math.round(6 + eased * 12); // 6…18
-  const radial = evenRadialSegments(8 + eased * 12, 8); // 8…20
+  // Game Low ≈ 6×8, Game ≈ 8×12, Solid ≈ 10×12, Dense ≈ 14×16
+  const vertical = Math.round(6 + eased * 10); // 6…16
+  const radial = evenRadialSegments(8 + eased * 8, 8); // 8…16
   return { vertical, radial };
 }
 
 /** Inverse of qualityToSegments for the Mesh Detail slider thumb. */
 export function segmentsToQuality(vertical: number, radial: number): number {
-  const tV = (Math.max(6, vertical) - 6) / 12;
-  const tR = (Math.max(8, radial) - 8) / 12;
+  const tV = (Math.max(6, Math.min(16, vertical)) - 6) / 10;
+  const tR = (Math.max(8, Math.min(16, radial)) - 8) / 8;
   return Math.round(Math.max(0, Math.min(100, ((tV + tR) / 2) * 100)));
 }
+
+/** Named density presets for one-click game topology. */
+export const VECTOR_DENSITY_PRESETS = {
+  low: { vertical: 6, radial: 8, label: 'Low', hint: 'Boxy low-poly — outer + center seams' },
+  game: { vertical: 8, radial: 12, label: 'Game', hint: 'Character / prop sweet spot' },
+  solid: { vertical: 10, radial: 12, label: 'Solid', hint: 'Extra height rings, same around' },
+  dense: { vertical: 14, radial: 16, label: 'Dense', hint: 'Still game-friendly, more edge loops' },
+} as const;
 
 export function cubicPoint(
   a: VectorPoint,
@@ -1039,8 +1049,9 @@ function ringCentroid(
 
 /**
  * Ring stack → wall quads + tip caps.
- * `game` caps: planar inset ring of quads, then a tiny pole fan (low valence at tip).
- * `pointed` caps: direct fan to silhouette tip (organic).
+ * `game` caps: inset ring of quads + diameter-strip fill (all quads when sides even).
+ * Soft dome: inset verts push slightly toward the tip for a game-friendly end.
+ * `pointed` caps: direct fan to silhouette tip (organic, uses tris).
  */
 function finishLoftWithPoles(
   ringVerts: { x: number; y: number; z: number }[],
@@ -1067,26 +1078,24 @@ function finishLoftWithPoles(
   const addCap = (ringStart: number, tipY: number, winding: 'bottom' | 'top') => {
     const center = ringCentroid(vertices, ringStart, sides);
 
-    if (capStyle === 'game' && sides >= 6 && sides % 2 === 0) {
-      // Planar inset — most of the tip is quads (easy to select / bevel / UV later).
+    if (capStyle === 'game' && sides >= 4 && sides % 2 === 0) {
+      const heightRange = Math.max(activeMaxY - activeMinY, 1e-6);
+      const tipPush = heightRange * 0.018;
       const insetStart = vertices.length;
+
+      // Soft dome: inset toward center in XZ and ease Y toward the tip.
       for (let col = 0; col < sides; col++) {
         const outer = vertices[ringStart + col];
+        const t = 0.52;
+        const dome = t * t;
         vertices.push({
-          x: mix(outer.x, center.x, 0.55),
-          y: outer.y,
-          z: mix(outer.z, center.z, 0.55),
+          x: mix(outer.x, center.x, t),
+          y: mix(outer.y, winding === 'bottom' ? tipY - tipPush : tipY + tipPush, dome * 0.85),
+          z: mix(outer.z, center.z, t),
         });
       }
-      const pole = vertices.length;
-      // Slight tip push so the end isn't a perfectly flat lid in perspective.
-      const tipPush = (activeMaxY - activeMinY) * 0.012;
-      vertices.push({
-        x: center.x,
-        y: winding === 'bottom' ? tipY - tipPush : tipY + tipPush,
-        z: center.z,
-      });
 
+      // Outer → inset ring of quads (clean edge loop under the tip).
       for (let col = 0; col < sides; col++) {
         const next = (col + 1) % sides;
         const o0 = ringStart + col;
@@ -1095,10 +1104,22 @@ function finishLoftWithPoles(
         const i1 = insetStart + next;
         if (winding === 'bottom') {
           faces.push([o0, o1, i1, i0]);
-          faces.push([pole, i0, i1]);
         } else {
           faces.push([o0, i0, i1, o1]);
-          faces.push([pole, i1, i0]);
+        }
+      }
+
+      // Diameter-strip fill — all quads, no pole tris (game / UV friendly).
+      const half = sides / 2;
+      for (let i = 0; i < half - 1; i++) {
+        const a = insetStart + i;
+        const b = insetStart + i + 1;
+        const c = insetStart + sides - i - 2;
+        const d = insetStart + sides - i - 1;
+        if (winding === 'bottom') {
+          faces.push([a, b, c, d]);
+        } else {
+          faces.push([a, d, c, b]);
         }
       }
       return;

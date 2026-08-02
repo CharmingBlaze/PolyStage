@@ -26,10 +26,12 @@ interface RiggingPanelProps {
   setSelectedBoneId: (id: string) => void;
   toolState: ToolState;
   setToolState: React.Dispatch<React.SetStateAction<ToolState>>;
-  onKeyPoseToClip?: () => void;
+  onKeyPoseToClip?: (opts?: { time?: number; selectedOnly?: boolean }) => void;
   onOpenAnimation?: () => void;
   /** Full Easy Rig workspace — guided pipeline + pose test. */
   easyRig?: boolean;
+  /** Current animation playhead (seconds) for Key Pose. */
+  keyPoseTime?: number;
 }
 
 type EasyStepId = 'skeleton' | 'rest' | 'bind' | 'paint' | 'test' | 'animate';
@@ -56,7 +58,7 @@ const paintModes: Array<{ id: NonNullable<ToolState['weightPaintMode']>; label: 
 
 export const RiggingPanel: React.FC<RiggingPanelProps> = ({
   bones, setBones, meshes, setMeshes, activeMeshId, selectedBoneId, setSelectedBoneId,
-  toolState, setToolState, onKeyPoseToClip, onOpenAnimation, easyRig = false,
+  toolState, setToolState, onKeyPoseToClip, onOpenAnimation, easyRig = false, keyPoseTime = 0,
 }) => {
   const [newBoneName, setNewBoneName] = useState('Bone');
   const [procAnimId, setProcAnimId] = useState<ProcAnimId>('fish_swim_x');
@@ -64,8 +66,10 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
   const [procPreviewT, setProcPreviewT] = useState(0);
   const [easyStep, setEasyStep] = useState<EasyStepId>('skeleton');
   const [poseTesting, setPoseTesting] = useState(false);
+  const [localKeyTime, setLocalKeyTime] = useState(0);
   const poseTestRef = useRef<number | null>(null);
   const poseTRef = useRef(0);
+  const poseSnapshotRef = useRef<CADBone[] | null>(null);
 
   const selected = bones.find((bone) => bone.id === selectedBoneId) || bones[0] || null;
   const activeMesh = meshes.find((mesh) => mesh.id === activeMeshId) || meshes[0] || null;
@@ -81,15 +85,24 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
     [procSpecies],
   );
 
-  const stopPoseTest = () => {
+  const stopPoseTest = (restore = false) => {
     if (poseTestRef.current != null) {
       cancelAnimationFrame(poseTestRef.current);
       poseTestRef.current = null;
     }
     setPoseTesting(false);
+    if (restore && poseSnapshotRef.current) {
+      setBones(poseSnapshotRef.current.map((bone) => ({
+        ...bone,
+        position: { ...bone.position },
+        rotation: { ...bone.rotation },
+        scale: { ...bone.scale },
+      })));
+      poseSnapshotRef.current = null;
+    }
   };
 
-  useEffect(() => () => stopPoseTest(), []);
+  useEffect(() => () => stopPoseTest(false), []);
 
   useEffect(() => {
     if (!poseTesting) return;
@@ -109,6 +122,19 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
       }
     };
   }, [poseTesting, procAnimId, procSpeed, setBones]);
+
+  const startPoseTest = () => {
+    poseSnapshotRef.current = bones.map((bone) => ({
+      ...bone,
+      position: { ...bone.position },
+      rotation: { ...bone.rotation },
+      scale: { ...bone.scale },
+    }));
+    setRigMode('pose');
+    if (easyRig) setEasyStep('test');
+    poseTRef.current = 0;
+    setPoseTesting(true);
+  };
 
   const applyPreset = (id: SkeletonPresetId) => {
     const label = SKELETON_PRESETS.find((p) => p.id === id)?.label || id;
@@ -150,7 +176,7 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
     const meta = EASY_STEPS.find((s) => s.id === step);
     setEasyStep(step);
     if (meta) setRigMode(meta.rigMode);
-    if (step !== 'test') stopPoseTest();
+    if (step !== 'test') stopPoseTest(true);
   };
 
   const addBone = (asChild: boolean) => {
@@ -252,6 +278,7 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
   const rigMode = toolState.rigMode || 'edit';
   const paintMode = toolState.weightPaintMode || 'add';
   const weightedCount = activeMesh?.vertices.filter((vertex) => activeMesh.skinWeights?.[vertex.id]?.length).length || 0;
+  const keyTime = Math.max(0, keyPoseTime || localKeyTime);
   const ikConstraint = selected?.constraints?.find((item) => item.type === 'ik');
   const currentEasy = EASY_STEPS.find((s) => s.id === easyStep) || EASY_STEPS[0];
 
@@ -268,7 +295,7 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
       </div>
 
       {easyRig && (
-        <div className="shrink-0 border-b border-[#1a1a1a] bg-[#3a3a3a] p-2 space-y-2">
+        <div className="shrink-0 border-b border-[#101114] bg-[#2e3136] p-2 space-y-2">
           <div className="grid grid-cols-6 gap-0.5">
             {EASY_STEPS.map((step) => (
               <button
@@ -279,14 +306,14 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
                 className={`h-7 px-0.5 rounded text-[8px] font-bold tracking-tight ${
                   easyStep === step.id
                     ? 'bg-[#ed7300] text-white'
-                    : 'bg-[#2e2e2e] text-[#8c8c8c] hover:text-white'
+                    : 'bg-[#24262b] text-[#858a93] hover:text-white'
                 }`}
               >
                 {step.label.replace(/^\d+\s/, '')}
               </button>
             ))}
           </div>
-          <p className="text-[9px] text-[#8c8c8c] leading-snug">{currentEasy.hint}</p>
+          <p className="text-[9px] text-[#858a93] leading-snug">{currentEasy.hint}</p>
           <div className="flex gap-1">
             <button
               type="button"
@@ -328,7 +355,7 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
                   goEasyStep('animate');
                   return;
                 }
-                onKeyPoseToClip?.();
+                onKeyPoseToClip?.({ time: keyTime });
                 onOpenAnimation?.();
               }}
             >
@@ -340,15 +367,23 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
 
       <div className="adobe-toolbar shrink-0 grid grid-cols-3">
         {([
-          { id: 'edit' as const, label: 'EDIT', title: 'Build & parent the bind skeleton' },
-          { id: 'pose' as const, label: 'POSE', title: 'Animate transforms + IK' },
-          { id: 'skin' as const, label: 'PAINT', title: 'Weight paint view' },
+          { id: 'edit' as const, label: 'EDIT', title: 'Build & parent the bind skeleton (hotkey 5)' },
+          { id: 'pose' as const, label: 'POSE', title: 'Animate transforms + IK — then Key Pose' },
+          { id: 'skin' as const, label: 'PAINT', title: 'Weight paint view — Shift=Sub · Alt=Smooth' },
         ]).map((mode) => (
           <button
             key={mode.id}
             title={mode.title}
             className={`adobe-control h-7 px-2 ${rigMode === mode.id ? 'is-active' : ''}`}
-            onClick={() => setRigMode(mode.id)}
+            onClick={() => {
+              stopPoseTest(true);
+              setRigMode(mode.id);
+              if (easyRig) {
+                if (mode.id === 'edit') setEasyStep('skeleton');
+                else if (mode.id === 'skin') setEasyStep(isBound ? 'paint' : 'bind');
+                else setEasyStep('test');
+              }
+            }}
           >
             {mode.label}
           </button>
@@ -356,7 +391,7 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
       </div>
 
       {!easyRig && (
-        <div className="px-2 py-1.5 border-b border-[#1a1a1a] bg-[#2b2b2b] text-[9px] text-[#8c8c8c] leading-snug shrink-0">
+        <div className="px-2 py-1.5 border-b border-[#101114] bg-[#1e2023] text-[9px] text-[#858a93] leading-snug shrink-0">
           {rigMode === 'edit' && '1) Add bones · 2) Parent hierarchy · 3) Set Rest Pose · then Auto Weights'}
           {rigMode === 'pose' && 'Drag bones in the viewport. IK solves on release. Key Pose → Animation when ready.'}
           {rigMode === 'skin' && 'Select a bone, paint the mesh. Red = strong · Blue = none. Shift=Sub · Alt=Smooth'}
@@ -381,7 +416,7 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
                 </button>
               ))}
             </div>
-            <label className="block text-[#8c8c8c]">
+            <label className="block text-[#858a93]">
               Brush radius
               <input
                 type="range"
@@ -393,7 +428,7 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
                 className="w-full accent-[#ed7300] mt-1"
               />
             </label>
-            <label className="block text-[#8c8c8c]">
+            <label className="block text-[#858a93]">
               Strength
               <input
                 type="range"
@@ -405,7 +440,7 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
                 className="w-full accent-[#e68619] mt-1"
               />
             </label>
-            <div className="rounded bg-[#3a3a3a] px-2 py-1.5 text-[#8c8c8c]">
+            <div className="rounded bg-[#2e3136] px-2 py-1.5 text-[#858a93]">
               Painting for: <b className="text-white">{selected?.name || 'select a bone'}</b>
             </div>
           </section>
@@ -413,8 +448,8 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
 
         <section className="cad-card p-2 space-y-2">
           <div className="flex items-center justify-between">
-            <b className="uppercase tracking-wide text-[#b3b3b3]">Skeleton hierarchy</b>
-            <span className="text-[#8c8c8c]">{bones.length} bones</span>
+            <b className="uppercase tracking-wide text-[#a6abb4]">Skeleton hierarchy</b>
+            <span className="text-[#858a93]">{bones.length} bones</span>
           </div>
           <div className="flex gap-1">
             <input value={newBoneName} onChange={(event) => setNewBoneName(event.target.value)}
@@ -428,20 +463,20 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
               const active = bone.id === selected?.id;
               return (
                 <button key={bone.id} onClick={() => setSelectedBoneId(bone.id)}
-                  className={`w-full h-7 rounded border flex items-center gap-1.5 pr-2 text-left ${active ? 'bg-[rgba(20,115,230,.24)] border-[#ed7300] text-white' : 'bg-[#2e2e2e] border-transparent hover:border-[#4d4d4d] text-[#b3b3b3]'}`}
+                  className={`w-full h-7 rounded border flex items-center gap-1.5 pr-2 text-left ${active ? 'bg-[rgba(20,115,230,.24)] border-[#ed7300] text-white' : 'bg-[#24262b] border-transparent hover:border-[#3b3f46] text-[#a6abb4]'}`}
                   style={{ paddingLeft: 6 + depth * 13 }}>
                   {depth > 0 && <ChevronRight className="w-3 h-3 text-[#6f6f6f]"/>}
                   <Bone className="w-3.5 h-3.5" style={{ color: bone.color || '#ed7300' }}/>
                   <span className="truncate flex-1">{bone.name}</span>
-                  {bone.locked && <Lock className="w-3 h-3 text-[#8c8c8c]"/>}
+                  {bone.locked && <Lock className="w-3 h-3 text-[#858a93]"/>}
                   {bone.deform === false && <span className="text-[8px] text-[#e68619]">IK</span>}
                 </button>
               );
             })}
-            {!bones.length && <div className="p-3 text-center text-[#8c8c8c]">Create a root bone or use a skeleton preset.</div>}
+            {!bones.length && <div className="p-3 text-center text-[#858a93]">Create a root bone or use a skeleton preset.</div>}
           </div>
           <div className="space-y-1">
-            <span className="uppercase tracking-wide text-[8px] text-[#8c8c8c] font-semibold">Skeleton Presets</span>
+            <span className="uppercase tracking-wide text-[8px] text-[#858a93] font-semibold">Skeleton Presets</span>
             <div className="grid grid-cols-2 gap-1">
               {SKELETON_PRESETS.map((preset) => (
                 <button
@@ -455,7 +490,7 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
                 </button>
               ))}
             </div>
-            <div className="grid grid-cols-3 gap-1 pt-1 border-t border-[#1a1a1a]">
+            <div className="grid grid-cols-3 gap-1 pt-1 border-t border-[#101114]">
               <button className="adobe-control h-7 px-1 text-[9px]" onClick={() => {
                 if (bones.length && !window.confirm('Replace the current skeleton with Tail Chain?')) return;
                 const preset = createTailChainRig(5);
@@ -490,11 +525,11 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
           <div className="flex items-center justify-between">
             <input value={selected.name} onChange={(event) => patchSelected({ name: event.target.value })}
               className="cad-input h-7 min-w-0 flex-1 px-2 font-semibold"/>
-            <button className="p-1.5 text-[#8c8c8c] hover:text-white" onClick={() => patchSelected({ locked: !selected.locked })}>
+            <button className="p-1.5 text-[#858a93] hover:text-white" onClick={() => patchSelected({ locked: !selected.locked })}>
               {selected.locked ? <Lock className="w-3.5 h-3.5"/> : <Unlock className="w-3.5 h-3.5"/>}
             </button>
           </div>
-          <label className="block text-[#8c8c8c]">Parent
+          <label className="block text-[#858a93]">Parent
             <select value={selected.parentId || ''} onChange={(event) => {
               const parentId = event.target.value || null;
               if (!createsCycle(bones, selected.id, parentId)) patchSelected({ parentId });
@@ -507,7 +542,7 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
           </label>
           {(['position', 'rotation', 'scale'] as const).map((field) => (
             <div key={field}>
-              <span className="uppercase text-[8px] tracking-wider text-[#8c8c8c]">{field}</span>
+              <span className="uppercase text-[8px] tracking-wider text-[#858a93]">{field}</span>
               <div className="grid grid-cols-3 gap-1 mt-1">
                 {axes.map((axis) => <label key={axis} className="cad-input h-7 flex items-center px-1 gap-1">
                   <span className="uppercase text-[#6f6f6f]">{axis}</span>
@@ -539,8 +574,8 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
             restPosition: { ...selected.position }, restRotation: { ...selected.rotation }, restScale: { ...selected.scale },
           })}><RotateCw className="w-3 h-3"/>Set Current as Rest Pose</button>
 
-          <div className="border-t border-[#4d4d4d] pt-2 space-y-1">
-            <b className="uppercase tracking-wide text-[8px] text-[#8c8c8c]">IK & Constraints</b>
+          <div className="border-t border-[#3b3f46] pt-2 space-y-1">
+            <b className="uppercase tracking-wide text-[8px] text-[#858a93]">IK & Constraints</b>
             <button className={`adobe-control w-full h-7 ${selected.constraints?.some((item) => item.type === 'limit-rotation' && item.enabled) ? 'is-active' : ''}`}
               onClick={() => {
                 const existing = selected.constraints || [];
@@ -585,10 +620,10 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
         </section>}
 
         <section className="cad-card p-2 space-y-2">
-          <b className="uppercase tracking-wide text-[#b3b3b3] flex items-center gap-1"><Box className="w-3 h-3"/>Skin binding</b>
-          <div className="rounded bg-[#3a3a3a] p-2">
+          <b className="uppercase tracking-wide text-[#a6abb4] flex items-center gap-1"><Box className="w-3 h-3"/>Skin binding</b>
+          <div className="rounded bg-[#2e3136] p-2">
             <div className="truncate text-white">{activeMesh?.name || 'No mesh selected'}</div>
-            <div className="text-[#8c8c8c] mt-0.5">{weightedCount}/{activeMesh?.vertices.length || 0} weighted vertices</div>
+            <div className="text-[#858a93] mt-0.5">{weightedCount}/{activeMesh?.vertices.length || 0} weighted vertices</div>
           </div>
           <div className="grid grid-cols-2 gap-1">
             <button
@@ -630,7 +665,7 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
 
         <section className="cad-card p-2 space-y-2 border border-[#2d9d78]/35">
           <b className="uppercase tracking-wide text-[#2d9d78] flex items-center gap-1"><Play className="w-3 h-3"/>Pose Test</b>
-          <div className="text-[#8c8c8c] text-[9px] leading-relaxed">
+          <div className="text-[#858a93] text-[9px] leading-relaxed">
             Play a procedural motion to verify skin weights before keying animation.
           </div>
           <select
@@ -642,7 +677,7 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
               <option key={anim.id} value={anim.id}>{anim.label}</option>
             ))}
           </select>
-          <label className="flex items-center gap-2 text-[#8c8c8c] text-[9px]">
+          <label className="flex items-center gap-2 text-[#858a93] text-[9px]">
             Speed
             <input
               type="range" min={0.1} max={3} step={0.05} value={procSpeed}
@@ -658,13 +693,10 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
               className={`adobe-control h-8 ${poseTesting ? 'is-active' : ''}`}
               onClick={() => {
                 if (poseTesting) {
-                  stopPoseTest();
+                  stopPoseTest(true);
                   return;
                 }
-                setRigMode('pose');
-                if (easyRig) setEasyStep('test');
-                poseTRef.current = 0;
-                setPoseTesting(true);
+                startPoseTest();
               }}
             >
               {poseTesting ? <><Pause className="w-3 h-3"/>Stop Test</> : <><Play className="w-3 h-3"/>Play Test</>}
@@ -674,7 +706,8 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
               disabled={!bones.length}
               className="adobe-control h-8"
               onClick={() => {
-                stopPoseTest();
+                stopPoseTest(false);
+                poseSnapshotRef.current = null;
                 poseTRef.current = 0;
                 setProcPreviewT(0);
                 setBones((b) => resetPoseToRest(b));
@@ -686,7 +719,7 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
             disabled={!bones.length}
             className="adobe-control w-full h-8"
             onClick={() => {
-              stopPoseTest();
+              stopPoseTest(false);
               const nextT = procPreviewT + 0.08;
               setProcPreviewT(nextT);
               setBones((current) => evaluateProceduralBoneAnim(current, procAnimId, nextT, procSpeed));
@@ -695,29 +728,72 @@ export const RiggingPanel: React.FC<RiggingPanelProps> = ({
           ><Sparkles className="w-3 h-3"/>Preview Step</button>
         </section>
 
-        <section className="cad-card p-2 space-y-2">
-          <b className="uppercase tracking-wide text-[#b3b3b3] flex items-center gap-1"><Film className="w-3 h-3"/>Animate</b>
-          <button className="adobe-control is-active w-full h-8" onClick={() => {
-            stopPoseTest();
-            onKeyPoseToClip?.();
-          }}>
-            <Key className="w-3 h-3"/> Key Current Pose → Clip
+        <section className="cad-card p-2 space-y-2 border border-[#ed7300]/30">
+          <b className="uppercase tracking-wide text-[#ed7300] flex items-center gap-1"><Film className="w-3 h-3"/>Ready for Animation</b>
+          <div className="rounded bg-[#24262b] px-2 py-1.5 text-[9px] text-[#858a93] space-y-0.5">
+            <div className="flex justify-between"><span>Bones</span><b className="text-white">{bones.length}</b></div>
+            <div className="flex justify-between"><span>Skin</span><b className={isBound ? 'text-[#2d9d78]' : 'text-[#ec5b62]'}>{isBound ? `${weightedCount} verts` : 'Not bound'}</b></div>
+            <div className="flex justify-between gap-2 items-center">
+              <span>Key at</span>
+              <label className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min={0}
+                  step={0.1}
+                  value={Number(keyTime.toFixed(2))}
+                  onChange={(e) => setLocalKeyTime(Math.max(0, Number(e.target.value) || 0))}
+                  className="w-14 h-5 rounded bg-[#101114] border border-[#3b3f46] px-1 text-right text-white outline-none focus:border-[#ed7300]"
+                />
+                <span className="text-white">s</span>
+              </label>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="adobe-control is-active w-full h-8"
+            disabled={!bones.length}
+            title="Insert keys for the full skeleton at the key time"
+            onClick={() => {
+              stopPoseTest(true);
+              onKeyPoseToClip?.({ time: keyTime });
+            }}
+          >
+            <Key className="w-3 h-3"/> Key All Bones @ {keyTime.toFixed(2)}s
           </button>
-          <button className="adobe-control w-full h-8" onClick={() => {
-            stopPoseTest();
-            onOpenAnimation?.();
-          }}>
-            <Film className="w-3 h-3"/> Open Animation Workspace
+          <button
+            type="button"
+            className="adobe-control w-full h-8"
+            disabled={!selected}
+            title="Key only the selected bone"
+            onClick={() => {
+              stopPoseTest(true);
+              onKeyPoseToClip?.({ time: keyTime, selectedOnly: true });
+            }}
+          >
+            <Key className="w-3 h-3"/> Key Selected Bone
           </button>
-          <div className="text-[#8c8c8c] leading-relaxed">Pose in POSE mode, key it, then refine timing in ANIM cutscenes.</div>
+          <button
+            type="button"
+            className="adobe-control w-full h-8"
+            onClick={() => {
+              stopPoseTest(true);
+              onKeyPoseToClip?.({ time: keyTime });
+              onOpenAnimation?.();
+            }}
+          >
+            <Film className="w-3 h-3"/> Key & Open ANIM
+          </button>
+          <div className="text-[#858a93] leading-relaxed">
+            Tip: Set Rest → Bind ON → Weight Paint → Pose Test → Key → ANIM.
+          </div>
         </section>
 
         <section className="cad-card p-2 space-y-1">
-          <b className="uppercase tracking-wide text-[#b3b3b3] flex items-center gap-1">
+          <b className="uppercase tracking-wide text-[#a6abb4] flex items-center gap-1">
             {diagnostics.valid ? <CheckCircle2 className="w-3 h-3 text-[#2d9d78]"/> : <ShieldAlert className="w-3 h-3 text-[#ec5b62]"/>}
             Rig diagnostics
           </b>
-          <div className="grid grid-cols-2 gap-1 text-[#8c8c8c]">
+          <div className="grid grid-cols-2 gap-1 text-[#858a93]">
             <span>Roots <b className="float-right text-white">{diagnostics.roots}</b></span>
             <span>Cycles <b className="float-right text-white">{diagnostics.cycles}</b></span>
             <span>Bad parents <b className="float-right text-white">{diagnostics.missingParents}</b></span>

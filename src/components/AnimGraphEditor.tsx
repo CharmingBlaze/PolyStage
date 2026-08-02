@@ -353,18 +353,18 @@ export const AnimGraphEditor: React.FC<AnimGraphEditorProps> = ({
 
   return (
     <div ref={wrapRef} className="flex-1 min-h-0 flex flex-col bg-[#080a0f]" onWheel={onWheel}>
-      <div className="h-8 shrink-0 px-2 border-b border-[#1a1a1a] flex items-center gap-1.5 overflow-x-auto custom-scrollbar">
+      <div className="h-8 shrink-0 px-2 border-b border-[#101114] flex items-center gap-1.5 overflow-x-auto custom-scrollbar">
         <span className="text-[9px] font-mono text-[#6a9fd8] shrink-0 truncate max-w-[120px]">
           {track ? track.targetName : 'Select a track'}
         </span>
-        <div className="w-px h-4 bg-[#2a2a2a] shrink-0" />
+        <div className="w-px h-4 bg-[#202226] shrink-0" />
         {([
           ['pos', 'Pos'],
           ['rot', 'Rot'],
           ['scl', 'Scl'],
         ] as const).map(([kind, label]) => (
           <div key={kind} className="flex items-center gap-0.5 shrink-0">
-            <span className="text-[8px] text-[#666] uppercase mr-0.5">{label}</span>
+            <span className="text-[8px] text-[#51565f] uppercase mr-0.5">{label}</span>
             {(['x', 'y', 'z'] as Axis[]).map((axis) => {
               const id = `${kind}.${axis}`;
               const on = enabled[id];
@@ -375,8 +375,8 @@ export const AnimGraphEditor: React.FC<AnimGraphEditorProps> = ({
                   onClick={() => toggle(id)}
                   className="h-5 min-w-[22px] px-1 rounded text-[9px] font-bold border"
                   style={{
-                    color: on ? AXIS_COLORS[axis] : '#555',
-                    borderColor: on ? AXIS_COLORS[axis] : '#2a2a2a',
+                    color: on ? AXIS_COLORS[axis] : '#464b53',
+                    borderColor: on ? AXIS_COLORS[axis] : '#202226',
                     background: on ? `${AXIS_COLORS[axis]}22` : 'transparent',
                   }}
                   title={`${label} ${axis.toUpperCase()}`}
@@ -387,10 +387,10 @@ export const AnimGraphEditor: React.FC<AnimGraphEditorProps> = ({
             })}
           </div>
         ))}
-        <div className="ml-auto flex items-center gap-1 shrink-0 text-[8px] font-mono text-[#555]">
-          <button type="button" className="h-5 px-1.5 rounded border border-[#1a1a1a] hover:text-white" onClick={() => setValueZoom((z) => clamp(z * 1.2, 0.25, 8))}>+</button>
-          <button type="button" className="h-5 px-1.5 rounded border border-[#1a1a1a] hover:text-white" onClick={() => setValueZoom((z) => clamp(z / 1.2, 0.25, 8))}>-</button>
-          <button type="button" className="h-5 px-1.5 rounded border border-[#1a1a1a] hover:text-white" onClick={() => { setValueZoom(1); setValuePan(0); }}>Fit</button>
+        <div className="ml-auto flex items-center gap-1 shrink-0 text-[8px] font-mono text-[#464b53]">
+          <button type="button" className="h-5 px-1.5 rounded border border-[#101114] hover:text-white" onClick={() => setValueZoom((z) => clamp(z * 1.2, 0.25, 8))}>+</button>
+          <button type="button" className="h-5 px-1.5 rounded border border-[#101114] hover:text-white" onClick={() => setValueZoom((z) => clamp(z / 1.2, 0.25, 8))}>-</button>
+          <button type="button" className="h-5 px-1.5 rounded border border-[#101114] hover:text-white" onClick={() => { setValueZoom(1); setValuePan(0); }}>Fit</button>
           <span>Drag points · RMB/MMB pan · Wheel zoom</span>
         </div>
       </div>
@@ -415,7 +415,7 @@ export const AnimGraphEditor: React.FC<AnimGraphEditorProps> = ({
               return (
                 <g key={`g-${v}`}>
                   <line x1={padL} y1={y} x2={padL + plotW} y2={y} stroke="#151a24" strokeWidth={1} />
-                  <text x={padL - 4} y={y + 3} textAnchor="end" fill="#555" fontSize="8" fontFamily="ui-monospace, monospace">
+                  <text x={padL - 4} y={y + 3} textAnchor="end" fill="#464b53" fontSize="8" fontFamily="ui-monospace, monospace">
                     {Math.abs(v) >= 10 ? v.toFixed(0) : v.toFixed(2)}
                   </text>
                 </g>
@@ -494,12 +494,12 @@ export const AnimGraphEditor: React.FC<AnimGraphEditorProps> = ({
           </svg>
 
           {!track && (
-            <div className="absolute inset-0 flex items-center justify-center text-[10px] font-mono text-[#555] pointer-events-none">
+            <div className="absolute inset-0 flex items-center justify-center text-[10px] font-mono text-[#464b53] pointer-events-none">
               Select a timeline track to edit curves
             </div>
           )}
           {track && channels.length === 0 && (
-            <div className="absolute inset-0 flex items-center justify-center text-[10px] font-mono text-[#555] pointer-events-none">
+            <div className="absolute inset-0 flex items-center justify-center text-[10px] font-mono text-[#464b53] pointer-events-none">
               Enable Pos/Rot/Scl channels above
             </div>
           )}

@@ -95,7 +95,7 @@ export const AnimEditPopup: React.FC<AnimEditPopupProps> = ({
 
   return (
     <div
-      className="absolute z-40 shadow-2xl rounded-lg border border-[#4d4d4d] bg-[#1a1a1a]/95 backdrop-blur-md font-mono text-[10px] text-[#cccccc] select-none"
+      className="absolute z-40 shadow-2xl rounded-lg border border-[#3b3f46] bg-[#101114]/95 backdrop-blur-md font-mono text-[10px] text-[#c6cad1] select-none"
       style={{ left: position.x, top: position.y, width: minimized ? 220 : 268 }}
     >
       <div
@@ -104,7 +104,7 @@ export const AnimEditPopup: React.FC<AnimEditPopupProps> = ({
           setDragging(true);
           dragStart.current = { x: e.clientX - position.x, y: e.clientY - position.y };
         }}
-        className="h-8 px-2 flex items-center justify-between border-b border-[#333] bg-[#242424] cursor-grab active:cursor-grabbing rounded-t-lg"
+        className="h-8 px-2 flex items-center justify-between border-b border-[#26282d] bg-[#242424] cursor-grab active:cursor-grabbing rounded-t-lg"
       >
         <div className="flex items-center gap-1.5 font-bold text-[#ed7300]">
           <GripHorizontal className="w-3.5 h-3.5 text-[#6f6f6f]" />
@@ -114,7 +114,7 @@ export const AnimEditPopup: React.FC<AnimEditPopupProps> = ({
         <div className="flex items-center gap-0.5">
           <button
             type="button"
-            className="p-1 hover:bg-[#4d4d4d] rounded text-[#b3b3b3] hover:text-white"
+            className="p-1 hover:bg-[#3b3f46] rounded text-[#a6abb4] hover:text-white"
             title={minimized ? 'Expand' : 'Collapse'}
             onClick={() => setMinimized((v) => !v)}
           >
@@ -122,7 +122,7 @@ export const AnimEditPopup: React.FC<AnimEditPopupProps> = ({
           </button>
           <button
             type="button"
-            className="p-1 hover:bg-rose-900/40 hover:text-rose-400 rounded text-[#b3b3b3]"
+            className="p-1 hover:bg-rose-900/40 hover:text-rose-400 rounded text-[#a6abb4]"
             title="Close"
             onClick={onClose}
           >
@@ -133,7 +133,7 @@ export const AnimEditPopup: React.FC<AnimEditPopupProps> = ({
 
       {!minimized && (
         <div className="p-2 space-y-2 max-h-[420px] overflow-y-auto custom-scrollbar">
-          <label className="block text-[#8c8c8c] uppercase text-[8px] tracking-wide">
+          <label className="block text-[#858a93] uppercase text-[8px] tracking-wide">
             Target
             <select
               className="cad-input mt-1 h-7 w-full px-1"
@@ -171,7 +171,7 @@ export const AnimEditPopup: React.FC<AnimEditPopupProps> = ({
                     className={`h-7 rounded border flex items-center justify-center gap-1 ${
                       gizmoMode === mode.id
                         ? 'border-[#ed7300] bg-[#ed7300]/20 text-[#ed7300]'
-                        : 'border-[#4d4d4d] text-[#8c8c8c] hover:text-white'
+                        : 'border-[#3b3f46] text-[#858a93] hover:text-white'
                     }`}
                     onClick={() => onGizmoMode(mode.id)}
                   >
@@ -183,7 +183,7 @@ export const AnimEditPopup: React.FC<AnimEditPopupProps> = ({
 
               {(['position', 'rotation', 'scale'] as const).map((field) => (
                 <div key={field}>
-                  <div className="text-[#8c8c8c] uppercase text-[8px] mb-1">
+                  <div className="text-[#858a93] uppercase text-[8px] mb-1">
                     {field}{field === 'rotation' ? ' (°)' : ''}
                   </div>
                   <div className="grid grid-cols-3 gap-1">
@@ -204,7 +204,7 @@ export const AnimEditPopup: React.FC<AnimEditPopupProps> = ({
               ))}
 
               {target.kind === 'camera' && typeof target.fov === 'number' && (
-                <label className="block text-[#8c8c8c]">
+                <label className="block text-[#858a93]">
                   FOV
                   <SmoothSlider
                     min={20}
@@ -220,7 +220,7 @@ export const AnimEditPopup: React.FC<AnimEditPopupProps> = ({
 
               {target.kind === 'particle' && (
                 <div className="space-y-1">
-                  <div className="text-[#8c8c8c]">Rate {target.rate ?? 0}/s · {target.enabled === false ? 'OFF' : 'ON'}</div>
+                  <div className="text-[#858a93]">Rate {target.rate ?? 0}/s · {target.enabled === false ? 'OFF' : 'ON'}</div>
                   <button
                     type="button"
                     className="w-full h-7 cad-button text-[#e68619] font-bold"

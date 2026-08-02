@@ -79,23 +79,24 @@ describe('vectorPathsToMesh', () => {
     });
   });
 
-  it('lofts front + side with game caps (inset quads + tiny tip fans)', () => {
+  it('lofts front + side with all-quad game caps (inset + diameter strip)', () => {
     const front = closedRect('front', 0.5, 0, 2);
     const side = closedRect('side', 0.35, 0, 2);
     const rings = 4;
     const sides = 8;
     const snapshot = vectorPathsToMesh(front, side, rings, sides, null, { capStyle: 'game' });
     expect(snapshot).not.toBeNull();
-    // ring verts + 2 inset rings + 2 poles
-    expect(snapshot!.vertices.length).toBe((rings + 1) * sides + 2 * sides + 2);
-    // wall quads + 2*(inset quads + tip tris)
-    expect(snapshot!.faces.length).toBe(rings * sides + 2 * (sides + sides));
-    expect(snapshot!.faces.filter((f) => f.length === 4).length).toBe(rings * sides + 2 * sides);
-    expect(snapshot!.faces.filter((f) => f.length === 3).length).toBe(2 * sides);
+    // ring verts + 2 inset rings (no poles)
+    expect(snapshot!.vertices.length).toBe((rings + 1) * sides + 2 * sides);
+    // wall quads + 2*(inset ring quads + diameter-strip quads)
+    // diameter strip for sides=8 → half-1 = 3 quads per tip
+    const tipQuads = sides + (sides / 2 - 1);
+    expect(snapshot!.faces.length).toBe(rings * sides + 2 * tipQuads);
+    expect(snapshot!.faces.filter((f) => f.length === 4).length).toBe(snapshot!.faces.length);
+    expect(snapshot!.faces.filter((f) => f.length === 3).length).toBe(0);
 
     const mesh = vectorSnapshotToCADMesh(snapshot!, 'Test Blockout', { seedTexture: true });
-    expect(mesh.faces.some((f) => f.vertexIds.length === 4)).toBe(true);
-    expect(mesh.faces.some((f) => f.vertexIds.length === 3)).toBe(true);
+    expect(mesh.faces.every((f) => f.vertexIds.length === 4)).toBe(true);
     expect(mesh.textureCanvasDataUrl).toBeTruthy();
     for (const face of mesh.faces) {
       expect(face.uvs.length).toBe(face.vertexIds.length);
@@ -109,12 +110,11 @@ describe('vectorPathsToMesh', () => {
       }
     }
 
-    // Caps append: bottom insets → bottom pole → top insets → top pole.
-    const poleBot = snapshot!.vertices[(rings + 1) * sides + sides];
-    const poleTop = snapshot!.vertices[snapshot!.vertices.length - 1];
-    // Game tips get a tiny push past silhouette ends.
-    expect(poleBot.y).toBeLessThan(0.01);
-    expect(poleTop.y).toBeGreaterThan(1.99);
+    // Soft dome: inset tip verts ease past silhouette ends.
+    const insetBot = snapshot!.vertices.slice((rings + 1) * sides, (rings + 1) * sides + sides);
+    const insetTop = snapshot!.vertices.slice(-sides);
+    expect(Math.min(...insetBot.map((v) => v.y))).toBeLessThan(0.05);
+    expect(Math.max(...insetTop.map((v) => v.y))).toBeGreaterThan(1.95);
   });
 
   it('pointed caps fan directly to silhouette tips', () => {
@@ -323,8 +323,9 @@ describe('vectorPathsToMesh', () => {
     });
     expect(mesh).not.toBeNull();
     const audit = analyzeVectorMesh(mesh!);
-    expect(audit.vertices).toBe(9 * 8 + 2 * 8 + 2);
+    expect(audit.vertices).toBe(9 * 8 + 2 * 8);
     expect(audit.issues).toEqual([]);
+    expect(mesh!.faces.every((face) => face.length === 4)).toBe(true);
   });
 
   it('box loft keeps a stable mid seam (no zigzag center)', () => {

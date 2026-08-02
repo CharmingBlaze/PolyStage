@@ -171,6 +171,7 @@ export function VectorOverlay({ kind, active }: VectorOverlayProps) {
   const paths = useVectorStore((s) => s.paths);
   const mode = useVectorStore((s) => s.mode);
   const pathStyle = useVectorStore((s) => s.pathStyle);
+  const activePlane = useVectorStore((s) => s.activePlane);
   const refTool = useVectorStore((s) => s.refTool);
   const selected = useVectorStore((s) => s.selected);
   const selectedIndices = useVectorStore((s) => s.selectedIndices);
@@ -195,6 +196,7 @@ export function VectorOverlay({ kind, active }: VectorOverlayProps) {
     x2: number;
     y2: number;
   } | null>(null);
+  const [penPreview, setPenPreview] = useState<{ x: number; y: number } | null>(null);
   const marqueeRef = useRef<{
     x1: number;
     y1: number;
@@ -277,7 +279,8 @@ export function VectorOverlay({ kind, active }: VectorOverlayProps) {
     moveRafRef.current = requestAnimationFrame(flushPendingMove);
   };
 
-  const endDrag = (pointerId?: number, el?: HTMLElement | null) => {
+  // Accepts Element so both the HTML canvas and the SVG overlay can release capture.
+  const endDrag = (pointerId?: number, el?: Element | null) => {
     if (moveRafRef.current) {
       cancelAnimationFrame(moveRafRef.current);
       flushPendingMove();
@@ -299,7 +302,10 @@ export function VectorOverlay({ kind, active }: VectorOverlayProps) {
   // desyncs OrbitControls' internal pointer list and kills pan after 1–2 gestures
   // (especially Front/Side ortho).
   useEffect(() => {
-    if (!active || mode !== 'pen' || refTool !== 'none') return;
+    if (!active || mode !== 'pen' || refTool !== 'none') {
+      setPenPreview(null);
+      return;
+    }
 
     let cancelled = false;
     let tries = 0;
@@ -307,6 +313,7 @@ export function VectorOverlay({ kind, active }: VectorOverlayProps) {
     let onDown: ((e: PointerEvent) => void) | null = null;
     let onMove: ((e: PointerEvent) => void) | null = null;
     let onUp: (() => void) | null = null;
+    let onLeave: (() => void) | null = null;
     let onDblClick: ((e: MouseEvent) => void) | null = null;
 
     const bind = () => {
@@ -338,6 +345,9 @@ export function VectorOverlay({ kind, active }: VectorOverlayProps) {
       };
 
       onMove = (e: PointerEvent) => {
+        const local = clientToLocal(kind, e.clientX, e.clientY);
+        if (local) setPenPreview({ x: local.x, y: local.y });
+
         const target = drag.current;
         if (!target) return;
         if ((e.buttons & 1) === 0) {
@@ -352,6 +362,8 @@ export function VectorOverlay({ kind, active }: VectorOverlayProps) {
         endDrag();
       };
 
+      onLeave = () => setPenPreview(null);
+
       onDblClick = (e: MouseEvent) => {
         if (e.ctrlKey || e.metaKey) return;
         e.preventDefault();
@@ -361,6 +373,7 @@ export function VectorOverlay({ kind, active }: VectorOverlayProps) {
       };
 
       el.addEventListener('pointerdown', onDown);
+      el.addEventListener('pointerleave', onLeave);
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
       window.addEventListener('pointercancel', onUp);
@@ -372,7 +385,9 @@ export function VectorOverlay({ kind, active }: VectorOverlayProps) {
     return () => {
       cancelled = true;
       endDrag();
+      setPenPreview(null);
       if (el && onDown) el.removeEventListener('pointerdown', onDown);
+      if (el && onLeave) el.removeEventListener('pointerleave', onLeave);
       if (onMove) window.removeEventListener('pointermove', onMove);
       if (onUp) {
         window.removeEventListener('pointerup', onUp);
@@ -520,10 +535,15 @@ export function VectorOverlay({ kind, active }: VectorOverlayProps) {
     [kind, paths]
   );
 
-  const heightGuides = useMemo(() => {
-    if (kind === 'perspective' || kind === 'top') return [] as number[];
+  /**
+   * Key heights lifted from the *other* silhouette, drawn as alignment guides.
+   * Only meaningful in the front/side views, so the plane travels with the values
+   * to keep the guide's drawing plane statically known.
+   */
+  const heightGuides = useMemo<{ plane: VectorPlane; values: number[] }>(() => {
+    if (kind === 'perspective' || kind === 'top') return { plane: 'front', values: [] };
     const other = kind === 'front' ? paths.side : paths.front;
-    return silhouetteKeyHeights(other);
+    return { plane: kind, values: silhouetteKeyHeights(other) };
   }, [kind, paths]);
 
   if (!active) return null;
@@ -579,6 +599,21 @@ export function VectorOverlay({ kind, active }: VectorOverlayProps) {
     endDrag(e.pointerId, e.currentTarget);
   };
 
+  const drawingPlane = planeForViewport(kind, activePlane);
+  const drawingPath = paths[drawingPlane];
+  const lastAnchor =
+    mode === 'pen' && !drawingPath.closed && drawingPath.anchors.length > 0
+      ? projectPoint(kind, drawingPlane, drawingPath.anchors[drawingPath.anchors.length - 1].point)
+      : null;
+  const firstAnchor =
+    mode === 'pen' && !drawingPath.closed && drawingPath.anchors.length >= 3
+      ? projectPoint(kind, drawingPlane, drawingPath.anchors[0].point)
+      : null;
+  const emptyOrthoHint =
+    kind !== 'perspective' &&
+    paths[kind].anchors.length === 0 &&
+    mode === 'pen';
+
   return (
     <svg
       ref={svgRef}
@@ -589,9 +624,24 @@ export function VectorOverlay({ kind, active }: VectorOverlayProps) {
       onPointerCancel={endOverlayDrag}
     >
       <rect className="vector-draw-surface" width="100%" height="100%" fill="transparent" />
-      {heightGuides.map((v) => {
-        const a = projectPoint(kind, kind, { u: -40, v });
-        const b = projectPoint(kind, kind, { u: 40, v });
+      {emptyOrthoHint ? (
+        <text
+          className="vector-empty-hint"
+          x="50%"
+          y="50%"
+          textAnchor="middle"
+          dominantBaseline="middle"
+        >
+          {kind === 'front'
+            ? 'Click to draw Front silhouette'
+            : kind === 'side'
+              ? 'Click to draw Side silhouette'
+              : 'Click to draw Top silhouette'}
+        </text>
+      ) : null}
+      {heightGuides.values.map((v) => {
+        const a = projectPoint(kind, heightGuides.plane, { u: -40, v });
+        const b = projectPoint(kind, heightGuides.plane, { u: 40, v });
         if (!a || !b) return null;
         return (
           <line
@@ -610,7 +660,7 @@ export function VectorOverlay({ kind, active }: VectorOverlayProps) {
         const showHandles = mode === 'edit' && pathStyle === 'curve';
         const showIndices = mode === 'edit' || path.closed || path.anchors.length > 0;
         return (
-          <g key={path.id} className={isActive ? 'active' : ''}>
+          <g key={path.id} className={`${isActive ? 'active' : ''}${path.closed ? ' is-closed' : ''}`}>
             {d ? (
               <path
                 className="vector-path-hit"
@@ -633,7 +683,12 @@ export function VectorOverlay({ kind, active }: VectorOverlayProps) {
                 }}
               />
             ) : null}
-            {d ? <path className={`vector-path plane-${path.plane}`} d={d} /> : null}
+            {d ? (
+              <path
+                className={`vector-path plane-${path.plane}${path.closed ? ' is-closed' : ''}`}
+                d={d}
+              />
+            ) : null}
             {path.anchors.map((anchor, index) => {
               const point = projectPoint(kind, path.plane, anchor.point);
               const handleIn = projectPoint(kind, path.plane, anchor.handleIn);
@@ -698,6 +753,27 @@ export function VectorOverlay({ kind, active }: VectorOverlayProps) {
           </g>
         );
       })}
+      {lastAnchor?.visible && penPreview ? (
+        <line
+          className="vector-pen-preview"
+          x1={lastAnchor.x}
+          y1={lastAnchor.y}
+          x2={penPreview.x}
+          y2={penPreview.y}
+        />
+      ) : null}
+      {firstAnchor?.visible && penPreview && drawingPath.anchors.length >= 3 ? (
+        <line
+          className="vector-pen-preview is-close"
+          x1={penPreview.x}
+          y1={penPreview.y}
+          x2={firstAnchor.x}
+          y2={firstAnchor.y}
+        />
+      ) : null}
+      {penPreview && mode === 'pen' ? (
+        <circle className="vector-pen-cursor" cx={penPreview.x} cy={penPreview.y} r={3.5} />
+      ) : null}
       {marqueeBox ? (
         <rect
           className="vector-marquee"

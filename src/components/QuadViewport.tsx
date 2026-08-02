@@ -37,7 +37,6 @@ interface QuadViewportProps {
   onDirect3DPaintStrokeEnd?: () => void;
   onSpawnDrawnPrimitive?: (newMesh: CADMesh) => void;
   onOpenUVModal?: () => void;
-  onModalMeshPreview?: (amount: number) => void;
   onModalMeshConfirm?: () => void;
   onModalMeshCancel?: () => void;
   onModalLoopCutConfirm?: (loopEdgeIds: string[], factors: number[]) => void;
@@ -79,7 +78,6 @@ export const QuadViewport: React.FC<QuadViewportProps> = ({
   onDirect3DPaintPixel,
   onSpawnDrawnPrimitive,
   onOpenUVModal,
-  onModalMeshPreview,
   onModalMeshConfirm,
   onModalMeshCancel,
   onModalLoopCutConfirm,
@@ -157,7 +155,6 @@ export const QuadViewport: React.FC<QuadViewportProps> = ({
     onSpawnDrawnPrimitive,
     onOpenUVModal,
     isQuadSubViewport: true as const,
-    onModalMeshPreview,
     onModalMeshConfirm,
     onModalMeshCancel,
     onModalLoopCutConfirm,
@@ -185,17 +182,17 @@ export const QuadViewport: React.FC<QuadViewportProps> = ({
       }}
     >
       {(!maximizedPane || maximizedPane === 'side') && (
-        <div className="relative min-h-0 min-w-0 overflow-hidden border border-[#222]">
+        <div className="relative min-h-0 min-w-0 overflow-hidden border border-[#1a1c20]">
           <Viewport3D {...shared} {...viewportNavProps('side')} cameraType="side" />
         </div>
       )}
       {(!maximizedPane || maximizedPane === 'front') && (
-        <div className="relative min-h-0 min-w-0 overflow-hidden border border-[#222]">
+        <div className="relative min-h-0 min-w-0 overflow-hidden border border-[#1a1c20]">
           <Viewport3D {...shared} {...viewportNavProps('front')} cameraType="front" />
         </div>
       )}
       {(!maximizedPane || maximizedPane === 'perspective') && (
-        <div className="relative min-h-0 min-w-0 overflow-hidden border border-[#222]">
+        <div className="relative min-h-0 min-w-0 overflow-hidden border border-[#1a1c20]">
           <Viewport3D {...shared} {...viewportNavProps('perspective')} cameraType="perspective" />
         </div>
       )}
@@ -211,22 +208,22 @@ export const QuadViewport: React.FC<QuadViewportProps> = ({
       onPointerUp={handlePointerUpSplitter}
     >
       {(!maximizedPane || maximizedPane === 'top') && (
-        <div className="relative min-h-0 min-w-0 overflow-hidden border border-[#222]">
+        <div className="relative min-h-0 min-w-0 overflow-hidden border border-[#1a1c20]">
           <Viewport3D {...shared} {...viewportNavProps('top')} cameraType="top" />
         </div>
       )}
       {(!maximizedPane || maximizedPane === 'front') && (
-        <div className="relative min-h-0 min-w-0 overflow-hidden border border-[#222]">
+        <div className="relative min-h-0 min-w-0 overflow-hidden border border-[#1a1c20]">
           <Viewport3D {...shared} {...viewportNavProps('front')} cameraType="front" />
         </div>
       )}
       {(!maximizedPane || maximizedPane === 'side') && (
-        <div className="relative min-h-0 min-w-0 overflow-hidden border border-[#222]">
+        <div className="relative min-h-0 min-w-0 overflow-hidden border border-[#1a1c20]">
           <Viewport3D {...shared} {...viewportNavProps('side')} cameraType="side" />
         </div>
       )}
       {(!maximizedPane || maximizedPane === 'perspective') && (
-        <div className="relative min-h-0 min-w-0 overflow-hidden border border-[#222]">
+        <div className="relative min-h-0 min-w-0 overflow-hidden border border-[#1a1c20]">
           <Viewport3D {...shared} {...viewportNavProps('perspective')} cameraType="perspective" />
         </div>
       )}

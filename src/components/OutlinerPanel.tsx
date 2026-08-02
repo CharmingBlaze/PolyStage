@@ -389,12 +389,12 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
             ? 'bg-[#ed7300]/30 border border-[#ed7300] text-white shadow-sm'
             : isSelected
               ? 'bg-[#ed7300]/15 border border-[#ed7300]/60 text-white'
-              : 'bg-[#2a2a2a] border border-[#1a1a1a] text-[#b3b3b3] hover:border-[#ed7300]/50 hover:bg-[#2e2e2e]'
+              : 'bg-[#202226] border border-[#101114] text-[#a6abb4] hover:border-[#ed7300]/50 hover:bg-[#24262b]'
         }`}
       >
         {/* Left: Mesh Icon & Name / Input */}
         <div className="flex items-center gap-1.5 min-w-0 flex-1 mr-2">
-          <Box className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-[#ed7300]' : 'text-[#8c8c8c]'}`} />
+          <Box className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-[#ed7300]' : 'text-[#858a93]'}`} />
           {isEditing ? (
             <input
               type="text"
@@ -404,10 +404,10 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
               onKeyDown={(e) => e.key === 'Enter' && handleSaveRename('mesh', m.id)}
               autoFocus
               onClick={(e) => e.stopPropagation()}
-              className="cad-input px-1 py-0.2 text-[10px] font-mono text-white outline-none w-28 bg-[#3a3a3a]"
+              className="cad-input px-1 py-0.2 text-[10px] font-mono text-white outline-none w-28 bg-[#2e3136]"
             />
           ) : (
-            <span className="font-bold truncate text-[#e8e8e8]" title="Double-click to rename">
+            <span className="font-bold truncate text-[#eaedf1]" title="Double-click to rename">
               {m.name}
             </span>
           )}
@@ -465,7 +465,7 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
               value={m.groupId || ''}
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => handleMoveMeshToGroup(m.id, e.target.value || null)}
-              className="bg-[#3a3a3a] text-[#e68619] text-[8.5px] font-mono px-1 py-0.5 rounded border border-[#4d4d4d] outline-none cursor-pointer"
+              className="bg-[#2e3136] text-[#e68619] text-[8.5px] font-mono px-1 py-0.5 rounded border border-[#3b3f46] outline-none cursor-pointer"
               title="Assign object to group folder"
             >
               <option value="">Root</option>
@@ -480,7 +480,7 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
           {/* Inline Rename button */}
           <button
             onClick={(e) => handleStartRename(m.id, m.name, e)}
-            className="p-1 hover:bg-[#404040] rounded text-[#8c8c8c] hover:text-white"
+            className="p-1 hover:bg-[#34383f] rounded text-[#858a93] hover:text-white"
             title="Rename Object"
           >
             <Edit2 className="w-3 h-3" />
@@ -492,7 +492,7 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
               e.stopPropagation();
               handleDuplicate(m);
             }}
-            className="p-1 hover:bg-[#404040] rounded text-[#8c8c8c] hover:text-[#ed7300]"
+            className="p-1 hover:bg-[#34383f] rounded text-[#858a93] hover:text-[#ed7300]"
             title="Duplicate Object"
           >
             <Copy className="w-3 h-3" />
@@ -504,7 +504,7 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
                 e.stopPropagation();
                 handleSeparate(m);
               }}
-              className="p-1 hover:bg-[#404040] rounded text-[#8c8c8c] hover:text-amber-400"
+              className="p-1 hover:bg-[#34383f] rounded text-[#858a93] hover:text-amber-400"
               title="Separate loose parts (P)"
             >
               <Unlink className="w-3 h-3" />
@@ -517,10 +517,10 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
               e.stopPropagation();
               toggleMeshLock(m.id);
             }}
-            className="p-1 hover:bg-[#404040] rounded text-[#8c8c8c]"
+            className="p-1 hover:bg-[#34383f] rounded text-[#858a93]"
             title={m.locked ? 'Unlock Object' : 'Lock Object'}
           >
-            {m.locked ? <Lock className="w-3 h-3 text-amber-400" /> : <Unlock className="w-3 h-3 text-[#666666]" />}
+            {m.locked ? <Lock className="w-3 h-3 text-amber-400" /> : <Unlock className="w-3 h-3 text-[#51565f]" />}
           </button>
 
           {/* Visibility Toggle */}
@@ -529,7 +529,7 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
               e.stopPropagation();
               toggleMeshVisibility(m.id);
             }}
-            className="p-1 hover:bg-[#404040] rounded text-[#8c8c8c]"
+            className="p-1 hover:bg-[#34383f] rounded text-[#858a93]"
             title={m.visible === false ? 'Show Object' : 'Hide Object'}
           >
             {m.visible === false ? <EyeOff className="w-3 h-3 text-[#ec5b62]" /> : <Eye className="w-3 h-3 text-[#2d9d78]" />}
@@ -565,7 +565,7 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
                 e.stopPropagation();
                 onDeleteMesh(m.id);
               }}
-              className="p-1 hover:bg-[#ec5b62] rounded text-[#8c8c8c] hover:text-white"
+              className="p-1 hover:bg-[#ec5b62] rounded text-[#858a93] hover:text-white"
               title="Delete Object"
             >
               <Trash2 className="w-3 h-3" />
@@ -577,10 +577,10 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
   };
 
   return (
-    <div className={`flex flex-col h-full bg-[#333333] text-[#cccccc] font-sans text-xs select-none ${floating ? '' : ''}`}>
+    <div className={`flex flex-col h-full bg-[#26282d] text-[#c6cad1] font-sans text-xs select-none ${floating ? '' : ''}`}>
       {/* Outliner Header Bar — skipped in floating shell (title lives on window chrome) */}
       {!floating && (
-      <div className="h-8 bg-[#262626] border-b border-[#4d4d4d] px-2.5 flex items-center justify-between font-mono text-[10px] text-[#ed7300] font-bold">
+      <div className="h-8 bg-[#191b1e] border-b border-[#3b3f46] px-2.5 flex items-center justify-between font-mono text-[10px] text-[#ed7300] font-bold">
         <span className="flex items-center gap-1.5 uppercase">
           <Layers className="w-3.5 h-3.5 text-[#ed7300]" />
           SCENE HIERARCHY
@@ -588,28 +588,28 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
         <div className="flex items-center gap-1">
           <button
             onClick={handleSelectAll}
-            className="p-1 hover:bg-[#404040] rounded text-[#8c8c8c] hover:text-white"
+            className="p-1 hover:bg-[#34383f] rounded text-[#858a93] hover:text-white"
             title="Select All Meshes"
           >
             <CheckSquare className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={handleDeselectAll}
-            className="p-1 hover:bg-[#404040] rounded text-[#8c8c8c] hover:text-white"
+            className="p-1 hover:bg-[#34383f] rounded text-[#858a93] hover:text-white"
             title="Deselect All Meshes"
           >
             <SquareDashed className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={handleShowAll}
-            className="p-1 hover:bg-[#404040] rounded text-[#2d9d78]"
+            className="p-1 hover:bg-[#34383f] rounded text-[#2d9d78]"
             title="Show All Objects"
           >
             <Eye className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={handleHideAll}
-            className="p-1 hover:bg-[#404040] rounded text-[#ec5b62]"
+            className="p-1 hover:bg-[#34383f] rounded text-[#ec5b62]"
             title="Hide All Objects"
           >
             <EyeOff className="w-3.5 h-3.5" />
@@ -617,14 +617,14 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
           <div className="sp-sep-v h-3 mx-0.5 self-center" />
           <button
             onClick={handleAddGroup}
-            className="p-1 hover:bg-[#404040] rounded text-[#e68619]"
+            className="p-1 hover:bg-[#34383f] rounded text-[#e68619]"
             title="New Group Folder"
           >
             <FolderPlus className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => onSpawnPrimitive('cube')}
-            className="p-1 hover:bg-[#404040] rounded text-[#ed7300]"
+            className="p-1 hover:bg-[#34383f] rounded text-[#ed7300]"
             title="New Mesh Primitive"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -634,31 +634,31 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
       )}
 
       {floating && (
-        <div className="px-1.5 py-1 bg-[#2d2d2d] border-b border-[#1a1a1a] flex items-center gap-1 shrink-0">
+        <div className="px-1.5 py-1 bg-[#212327] border-b border-[#101114] flex items-center gap-1 shrink-0">
           <button
             onClick={handleSelectAll}
-            className="p-1 hover:bg-[#404040] rounded text-[#8c8c8c] hover:text-white"
+            className="p-1 hover:bg-[#34383f] rounded text-[#858a93] hover:text-white"
             title="Select All"
           >
             <CheckSquare className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={handleDeselectAll}
-            className="p-1 hover:bg-[#404040] rounded text-[#8c8c8c] hover:text-white"
+            className="p-1 hover:bg-[#34383f] rounded text-[#858a93] hover:text-white"
             title="Deselect All"
           >
             <SquareDashed className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={handleShowAll}
-            className="p-1 hover:bg-[#404040] rounded text-[#2d9d78]"
+            className="p-1 hover:bg-[#34383f] rounded text-[#2d9d78]"
             title="Show All"
           >
             <Eye className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={handleHideAll}
-            className="p-1 hover:bg-[#404040] rounded text-[#ec5b62]"
+            className="p-1 hover:bg-[#34383f] rounded text-[#ec5b62]"
             title="Hide All"
           >
             <EyeOff className="w-3.5 h-3.5" />
@@ -666,14 +666,14 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
           <div className="flex-1" />
           <button
             onClick={handleAddGroup}
-            className="p-1 hover:bg-[#404040] rounded text-[#e68619]"
+            className="p-1 hover:bg-[#34383f] rounded text-[#e68619]"
             title="New Group"
           >
             <FolderPlus className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => onSpawnPrimitive('cube')}
-            className="p-1 hover:bg-[#404040] rounded text-[#ed7300]"
+            className="p-1 hover:bg-[#34383f] rounded text-[#ed7300]"
             title="Add Cube"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -682,13 +682,13 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
       )}
 
       {/* Sub Tabs: Meshes / Scene / Bones */}
-      <div className="flex border-b border-[#1a1a1a] bg-[#262626] text-[10px] font-mono font-bold">
+      <div className="flex border-b border-[#101114] bg-[#191b1e] text-[10px] font-mono font-bold">
         <button
           onClick={() => setOutlinerTab('meshes')}
           className={`flex-1 py-1.5 flex items-center justify-center gap-1 transition border-b-2 ${
             outlinerTab === 'meshes'
-              ? 'border-[#ed7300] bg-[#333333] text-[#ed7300]'
-              : 'border-transparent text-[#8c8c8c] hover:text-[#e0e0e0] hover:bg-[#2a2a2a]'
+              ? 'border-[#ed7300] bg-[#26282d] text-[#ed7300]'
+              : 'border-transparent text-[#858a93] hover:text-[#e0e0e0] hover:bg-[#202226]'
           }`}
         >
           <Box className="w-3 h-3" />
@@ -699,8 +699,8 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
             onClick={() => setOutlinerTab('scene')}
             className={`flex-1 py-1.5 flex items-center justify-center gap-1 transition border-b-2 ${
               outlinerTab === 'scene'
-                ? 'border-[#e68619] bg-[#333333] text-[#e68619]'
-                : 'border-transparent text-[#8c8c8c] hover:text-[#e0e0e0] hover:bg-[#2a2a2a]'
+                ? 'border-[#e68619] bg-[#26282d] text-[#e68619]'
+                : 'border-transparent text-[#858a93] hover:text-[#e0e0e0] hover:bg-[#202226]'
             }`}
           >
             <Layers className="w-3 h-3" />
@@ -711,8 +711,8 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
           onClick={() => setOutlinerTab('bones')}
           className={`flex-1 py-1.5 flex items-center justify-center gap-1 transition border-b-2 ${
             outlinerTab === 'bones'
-              ? 'border-[#ed7300] bg-[#333333] text-[#ed7300]'
-              : 'border-transparent text-[#8c8c8c] hover:text-[#e0e0e0] hover:bg-[#2a2a2a]'
+              ? 'border-[#ed7300] bg-[#26282d] text-[#ed7300]'
+              : 'border-transparent text-[#858a93] hover:text-[#e0e0e0] hover:bg-[#202226]'
           }`}
         >
           <Bone className="w-3 h-3" />
@@ -721,9 +721,9 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
       </div>
 
       {/* Group Quick Action Bar & Filter */}
-      <div className="p-1.5 bg-[#2a2a2a] border-b border-[#1a1a1a] flex flex-col gap-1.5">
-        <div className="flex items-center gap-1 bg-[#3a3a3a] px-2 py-1 rounded border border-[#4d4d4d] text-[10px] font-mono">
-          <Search className="w-3 h-3 text-[#8c8c8c]" />
+      <div className="p-1.5 bg-[#202226] border-b border-[#101114] flex flex-col gap-1.5">
+        <div className="flex items-center gap-1 bg-[#2e3136] px-2 py-1 rounded border border-[#3b3f46] text-[10px] font-mono">
+          <Search className="w-3 h-3 text-[#858a93]" />
           <input
             type="text"
             value={searchQuery}
@@ -735,10 +735,10 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
                   ? 'Search cameras, lights, FX...'
                   : 'Search skeleton bones...'
             }
-            className="bg-transparent text-[#e8e8e8] outline-none w-full placeholder:text-[#6e6e6e]"
+            className="bg-transparent text-[#eaedf1] outline-none w-full placeholder:text-[#6e6e6e]"
           />
           {searchQuery && (
-            <button onClick={() => setSearchQuery('')} className="text-[#8c8c8c] hover:text-white">
+            <button onClick={() => setSearchQuery('')} className="text-[#858a93] hover:text-white">
               <X className="w-3 h-3" />
             </button>
           )}
@@ -746,7 +746,7 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
 
         {outlinerTab === 'meshes' && (
           <div className="flex items-center justify-between text-[9px] font-mono pt-0.5">
-            <span className="text-[#8c8c8c]">Group Tools:</span>
+            <span className="text-[#858a93]">Group Tools:</span>
             <div className="flex items-center gap-1">
               <button
                 onClick={handleGroupSelected}
@@ -754,7 +754,7 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
                 className={`px-2 py-0.5 rounded font-bold flex items-center gap-1 transition ${
                   selectedMeshIds.length > 0
                     ? 'bg-[#e68619] hover:bg-[#f59e0b] text-white shadow-sm'
-                    : 'bg-[#262626] text-[#666666] cursor-not-allowed'
+                    : 'bg-[#191b1e] text-[#51565f] cursor-not-allowed'
                 }`}
                 title="Group Selected Objects into a folder (Ctrl+G)"
               >
@@ -766,8 +766,8 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
                 disabled={selectedMeshIds.length === 0}
                 className={`px-2 py-0.5 rounded flex items-center gap-1 transition ${
                   selectedMeshIds.length > 0
-                    ? 'bg-[#333333] hover:bg-[#444444] text-[#e0e0e0]'
-                    : 'bg-[#262626] text-[#666666] cursor-not-allowed'
+                    ? 'bg-[#26282d] hover:bg-[#444444] text-[#e0e0e0]'
+                    : 'bg-[#191b1e] text-[#51565f] cursor-not-allowed'
                 }`}
                 title="Remove selected objects from their group"
               >
@@ -819,7 +819,7 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
                       className={`p-1.5 rounded flex items-center justify-between font-mono text-[10px] cursor-pointer border ${
                         selected
                           ? 'bg-[#ed7300]/25 border-[#ed7300] text-white'
-                          : 'bg-[#2a2a2a] border-[#1a1a1a] text-[#b3b3b3] hover:border-[#ed7300]/50'
+                          : 'bg-[#202226] border-[#101114] text-[#a6abb4] hover:border-[#ed7300]/50'
                       }`}
                     >
                       <div className="flex items-center gap-1.5 min-w-0">
@@ -829,7 +829,7 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
                       <div className="flex items-center gap-0.5">
                         <button
                           type="button"
-                          className="p-0.5 hover:bg-[#404040] rounded"
+                          className="p-0.5 hover:bg-[#34383f] rounded"
                           onClick={(e) => {
                             e.stopPropagation();
                             setCameras?.((prev) =>
@@ -895,18 +895,18 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
                       className={`p-1.5 rounded flex items-center justify-between font-mono text-[10px] cursor-pointer border ${
                         selected
                           ? 'bg-[#e68619]/25 border-[#e68619] text-white'
-                          : 'bg-[#2a2a2a] border-[#1a1a1a] text-[#b3b3b3] hover:border-[#e68619]/50'
+                          : 'bg-[#202226] border-[#101114] text-[#a6abb4] hover:border-[#e68619]/50'
                       }`}
                     >
                       <div className="flex items-center gap-1.5 min-w-0">
                         <Lightbulb className="w-3.5 h-3.5 text-[#e68619] shrink-0" />
                         <span className="truncate">{L.name}</span>
-                        <span className="text-[8px] text-[#666666] uppercase">{L.type}</span>
+                        <span className="text-[8px] text-[#51565f] uppercase">{L.type}</span>
                       </div>
                       <div className="flex items-center gap-0.5">
                         <button
                           type="button"
-                          className="p-0.5 hover:bg-[#404040] rounded"
+                          className="p-0.5 hover:bg-[#34383f] rounded"
                           onClick={(e) => {
                             e.stopPropagation();
                             setLights?.((prev) =>
@@ -967,7 +967,7 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
                       className={`p-1.5 rounded flex items-center justify-between font-mono text-[10px] cursor-pointer border ${
                         selected
                           ? 'bg-[#ff9a3c]/25 border-[#ff9a3c] text-white'
-                          : 'bg-[#2a2a2a] border-[#1a1a1a] text-[#b3b3b3] hover:border-[#ff9a3c]/50'
+                          : 'bg-[#202226] border-[#101114] text-[#a6abb4] hover:border-[#ff9a3c]/50'
                       }`}
                     >
                       <div className="flex items-center gap-1.5 min-w-0">
@@ -1004,18 +1004,18 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
                 className={`p-1.5 rounded font-mono text-[10px] cursor-pointer border ${
                   sceneSelection?.kind === 'weather'
                     ? 'bg-[#8aa0b8]/25 border-[#8aa0b8] text-white'
-                    : 'bg-[#2a2a2a] border-[#1a1a1a] text-[#b3b3b3] hover:border-[#8aa0b8]/50'
+                    : 'bg-[#202226] border-[#101114] text-[#a6abb4] hover:border-[#8aa0b8]/50'
                 }`}
               >
                 <div className="flex items-center justify-between gap-1.5 mb-1.5">
                   <div className="flex items-center gap-1.5 min-w-0">
                     <CloudSun className="w-3.5 h-3.5 text-[#8aa0b8] shrink-0" />
                     <span className="capitalize truncate">{(environment || createDefaultEnvironment()).weather} weather</span>
-                    <span className="text-[8px] text-[#666666] shrink-0">(move / rotate / scale volume)</span>
+                    <span className="text-[8px] text-[#51565f] shrink-0">(move / rotate / scale volume)</span>
                   </div>
                   <button
                     type="button"
-                    className="p-0.5 hover:bg-[#404040] rounded shrink-0"
+                    className="p-0.5 hover:bg-[#34383f] rounded shrink-0"
                     title={(environment?.visible === true) ? 'Hide weather volume' : 'Show weather volume'}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -1038,7 +1038,7 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
                       className={`px-1.5 py-0.5 rounded text-[8px] uppercase font-bold ${
                         (environment || createDefaultEnvironment()).weather === w
                           ? 'bg-[#ed7300] text-white'
-                          : 'bg-[#262626] text-[#8c8c8c] hover:text-white'
+                          : 'bg-[#191b1e] text-[#858a93] hover:text-white'
                       }`}
                       onClick={() => {
                         setEnvironment?.((prev) => weatherPresetToEnv(w, prev));
@@ -1064,14 +1064,14 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
               const anyLocked = groupMeshes.some((m) => m.locked);
 
               return (
-                <div key={group.id} className="cad-card border border-[#4d4d4d] bg-[#2e2e2e] rounded p-1 space-y-1">
+                <div key={group.id} className="cad-card border border-[#3b3f46] bg-[#24262b] rounded p-1 space-y-1">
                   {/* Group Folder Header */}
                   <div
                     onClick={() => handleToggleGroupCollapse(group.id)}
-                    className="flex items-center justify-between font-mono text-[10px] cursor-pointer py-1 px-1.5 bg-[#2a2a2a] rounded hover:bg-[#282828] transition"
+                    className="flex items-center justify-between font-mono text-[10px] cursor-pointer py-1 px-1.5 bg-[#202226] rounded hover:bg-[#1e2023] transition"
                   >
                     <div className="flex items-center gap-1.5 min-w-0 flex-1 mr-2">
-                      {isCollapsed ? <ChevronRight className="w-3 h-3 text-[#8c8c8c]" /> : <ChevronDown className="w-3 h-3 text-[#8c8c8c]" />}
+                      {isCollapsed ? <ChevronRight className="w-3 h-3 text-[#858a93]" /> : <ChevronDown className="w-3 h-3 text-[#858a93]" />}
                       {isCollapsed ? <Folder className="w-3.5 h-3.5 text-[#e68619]" /> : <FolderOpen className="w-3.5 h-3.5 text-[#e68619]" />}
                       {isEditing ? (
                         <input
@@ -1082,7 +1082,7 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
                           onKeyDown={(e) => e.key === 'Enter' && handleSaveRename('group', group.id)}
                           autoFocus
                           onClick={(e) => e.stopPropagation()}
-                          className="cad-input px-1 py-0.2 text-[10px] font-mono text-white outline-none w-28 bg-[#3a3a3a]"
+                          className="cad-input px-1 py-0.2 text-[10px] font-mono text-white outline-none w-28 bg-[#2e3136]"
                         />
                       ) : (
                         <span
@@ -1093,34 +1093,34 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
                           {group.name}
                         </span>
                       )}
-                      <span className="text-[8.5px] text-[#8c8c8c]">({groupMeshes.length})</span>
+                      <span className="text-[8.5px] text-[#858a93]">({groupMeshes.length})</span>
                     </div>
 
                     <div className="flex items-center gap-1">
                       <button
                         onClick={(e) => handleStartRename(group.id, group.name, e)}
-                        className="p-0.5 hover:bg-[#404040] rounded text-[#8c8c8c] hover:text-white"
+                        className="p-0.5 hover:bg-[#34383f] rounded text-[#858a93] hover:text-white"
                         title="Rename Group Folder"
                       >
                         <Edit2 className="w-3 h-3" />
                       </button>
                       <button
                         onClick={(e) => handleToggleGroupLock(group.id, e)}
-                        className="p-0.5 hover:bg-[#404040] rounded text-[#8c8c8c]"
+                        className="p-0.5 hover:bg-[#34383f] rounded text-[#858a93]"
                         title={anyLocked ? 'Unlock All Group Meshes' : 'Lock All Group Meshes'}
                       >
-                        {anyLocked ? <Lock className="w-3 h-3 text-amber-400" /> : <Unlock className="w-3 h-3 text-[#666666]" />}
+                        {anyLocked ? <Lock className="w-3 h-3 text-amber-400" /> : <Unlock className="w-3 h-3 text-[#51565f]" />}
                       </button>
                       <button
                         onClick={(e) => handleToggleGroupVisibility(group.id, e)}
-                        className="p-0.5 hover:bg-[#404040] rounded text-[#8c8c8c]"
+                        className="p-0.5 hover:bg-[#34383f] rounded text-[#858a93]"
                         title={allVisible ? 'Hide Group' : 'Show Group'}
                       >
                         {allVisible ? <Eye className="w-3 h-3 text-[#2d9d78]" /> : <EyeOff className="w-3 h-3 text-[#ec5b62]" />}
                       </button>
                       <button
                         onClick={(e) => handleDeleteGroup(group.id, e)}
-                        className="p-0.5 hover:bg-[#ec5b62] rounded text-[#8c8c8c] hover:text-white"
+                        className="p-0.5 hover:bg-[#ec5b62] rounded text-[#858a93] hover:text-white"
                         title="Delete Group Folder"
                       >
                         <Trash2 className="w-3 h-3" />
@@ -1132,7 +1132,7 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
                   {!isCollapsed && (
                     <div className="pl-3 border-l-2 border-[#e68619]/30 space-y-1 pt-0.5">
                       {groupMeshes.length === 0 ? (
-                        <div className="text-[9px] font-mono text-[#666666] italic py-1 pl-1">
+                        <div className="text-[9px] font-mono text-[#51565f] italic py-1 pl-1">
                           (Empty group — drag or select meshes to group)
                         </div>
                       ) : (
@@ -1147,7 +1147,7 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
             {/* Ungrouped Meshes Container */}
             <div className="space-y-1">
               {groups.length > 0 && (
-                <div className="text-[9px] font-mono text-[#8c8c8c] font-bold uppercase tracking-wider px-1 pt-1">
+                <div className="text-[9px] font-mono text-[#858a93] font-bold uppercase tracking-wider px-1 pt-1">
                   UNGROUPED OBJECTS ({filteredMeshes.filter((m) => !m.groupId).length})
                 </div>
               )}
@@ -1160,8 +1160,8 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
           /* SKELETON BONES TAB CONTENT */
           <div className="space-y-2">
             {/* Add Bone Creation Bar */}
-            <div className="cad-card p-2 space-y-1.5 border border-[#4d4d4d] bg-[#222222]">
-              <span className="text-[9px] font-mono text-[#8c8c8c] uppercase font-bold block">
+            <div className="cad-card p-2 space-y-1.5 border border-[#3b3f46] bg-[#222222]">
+              <span className="text-[9px] font-mono text-[#858a93] uppercase font-bold block">
                 CREATE NEW BONE (PARENT: {bones.find((b) => b.id === selectedBoneId)?.name || 'ROOT'})
               </span>
               <div className="flex items-center gap-1">
@@ -1185,7 +1185,7 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
             {/* Bone Hierarchy */}
             <div className="space-y-0.5">
               {filteredBones.length === 0 ? (
-                <div className="text-[10px] font-mono text-[#666666] italic text-center py-4">
+                <div className="text-[10px] font-mono text-[#51565f] italic text-center py-4">
                   No skeleton bones created
                 </div>
               ) : (
@@ -1212,13 +1212,13 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
                           className={`h-7 rounded flex items-center gap-0.5 font-mono text-[10px] cursor-pointer transition pr-1 ${
                             isSelected
                               ? 'bg-[#ed7300]/20 border border-[#ed7300] text-[#ffffff]'
-                              : 'bg-[#2a2a2a] border border-transparent text-[#b3b3b3] hover:border-[#ed7300]/45'
+                              : 'bg-[#202226] border border-transparent text-[#a6abb4] hover:border-[#ed7300]/45'
                           }`}
                           style={{ paddingLeft: 4 + depth * 12 }}
                         >
                           <button
                             type="button"
-                            className={`w-4 h-4 shrink-0 flex items-center justify-center ${hasKids ? 'text-[#8c8c8c]' : 'opacity-0 pointer-events-none'}`}
+                            className={`w-4 h-4 shrink-0 flex items-center justify-center ${hasKids ? 'text-[#858a93]' : 'opacity-0 pointer-events-none'}`}
                             onClick={(e) => {
                               e.stopPropagation();
                               setCollapsedBones((prev) => ({ ...prev, [bone.id]: !prev[bone.id] }));
@@ -1226,7 +1226,7 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
                           >
                             {collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                           </button>
-                          <Bone className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-[#ed7300]' : 'text-[#8c8c8c]'}`} />
+                          <Bone className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-[#ed7300]' : 'text-[#858a93]'}`} />
                           {isEditing ? (
                             <input
                               type="text"
@@ -1236,14 +1236,14 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
                               onKeyDown={(e) => e.key === 'Enter' && handleSaveRename('bone', bone.id)}
                               autoFocus
                               onClick={(e) => e.stopPropagation()}
-                              className="cad-input px-1 py-0.2 text-[10px] font-mono text-white outline-none w-28 bg-[#3a3a3a]"
+                              className="cad-input px-1 py-0.2 text-[10px] font-mono text-white outline-none w-28 bg-[#2e3136]"
                             />
                           ) : (
-                            <span className="font-bold truncate text-[#e8e8e8] flex-1">{bone.name}</span>
+                            <span className="font-bold truncate text-[#eaedf1] flex-1">{bone.name}</span>
                           )}
                           <button
                             onClick={(e) => handleStartRename(bone.id, bone.name, e)}
-                            className="p-1 hover:bg-[#404040] rounded text-[#8c8c8c] hover:text-white"
+                            className="p-1 hover:bg-[#34383f] rounded text-[#858a93] hover:text-white"
                             title="Rename Bone"
                           >
                             <Edit2 className="w-3 h-3" />
@@ -1253,7 +1253,7 @@ export const OutlinerPanel: React.FC<OutlinerPanelProps> = ({
                               e.stopPropagation();
                               handleDeleteBone(bone.id);
                             }}
-                            className="p-1 hover:bg-[#ec5b62] rounded text-[#8c8c8c] hover:text-white"
+                            className="p-1 hover:bg-[#ec5b62] rounded text-[#858a93] hover:text-white"
                             title="Delete Bone"
                           >
                             <Trash2 className="w-3 h-3" />

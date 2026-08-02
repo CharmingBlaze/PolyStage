@@ -47,6 +47,60 @@ export function createCamera(name = 'Camera', position = v(4, 3, 5)): CADCamera 
   };
 }
 
+export type CameraShotPresetId = 'wide' | 'medium' | 'close' | 'low' | 'high' | 'profile' | 'otsp';
+
+export const CAMERA_SHOT_PRESETS: Array<{
+  id: CameraShotPresetId;
+  label: string;
+  hint: string;
+  position: Vector3D;
+  lookAt: Vector3D;
+  fov: number;
+}> = [
+  { id: 'wide', label: 'Wide', hint: 'Establishing / master shot', position: v(9, 5, 11), lookAt: v(0, 1, 0), fov: 55 },
+  { id: 'medium', label: 'Medium', hint: 'Waist-up character shot', position: v(4.5, 2.2, 5.5), lookAt: v(0, 1.2, 0), fov: 40 },
+  { id: 'close', label: 'Close-up', hint: 'Face / detail', position: v(2.2, 1.6, 2.8), lookAt: v(0, 1.5, 0), fov: 32 },
+  { id: 'low', label: 'Low Angle', hint: 'Hero / power', position: v(3.5, 0.6, 5), lookAt: v(0, 1.4, 0), fov: 42 },
+  { id: 'high', label: 'High Angle', hint: 'Overview / vulnerability', position: v(4, 7, 4), lookAt: v(0, 0.8, 0), fov: 48 },
+  { id: 'profile', label: 'Profile', hint: 'Side silhouette', position: v(6, 1.6, 0.2), lookAt: v(0, 1.4, 0), fov: 38 },
+  { id: 'otsp', label: 'OTS', hint: 'Over-the-shoulder dialogue', position: v(1.4, 1.7, 2.6), lookAt: v(0, 1.5, -0.4), fov: 36 },
+];
+
+/** Build a camera aimed at lookAt from position (Euler XYZ). */
+export function createCameraShot(preset: CameraShotPresetId, name?: string): CADCamera {
+  const shot = CAMERA_SHOT_PRESETS.find((p) => p.id === preset) || CAMERA_SHOT_PRESETS[1];
+  const cam = createCamera(name || shot.label, shot.position);
+  cam.lookAt = { ...shot.lookAt };
+  cam.fov = shot.fov;
+  cam.rotation = aimCameraRotation(shot.position, shot.lookAt);
+  return cam;
+}
+
+/** Create a camera matching the free orbit view (machinima “set shot from view”). */
+export function createCameraFromView(
+  name: string,
+  position: Vector3D,
+  rotation: Vector3D,
+  fov: number,
+  lookAt: Vector3D | null = null,
+): CADCamera {
+  const cam = createCamera(name, position);
+  cam.rotation = { ...rotation };
+  cam.fov = Math.max(15, Math.min(100, fov));
+  cam.lookAt = lookAt ? { ...lookAt } : null;
+  return cam;
+}
+
+/** Euler so local −Z aims from `from` toward `target` (Three.js camera default). */
+export function aimCameraRotation(from: Vector3D, target: Vector3D): Vector3D {
+  const dx = target.x - from.x;
+  const dy = target.y - from.y;
+  const dz = target.z - from.z;
+  const yaw = Math.atan2(dx, dz);
+  const pitch = -Math.atan2(dy, Math.hypot(dx, dz));
+  return { x: pitch, y: yaw, z: 0 };
+}
+
 export function createParticleEmitter(name = 'Spark'): ParticleEmitter {
   return {
     id: id('fx'),

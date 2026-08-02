@@ -41,6 +41,51 @@ const DEFAULT_MATERIALS: MaterialSlot[] = [
   { id: 'mat_toon', name: 'Toon Pink', color: '#ff77a8', shading: 'toon', roughness: 0.8, metalness: 0.0, emissive: '#000000', emissiveIntensity: 0, pattern: 'solid', tileScale: 1, doubleSided: true },
 ];
 
+const GRADIENT_PRESETS: { id: string; name: string; stops: GradientStop[] }[] = [
+  {
+    id: 'sunset',
+    name: 'Sunset',
+    stops: [
+      { id: 's1', color: '#ff4e50', position: 0, opacity: 100 },
+      { id: 's2', color: '#f9d423', position: 100, opacity: 100 },
+    ],
+  },
+  {
+    id: 'cyberpunk',
+    name: 'Cyberpunk',
+    stops: [
+      { id: 's1', color: '#00f6ff', position: 0, opacity: 100 },
+      { id: 's2', color: '#ff007b', position: 100, opacity: 100 },
+    ],
+  },
+  {
+    id: 'retro',
+    name: 'Retro 16',
+    stops: [
+      { id: 's1', color: '#83769c', position: 0, opacity: 100 },
+      { id: 's2', color: '#ff004d', position: 50, opacity: 100 },
+      { id: 's3', color: '#ffec27', position: 100, opacity: 100 },
+    ],
+  },
+  {
+    id: 'gold',
+    name: 'Gold',
+    stops: [
+      { id: 's1', color: '#bf953f', position: 0, opacity: 100 },
+      { id: 's2', color: '#fcf6ba', position: 50, opacity: 100 },
+      { id: 's3', color: '#b38728', position: 100, opacity: 100 },
+    ],
+  },
+  {
+    id: 'monochrome',
+    name: 'Mono',
+    stops: [
+      { id: 's1', color: '#101114', position: 0, opacity: 100 },
+      { id: 's2', color: '#ffffff', position: 100, opacity: 100 },
+    ],
+  },
+];
+
 interface MaterialPanelProps {
   mesh: CADMesh;
   setMesh: (updater: CADMesh | ((prev: CADMesh) => CADMesh)) => void;
@@ -230,7 +275,7 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
     const tileSize = Math.max(8, Math.floor(32 / scale));
 
     if (activeMaterial.pattern === 'checker' || activeMaterial.pattern === 'checker4') {
-      ctx.fillStyle = '#3a3a3a';
+      ctx.fillStyle = '#2e3136';
       for (let y = 0; y < 256; y += tileSize) {
         for (let x = 0; x < 256; x += tileSize) {
           if (((x / tileSize) + (y / tileSize)) % 2 === 0) {
@@ -262,7 +307,7 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
         }
       }
     } else if (activeMaterial.pattern === 'stripes') {
-      ctx.fillStyle = '#3a3a3a';
+      ctx.fillStyle = '#2e3136';
       for (let x = 0; x < 256; x += tileSize * 2) {
         ctx.fillRect(x, 0, tileSize, 256);
       }
@@ -343,35 +388,11 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
     );
   };
 
-  const applyGradientPreset = (presetName: string) => {
-    if (presetName === 'sunset') {
-      setStops([
-        { id: 's1', color: '#ff4e50', position: 0, opacity: 100 },
-        { id: 's2', color: '#f9d423', position: 100, opacity: 100 },
-      ]);
-    } else if (presetName === 'cyberpunk') {
-      setStops([
-        { id: 's1', color: '#00f6ff', position: 0, opacity: 100 },
-        { id: 's2', color: '#ff007b', position: 100, opacity: 100 },
-      ]);
-    } else if (presetName === 'picocad') {
-      setStops([
-        { id: 's1', color: '#83769c', position: 0, opacity: 100 },
-        { id: 's2', color: '#ff004d', position: 50, opacity: 100 },
-        { id: 's3', color: '#ffec27', position: 100, opacity: 100 },
-      ]);
-    } else if (presetName === 'gold') {
-      setStops([
-        { id: 's1', color: '#bf953f', position: 0, opacity: 100 },
-        { id: 's2', color: '#fcf6ba', position: 50, opacity: 100 },
-        { id: 's3', color: '#b38728', position: 100, opacity: 100 },
-      ]);
-    } else if (presetName === 'monochrome') {
-      setStops([
-        { id: 's1', color: '#1a1a1a', position: 0, opacity: 100 },
-        { id: 's2', color: '#ffffff', position: 100, opacity: 100 },
-      ]);
-    }
+  const applyGradientPreset = (presetId: string) => {
+    const preset = GRADIENT_PRESETS.find((p) => p.id === presetId);
+    if (!preset) return;
+    setStops(preset.stops.map((s) => ({ ...s })));
+    setSelectedStopId(preset.stops[0].id);
   };
 
   const handleApplyGradientToMesh = () => {
@@ -672,7 +693,7 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
                   value={selectedStop?.position ?? 0}
                   onChange={(e) => handleUpdateSelectedStop('position', Math.max(0, Math.min(100, +e.target.value)))}
                 />
-                <span className="text-[#999]">%</span>
+                <span className="text-[#8b909a]">%</span>
                 <input
                   type="color"
                   value={selectedStop?.color || '#ffffff'}
@@ -690,11 +711,44 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
             <button type="button" className="sp-mat__ghost-btn" onClick={handleReverseGradient}><RotateCcw className="w-3 h-3" />Reverse</button>
           </div>
 
+          <div className="sp-mat__presets">
+            {GRADIENT_PRESETS.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                className="sp-mat__preset"
+                title={`Load ${preset.name} gradient`}
+                onClick={() => applyGradientPreset(preset.id)}
+              >
+                <span
+                  className="sp-mat__preset-swatch"
+                  style={{
+                    background: `linear-gradient(90deg, ${preset.stops
+                      .map((s) => `${s.color} ${s.position}%`)
+                      .join(', ')})`,
+                  }}
+                />
+                <span className="sp-mat__preset-name">{preset.name}</span>
+              </button>
+            ))}
+          </div>
+
           <div className="sp-mat__actions">
             <button type="button" className="sp-mat__primary" onClick={handleApplyGradientToMesh}>
               <Sparkles className="w-3.5 h-3.5" />
               Apply Gradient
             </button>
+            {onOpenPaintWorkspace && (
+              <button
+                type="button"
+                className="sp-mat__secondary"
+                title="Apply the gradient, then jump to Pixel Paint to refine it"
+                onClick={() => handleEditGradientInPixelPaint(false)}
+              >
+                <Pencil className="w-3 h-3" />
+                Edit in Paint
+              </button>
+            )}
           </div>
         </section>
 

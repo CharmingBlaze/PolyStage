@@ -152,6 +152,27 @@ export function magicWandSelect(
   return out;
 }
 
+/**
+ * Ambient auto-play: loop the whole frame strip at `autoPlayFps` (uniform) or
+ * per-frame durations. Returns the active frame index at time t (seconds).
+ */
+export function sampleAutoPlayFrameIndex(anim: MeshTextureAnimation, time: number): number {
+  const count = anim.frames.length;
+  if (count <= 1) return 0;
+  const t = Math.max(0, time);
+  if (anim.autoPlayFps && anim.autoPlayFps > 0) {
+    return Math.floor(t * anim.autoPlayFps) % count;
+  }
+  const durations = anim.frames.map((f) => Math.max(1, f.durationMs || 100));
+  const total = durations.reduce((a, b) => a + b, 0);
+  let tMs = (t * 1000) % total;
+  for (let i = 0; i < count; i++) {
+    tMs -= durations[i];
+    if (tMs < 0) return i;
+  }
+  return count - 1;
+}
+
 export function sampleTextureFrameIndex(keys: AnimKeyframe[] | undefined, time: number): number | null {
   if (!keys?.length) return null;
   const sorted = [...keys].sort((a, b) => a.time - b.time);
@@ -180,7 +201,7 @@ export function activeTextureClipKey(
 
 /**
  * Resolve which texture dataUrl to show at time t.
- * Priority: texFrameKeys > named texture clip > defaultClip > still/first frame.
+ * Priority: texFrameKeys > named texture clip > autoPlay strip > still > defaultClip > first frame.
  */
 export function resolveMeshTextureAtTime(
   mesh: CADMesh,
@@ -227,12 +248,18 @@ export function resolveMeshTextureAtTime(
     }
   }
 
-  // 3) Current still (live paint / last composited frame)
+  // 3) Ambient auto-play loop (opt-in; no keyframes needed)
+  if (anim.autoPlay && anim.frames.length > 1) {
+    const idx = sampleAutoPlayFrameIndex(anim, time);
+    return { dataUrl: anim.frames[idx].dataUrl || still, frameIndex: idx, clipId: null };
+  }
+
+  // 4) Current still (live paint / last composited frame)
   if (still) {
     return { dataUrl: still, frameIndex: 0, clipId: null };
   }
 
-  // 4) Default clip
+  // 5) Default clip
   if (anim.defaultClipId) {
     const clip = anim.clips?.find((c) => c.id === anim.defaultClipId);
     if (clip?.frameIds[0]) {

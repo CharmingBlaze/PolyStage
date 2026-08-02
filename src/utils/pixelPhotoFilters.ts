@@ -225,32 +225,41 @@ export function applyPhotoAdjustments(
   return out;
 }
 
+export interface PixelPoint {
+  x: number;
+  y: number;
+}
+
+/**
+ * True when `curr` is the redundant corner of an L-shaped step and dropping it
+ * leaves a clean 1px diagonal (the Aseprite "pixel perfect" rule).
+ *
+ * Shared by the batch cleaner and the live pencil stroke so both agree on what
+ * counts as a corner.
+ */
+export function isPixelPerfectCorner(prev: PixelPoint, curr: PixelPoint, next: PixelPoint): boolean {
+  const dx1 = curr.x - prev.x;
+  const dy1 = curr.y - prev.y;
+  const dx2 = next.x - curr.x;
+  const dy2 = next.y - curr.y;
+
+  const isLCorner =
+    (Math.abs(dx1) === 1 && dy1 === 0 && dx2 === 0 && Math.abs(dy2) === 1) ||
+    (dx1 === 0 && Math.abs(dy1) === 1 && Math.abs(dx2) === 1 && dy2 === 0);
+
+  return isLCorner && prev.x !== next.x && prev.y !== next.y;
+}
+
 /** Pixel-Perfect stroke cleaner (Aseprite algorithm). */
-export function cleanPixelPerfectPath(
-  points: Array<{ x: number; y: number }>
-): Array<{ x: number; y: number }> {
+export function cleanPixelPerfectPath(points: PixelPoint[]): PixelPoint[] {
   if (points.length < 3) return points;
-  const result: Array<{ x: number; y: number }> = [points[0]];
+  const result: PixelPoint[] = [points[0]];
 
   for (let i = 1; i < points.length - 1; i++) {
     const prev = result[result.length - 1];
     const curr = points[i];
     const next = points[i + 1];
-
-    // Check for L-shaped corner double pixel
-    const dx1 = curr.x - prev.x;
-    const dy1 = curr.y - prev.y;
-    const dx2 = next.x - curr.x;
-    const dy2 = next.y - curr.y;
-
-    const isLCorner =
-      (Math.abs(dx1) === 1 && dy1 === 0 && dx2 === 0 && Math.abs(dy2) === 1) ||
-      (dx1 === 0 && Math.abs(dy1) === 1 && Math.abs(dx2) === 1 && dy2 === 0);
-
-    if (isLCorner && prev.x !== next.x && prev.y !== next.y) {
-      // Skip corner pixel `curr` to produce clean 1px diagonal step
-      continue;
-    }
+    if (isPixelPerfectCorner(prev, curr, next)) continue;
     result.push(curr);
   }
   result.push(points[points.length - 1]);

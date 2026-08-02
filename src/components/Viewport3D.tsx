@@ -1,7 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { applyStandardOrbitMouseButtons, applyPaintOrbitMouseButtons, applyDrawToolOrbitMouseButtons, bindBlockbenchOrbitModifiers, panCameraInScreenSpace, STANDARD_NAV_HINT, PAINT_NAV_HINT } from '../utils/viewportNav';
+import {
+  applyStandardOrbitMouseButtons,
+  applyPaintOrbitMouseButtons,
+  applyPaintAltOrbitMouseButtons,
+  applyDrawToolOrbitMouseButtons,
+  bindBlockbenchOrbitModifiers,
+  panCameraInScreenSpace,
+  resetOrbitPointerState,
+  restorePaintOrbitControls,
+  STANDARD_NAV_HINT,
+  PAINT_NAV_HINT,
+} from '../utils/viewportNav';
 import { applyThemedTransformGizmo, VIEWPORT_THEME } from '../utils/viewportTheme';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import type { CADMesh, CADBone, CADCamera, CADLight, ParticleEmitter, EnvironmentSettings, ToolState, RenderSettings, PrimitiveType, SceneSelection, Vector3D, WorkspaceMode } from '../types/cad';
@@ -12,6 +23,7 @@ import {
   type ModalMeshSession,
 } from '../utils/modalMeshOps';
 import { evaluateMeshModifiers, syncMirroredBonePose, syncSymmetricalVertices } from '../utils/mirrorModeling';
+import { selectionCounts } from '../utils/selection';
 import { buildLogicalEdgeGeometry, buildTriangulationDebugGeometry } from '../utils/topology/edgeOverlay';
 import {
   findEdgeLoop,
@@ -20,7 +32,12 @@ import {
   type KnifeHit,
 } from '../utils/meshCutTools';
 import { pickPaintUv, samplePaintStrokeUvs, setRayFromPointer } from '../utils/bvh/picking';
-import { subscribeTexturePreview, cancelTexturePreviewNotify } from '../utils/texturePreviewBus';
+import { createPaintStrokeController } from '../utils/paintStrokeController';
+import {
+  subscribeTexturePreview,
+  cancelTexturePreviewNotify,
+  getLiveTextureCanvas,
+} from '../utils/texturePreviewBus';
 import { LightwaveNavToolbar } from './LightwaveNavToolbar';
 import { deformMeshWithBones, getBoneWorldMatrices, paintVertexWeight } from '../utils/rigging';
 import { evaluateConstraints } from '../utils/ik';
@@ -92,7 +109,6 @@ interface Viewport3DProps {
   isQuadSubViewport?: boolean;
   onMaximizeViewport?: () => void;
   isViewportMaximized?: boolean;
-  onModalMeshPreview?: (amount: number) => void;
   onModalMeshConfirm?: () => void;
   onModalMeshCancel?: () => void;
   onModalLoopCutConfirm?: (loopEdgeIds: string[], factors: number[]) => void;
@@ -142,7 +158,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   isQuadSubViewport = false,
   onMaximizeViewport,
   isViewportMaximized = false,
-  onModalMeshPreview,
   onModalMeshConfirm,
   onModalMeshCancel,
   onModalLoopCutConfirm,
@@ -199,11 +214,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   } | null>(null);
   const meshSnapshotRef = useRef<CADMesh | null>(null);
   const pendingComponentVertsRef = useRef<CADMesh['vertices'] | null>(null);
-  const transformSnapshotRef = useRef<{
-    position: { x: number; y: number; z: number };
-    rotation: { x: number; y: number; z: number };
-    scale: { x: number; y: number; z: number };
-  } | null>(null);
   /** Always-current refs so modal G/R/S does not rebind on every mesh frame. */
   const activeMeshRef = useRef<CADMesh | undefined>(undefined);
   const toolStateRef = useRef(toolState);
@@ -363,16 +373,40 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const [cadStep, setCadStep] = useState<0 | 1 | 2>(0);
   const [placementHoverPos, setPlacementHoverPos] = useState<THREE.Vector3 | null>(null);
   const [isPainting3DActive, setIsPainting3DActive] = useState<boolean>(false);
-  /** Immediate gesture state; React state can lag behind the first pointermove after pointerdown. */
+  /** Immediate gesture state — source of truth for an in-flight LMB stroke. */
   const isPainting3DActiveRef = useRef(false);
-  const paintPointerIdRef = useRef<number | null>(null);
-  const lastPaintClientRef = useRef<{ x: number; y: number } | null>(null);
-  const [paintCursor, setPaintCursor] = useState<{ x: number; y: number; u: number; v: number } | null>(null);
+  const lastPaintUvRef = useRef<{ u: number; v: number } | null>(null);
+  /** Latest stamp callback — drag listeners must not close over a stale prop. */
+  const onDirect3DPaintPixelRef = useRef(onDirect3DPaintPixel);
+  onDirect3DPaintPixelRef.current = onDirect3DPaintPixel;
+  const textureCanvasRefLocal = useRef(textureCanvas);
+  textureCanvasRefLocal.current = textureCanvas;
+  const activeMeshIdRef = useRef(activeMeshId);
+  activeMeshIdRef.current = activeMeshId;
+  /** Imperative stroke owner — survives React re-renders. */
+  const paintStrokeCtlRef = useRef(createPaintStrokeController());
+  const [paintCursor, setPaintCursor] = useState<{
+    x: number;
+    y: number;
+    u: number;
+    v: number;
+    hit: boolean;
+  } | null>(null);
   const paintCursorRafRef = useRef(0);
-  const pendingPaintCursorRef = useRef<{ x: number; y: number; u: number; v: number } | null>(null);
+  const pendingPaintCursorRef = useRef<{
+    x: number;
+    y: number;
+    u: number;
+    v: number;
+    hit: boolean;
+  } | null>(null);
 
-  const schedulePaintCursor = (next: { x: number; y: number; u: number; v: number } | null) => {
-    pendingPaintCursorRef.current = next;
+  const schedulePaintCursor = (
+    next: { x: number; y: number; u: number; v: number; hit?: boolean } | null,
+  ) => {
+    pendingPaintCursorRef.current = next
+      ? { ...next, hit: next.hit !== false }
+      : null;
     if (paintCursorRafRef.current) return;
     paintCursorRafRef.current = requestAnimationFrame(() => {
       paintCursorRafRef.current = 0;
@@ -425,27 +459,33 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
   useEffect(() => {
     if (!controlsRef.current) return;
+    // Prefer refs for in-flight paint — React isPainting3DActive is deferred a frame
+    // and must not briefly re-enable Orbit mid-stroke (that steals hold-drag).
+    const strokeLive =
+      isPainting3DActive
+      || isPainting3DActiveRef.current
+      || paintStrokeCtlRef.current.active;
     const blocked =
       toolState.isCadDrawing ||
       toolState.placeOnClick ||
       Boolean(toolState.modalTransform) ||
       Boolean(toolState.modalMeshOp) ||
       modalActiveRef.current ||
-      isPainting3DActive;
+      strokeLive;
+    // Idle paint: keep controls enabled for RMB/MMB/wheel; LMB unbound via paint buttons.
+    // Active stroke: disables the whole control.
     controlsRef.current.enabled = !blocked;
-    applyStandardOrbitMouseButtons(controlsRef.current);
 
-    // 3D paint: keep default LMB orbit (empty space). Mesh hits steal LMB in the pointer handler.
-    // Blockout pen: LMB is always for drawing — disable orbit on left button.
     const penBlockout = activeWorkspaceMode === 'blockout' && vectorMode === 'pen';
     const refEditing = activeWorkspaceMode === 'blockout' && vectorRefTool !== 'none';
     if (refEditing || penBlockout) {
-      // LMB reserved for drawing / reference move-scale.
       applyDrawToolOrbitMouseButtons(controlsRef.current, {
         ortho: cameraType !== 'perspective',
       });
     } else if (toolState.isPainting3D) {
       applyPaintOrbitMouseButtons(controlsRef.current);
+    } else {
+      applyStandardOrbitMouseButtons(controlsRef.current);
     }
   }, [
     toolState.isCadDrawing,
@@ -524,15 +564,24 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     setDrawBaseStart(null);
     setDrawBaseEnd(null);
     setDrawHeight(1.0);
+    const strokeLive =
+      isPainting3DActive
+      || isPainting3DActiveRef.current
+      || paintStrokeCtlRef.current.active;
     if (
       controlsRef.current &&
       !toolState.placeOnClick &&
       !toolState.modalTransform &&
       !toolState.modalMeshOp &&
-      !isPainting3DActive
+      !strokeLive
     ) {
       controlsRef.current.enabled = true;
-      applyStandardOrbitMouseButtons(controlsRef.current);
+      // Never re-arm LMB orbit while paint mode is on (that stole hold-drag).
+      if (toolState.isPainting3D) {
+        applyPaintOrbitMouseButtons(controlsRef.current);
+      } else {
+        applyStandardOrbitMouseButtons(controlsRef.current);
+      }
     }
   }, [toolState.isCadDrawing, toolState.placeOnClick, toolState.isPainting3D, toolState.modalTransform, toolState.modalMeshOp, isPainting3DActive]);
 
@@ -543,7 +592,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     const scene = new THREE.Scene();
     // OutlineForge live-view charcoal (soft shadows read better on near-black).
-    scene.background = new THREE.Color('#1b1b1b');
+    scene.background = new THREE.Color('#141518');
     sceneRef.current = scene;
 
     let camera: THREE.PerspectiveCamera | THREE.OrthographicCamera;
@@ -577,6 +626,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     rendererRef.current = renderer;
 
+    renderer.domElement.style.touchAction = 'none';
+    renderer.domElement.style.display = 'block';
+    renderer.domElement.style.width = '100%';
+    renderer.domElement.style.height = '100%';
     containerRef.current.appendChild(renderer.domElement);
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -584,7 +637,12 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     controls.dampingFactor = 0.05;
     controls.enableRotate = cameraType === 'perspective';
     controls.screenSpacePanning = true;
-    applyStandardOrbitMouseButtons(controls);
+    // Respect paint mode immediately — never leave LMB=ROTATE armed after a remount.
+    if (toolStateRef.current.isPainting3D) {
+      applyPaintOrbitMouseButtons(controls);
+    } else {
+      applyStandardOrbitMouseButtons(controls);
+    }
     // Block RMB context menu so pan gestures aren't eaten after 1–2 uses.
     const onCanvasContextMenu = (e: Event) => e.preventDefault();
     renderer.domElement.addEventListener('contextmenu', onCanvasContextMenu);
@@ -609,7 +667,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         Boolean(cur.placeOnClick) ||
         Boolean(cur.modalTransform) ||
         Boolean(cur.modalMeshOp) ||
-        modalActiveRef.current;
+        modalActiveRef.current ||
+        cur.isPainting3D ||
+        isPainting3DActiveRef.current;
       controls.enabled = !blocked;
       if (event.value && dummyTargetRef.current) {
         previousGizmoPosRef.current.copy(dummyTargetRef.current.position);
@@ -1210,20 +1270,24 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     meshes.forEach((m) => {
       keep.add(m.id);
 
-      if (m.id === activeMeshId && textureCanvas && textureCanvas.width > 0 && textureCanvas.height > 0) {
-        const key = `live:${textureRevision}:${textureCanvas.width}x${textureCanvas.height}`;
+      const liveCanvas =
+        m.id === activeMeshId
+          ? (getLiveTextureCanvas() || textureCanvas)
+          : null;
+      if (m.id === activeMeshId && liveCanvas && liveCanvas.width > 0 && liveCanvas.height > 0) {
+        const key = `live:${textureRevision}:${liveCanvas.width}x${liveCanvas.height}`;
         const prev = map.get(m.id);
         if (
           prev &&
           prev.key.startsWith('live:') &&
-          (prev.texture as THREE.CanvasTexture).image === textureCanvas
+          (prev.texture as THREE.CanvasTexture).image === liveCanvas
         ) {
           prev.key = key;
           prev.texture.needsUpdate = true;
           return;
         }
         prev?.texture.dispose();
-        const texture = styleTexture(new THREE.CanvasTexture(textureCanvas));
+        const texture = styleTexture(new THREE.CanvasTexture(liveCanvas));
         map.set(m.id, { key, texture });
         // New texture object — rebuild materials once. Do NOT tie mesh rebuild to
         // every live paint stamp (textureRevision); that caused mid-stroke jitter
@@ -1270,7 +1334,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     };
   }, [meshes, activeMeshId, textureCanvas, textureRevision]);
 
-  // Live paint stamps: needsUpdate only — no App setState / effect re-walk.
+  // Live paint stamps: rebind/upload without App setState / full mesh rebuild.
   useEffect(() => {
     return () => {
       cancelTexturePreviewNotify();
@@ -1278,16 +1342,59 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   }, []);
 
   useEffect(() => {
+    const styleLive = (texture: THREE.Texture) => {
+      texture.magFilter = THREE.NearestFilter;
+      texture.minFilter = THREE.NearestFilter;
+      texture.generateMipmaps = false;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.flipY = false;
+      texture.needsUpdate = true;
+      return texture;
+    };
+
+    const patchActiveMaterialMap = (meshId: string, texture: THREE.Texture) => {
+      const group = meshesGroupRef.current;
+      if (!group) return;
+      for (const child of group.children) {
+        if (!(child instanceof THREE.Mesh) || child.userData?.meshId !== meshId) continue;
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        for (const mat of mats) {
+          if (!mat || !('map' in mat)) continue;
+          const m = mat as THREE.MeshBasicMaterial;
+          if (m.map !== texture) {
+            m.map = texture;
+            m.needsUpdate = true;
+          }
+        }
+      }
+    };
+
     return subscribeTexturePreview(() => {
-      const entry = meshTexturesRef.current.get(activeMeshId);
-      if (!entry) return;
-      const image = entry.texture.image as { width?: number; height?: number } | undefined;
-      if (!image || !image.width || !image.height) return;
-      // Only refresh GPU upload — never reassign image to a stale React prop mid-stroke
-      // (that stole the live composite and made 3D paint look dead).
+      const meshId = activeMeshIdRef.current;
+      if (!meshId) return;
+      const live =
+        getLiveTextureCanvas()
+        || textureCanvasRefLocal.current;
+      if (!live || !live.width || !live.height) return;
+
+      let entry = meshTexturesRef.current.get(meshId);
+      const boundImage = entry?.texture?.image ?? null;
+      // GitHub main: needsUpdate only when CanvasTexture.image already is the live
+      // canvas. Rebind only when identity drifts (layer → composite) — never on
+      // every stamp (dispose/recreate mid-stroke made 3D paint look dead/jittery).
+      if (!entry || boundImage !== live) {
+        entry?.texture.dispose();
+        const texture = styleLive(new THREE.CanvasTexture(live));
+        entry = {
+          key: `live:preview:${live.width}x${live.height}`,
+          texture,
+        };
+        meshTexturesRef.current.set(meshId, entry);
+        patchActiveMaterialMap(meshId, texture);
+      }
       entry.texture.needsUpdate = true;
     });
-  }, [activeMeshId]);
+  }, []);
 
   // Live lighting, fog, and background from render settings / weather
   useEffect(() => {
@@ -1308,7 +1415,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         Math.cos(el) * Math.cos(azr) * 20,
       );
     }
-    scene.background = new THREE.Color(renderSettings.bgColor || '#1b1b1b');
+    scene.background = new THREE.Color(renderSettings.bgColor || '#141518');
     const fogDensity = renderSettings.fogDensity ?? 0;
     if (fogDensity > 0.001) {
       scene.fog = new THREE.FogExp2(renderSettings.fogColor || '#a8b4c4', fogDensity);
@@ -2356,14 +2463,12 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       const raycaster = new THREE.Raycaster();
       raycaster.setFromCamera(ndc, cam);
       const intersects = raycaster.intersectObject(meshObj);
-      if (!intersects.length || intersects[0].faceIndex == null) return null;
       const hit = intersects[0];
+      if (!hit || hit.faceIndex == null) return null;
+      const triIndex = hit.faceIndex;
       const geo = meshObj.geometry as THREE.BufferGeometry;
       const triToFaceMap = geo.userData.triangleToFaceId as string[] | undefined;
-      let faceId =
-        triToFaceMap && triToFaceMap[hit.faceIndex]
-          ? triToFaceMap[hit.faceIndex]
-          : mesh.faces[Math.floor(hit.faceIndex / 2)]?.id;
+      let faceId = triToFaceMap?.[triIndex] ?? mesh.faces[Math.floor(triIndex / 2)]?.id;
       if (!faceId) return null;
       const face = mesh.faces.find((f) => f.id === faceId);
       if (!face) return null;
@@ -2866,7 +2971,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           const isVertSelected = selectedVertexIds.includes(v.id);
           const isVertHovered = hoveredVertexId === v.id;
 
-          let vertColor = isVertHovered ? VIEWPORT_THEME.hover : isVertSelected ? VIEWPORT_THEME.selection : VIEWPORT_THEME.idleHandle;
+          let vertColor: number = isVertHovered
+            ? VIEWPORT_THEME.hover
+            : isVertSelected
+              ? VIEWPORT_THEME.selection
+              : VIEWPORT_THEME.idleHandle;
 
           if (toolState.rigMode === 'skin' && selectedBoneId) {
             const weights = activeMesh.skinWeights?.[v.id] || [];
@@ -3182,7 +3291,13 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         }
         // Modal G/R/S: hide gizmo entirely for free mouse grab.
         // Blockout is silhouette-driven — hide transform gizmo clutter.
-        if (modalActiveRef.current || activeWorkspaceMode === 'blockout') {
+        // 3D paint: gizmo must stay disabled or it steals LMB drag from strokes.
+        if (
+          modalActiveRef.current
+          || activeWorkspaceMode === 'blockout'
+          || toolState.isPainting3D
+          || isPainting3DActiveRef.current
+        ) {
           transformControlsRef.current.enabled = false;
           transformControlsRef.current.getHelper().visible = false;
         } else {
@@ -3233,7 +3348,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         Boolean(cur.placeOnClick) ||
         Boolean(cur.modalTransform) ||
         Boolean(cur.modalMeshOp) ||
-        modalActiveRef.current;
+        modalActiveRef.current ||
+        cur.isPainting3D ||
+        isPainting3DActiveRef.current;
       controlsRef.current.enabled = !blocked;
 
       if (event.value) {
@@ -3315,7 +3432,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           let verts = pendingComponentVertsRef.current;
           const step = toolState.gridSnap || 0;
           // Snap only on commit so live drag doesn't fight the gizmo (jitter).
-          if (step > 0 && toolState.transformMode === 'translate') {
+          if (step > 0 && toolState.transformMode === 'move') {
             const editIds = new Set(collectEditVertIds(activeMesh));
             verts = verts.map((v) => {
               if (!editIds.has(v.id)) return v;
@@ -3469,7 +3586,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
       if (toolState.editMode === 'object') {
         // Live mesh only — CAD commits on pointer-up (stops React rebuild fight).
-        if (step > 0 && toolState.transformMode === 'translate') {
+        if (step > 0 && toolState.transformMode === 'move') {
           dummy.position.set(snapPos.x, snapPos.y, snapPos.z);
         }
         applyLiveObjectFromDummy();
@@ -3662,45 +3779,435 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     return snapToGrid(fallbackY, step);
   };
 
-  const handlePointerUp = (e?: React.PointerEvent<HTMLDivElement>) => {
+  const resolvePaintMesh = (): THREE.Mesh | null => {
+    const active = activeMeshObjectRef.current;
+    if (active) return active;
+    const id = activeMeshIdRef.current;
+    const group = meshesGroupRef.current;
+    if (!id || !group) return null;
+    for (const child of group.children) {
+      if (child instanceof THREE.Mesh && child.userData?.meshId === id) {
+        activeMeshObjectRef.current = child;
+        return child;
+      }
+    }
+    return null;
+  };
+
+  /** Sample + stamp one drag segment along the mesh UVs. */
+  const paintStrokeSegment = (fromClient: { x: number; y: number } | null, toClient: { x: number; y: number }) => {
+    // Prefer a live scene mesh — a stale disposed ref after texture rebuild
+    // raycasts against nothing and collapses hold-drag to the begin stamp.
+    const id = activeMeshIdRef.current;
+    const group = meshesGroupRef.current;
+    let paintMesh: THREE.Mesh | null = null;
+    if (id && group) {
+      for (const child of group.children) {
+        if (child instanceof THREE.Mesh && child.userData?.meshId === id) {
+          paintMesh = child;
+          activeMeshObjectRef.current = child;
+          break;
+        }
+      }
+    }
+    if (!paintMesh) paintMesh = resolvePaintMesh();
+    const stamp = onDirect3DPaintPixelRef.current;
+    const camera = cameraRef.current;
+    const canvasEl = rendererRef.current?.domElement ?? containerRef.current;
+    if (!paintMesh || !stamp || !camera || !canvasEl) return false;
+
+    const rect = canvasEl.getBoundingClientRect();
+    const raycaster = new THREE.Raycaster();
+    const bridging = !!fromClient;
+    const sampleFrom = fromClient ?? toClient;
+    const texImage = meshTexturesRef.current.get(activeMeshIdRef.current)?.texture?.image as
+      | { width?: number }
+      | undefined;
+    const texSize =
+      textureCanvasRefLocal.current?.width
+      || texImage?.width
+      || 64;
+
+    // Match GitHub main: screen-space densify only; no facing filter / UV jump
+    // reject (those dropped valid DoubleSide hits and killed hold-drag).
+    const strokeHits = samplePaintStrokeUvs(
+      raycaster,
+      camera,
+      paintMesh,
+      rect,
+      sampleFrom,
+      toClient,
+      {
+        maxSteps: 64,
+        textureSize: texSize,
+        skipStart: bridging,
+        // Samples are screen-space ray hits — crossing a model edge is safe.
+        maxUvJump: 0,
+        minFacing: 0,
+      },
+    );
+
+    setRayFromPointer(raycaster, camera, toClient.x, toClient.y, rect);
+    const endHit = pickPaintUv(raycaster, paintMesh);
+    const samples = strokeHits.length > 0 ? strokeHits : endHit ? [endHit] : [];
+
+    if (samples.length === 0) {
+      schedulePaintCursor({
+        x: toClient.x - rect.left,
+        y: toClient.y - rect.top,
+        u: 0,
+        v: 0,
+        hit: false,
+      });
+      return false;
+    }
+
+    const last = samples[samples.length - 1];
+    lastPaintUvRef.current = { u: last.uv.x, v: last.uv.y };
+    schedulePaintCursor({
+      x: toClient.x - rect.left,
+      y: toClient.y - rect.top,
+      u: last.uv.x,
+      v: last.uv.y,
+      hit: true,
+    });
+    for (const sample of samples) {
+      stamp(sample.uv.x, sample.uv.y, false, sample.faceId);
+    }
+    // needsUpdate after stamps — paintUv schedules a coalesced composite+GPU sync.
+    if (meshTexturesRef.current.get(activeMeshIdRef.current)?.texture) {
+      meshTexturesRef.current.get(activeMeshIdRef.current)!.texture.needsUpdate = true;
+    }
+    return true;
+  };
+  const paintStrokeSegmentRef = useRef(paintStrokeSegment);
+  paintStrokeSegmentRef.current = paintStrokeSegment;
+
+  const restorePaintNav = () => {
+    const cur = toolStateRef.current;
+    if (controlsRef.current) {
+      const blocked =
+        cur.isCadDrawing ||
+        Boolean(cur.placeOnClick) ||
+        Boolean(cur.modalTransform) ||
+        Boolean(cur.modalMeshOp) ||
+        modalActiveRef.current ||
+        isPainting3DActiveRef.current;
+      if (activeWorkspaceMode === 'blockout' && useVectorStore.getState().mode === 'pen') {
+        resetOrbitPointerState(controlsRef.current, { enable: !blocked });
+        applyDrawToolOrbitMouseButtons(controlsRef.current, {
+          ortho: cameraType !== 'perspective',
+        });
+      } else if (cur.isPainting3D) {
+        // Always clear stuck ROTATE/DOLLY + restore paint LMB=-1, zoom/pan on.
+        restorePaintOrbitControls(controlsRef.current, {
+          enable: !blocked,
+          allowRotate: cameraType === 'perspective',
+        });
+      } else {
+        resetOrbitPointerState(controlsRef.current, { enable: !blocked });
+        applyStandardOrbitMouseButtons(controlsRef.current);
+      }
+    }
+    if (transformControlsRef.current && cur.isPainting3D) {
+      transformControlsRef.current.enabled = false;
+      transformControlsRef.current.getHelper().visible = false;
+    }
+  };
+
+  const finishPaintStrokeNav = () => {
+    isPainting3DActiveRef.current = false;
+    lastPaintUvRef.current = null;
+    setIsPainting3DActive(false);
+    onDirect3DPaintPixelRef.current?.(0, 0, true);
+    // Restore AFTER clearing the active ref so enable comes back for RMB/wheel.
+    restorePaintNav();
+  };
+
+  /**
+   * Start a hold-drag stroke. Capture + move/up listeners live on the controller
+   * (not React), so re-renders cannot drop the gesture.
+   */
+  const startPaintStrokeFromHit = (
+    pointerId: number,
+    client: { x: number; y: number },
+    uv: { x: number; y: number },
+    faceId: string | null,
+    captureEl: Element,
+  ) => {
+    if (controlsRef.current) {
+      // Must stay disabled for the whole stroke — never re-enable via resetOrbitPointerState.
+      controlsRef.current.enabled = false;
+      resetOrbitPointerState(controlsRef.current, { enable: false });
+      applyPaintOrbitMouseButtons(controlsRef.current);
+      controlsRef.current.enableZoom = true; // wheel still works when enabled later; keep flag healthy
+    }
+    if (transformControlsRef.current) {
+      transformControlsRef.current.enabled = false;
+    }
+
+    isPainting3DActiveRef.current = true;
+    lastPaintUvRef.current = { u: uv.x, v: uv.y };
+
+    if (meshTexturesRef.current.get(activeMeshIdRef.current)?.texture) {
+      meshTexturesRef.current.get(activeMeshIdRef.current)!.texture.needsUpdate = true;
+    }
+
+    // Attach window/document move/up listeners BEFORE any React setState.
+    // captureEl is unused by the controller (no setPointerCapture) — kept for API.
+    paintStrokeCtlRef.current.begin(pointerId, client, captureEl, {
+      onBegin: () => {
+        onDirect3DPaintPixelRef.current?.(uv.x, uv.y, false, faceId);
+      },
+      onSegment: (from, to) => {
+        // Always try the densified segment; if raycast misses filters, force a
+        // single end-point stamp so hold-drag never collapses to the first click.
+        const painted = paintStrokeSegmentRef.current(from, to);
+        if (!painted) {
+          paintStrokeSegmentRef.current(null, to);
+        }
+      },
+      onCancelNoise: () => {
+        // pointercancel must NOT end paint — only clear stuck Orbit gesture state.
+        if (controlsRef.current) {
+          controlsRef.current.enabled = false;
+          resetOrbitPointerState(controlsRef.current, { enable: false });
+          applyPaintOrbitMouseButtons(controlsRef.current);
+        }
+      },
+      onEnd: () => {
+        finishPaintStrokeNav();
+      },
+    });
+
+    // UI ring only — stroke truth is the ref + controller.
+    setIsPainting3DActive(true);
+  };
+
+  // Always-current paint begin — window/canvas listeners must not close over stale renders.
+  const tryBeginPaintAtClientRef = useRef<(ev: PointerEvent, captureEl: Element) => boolean>(() => false);
+  tryBeginPaintAtClientRef.current = (ev: PointerEvent, captureEl: Element): boolean => {
+    if (!toolStateRef.current.isPainting3D) return false;
+    if (!onDirect3DPaintPixelRef.current) return false;
+    if (ev.button !== 0 || ev.ctrlKey) return false;
+    if (paintStrokeCtlRef.current.active) return true;
+    if (ev.altKey) {
+      applyPaintAltOrbitMouseButtons(controlsRef.current);
+      return false;
+    }
+    if (modalActiveRef.current || toolStateRef.current.modalTransform || toolStateRef.current.modalMeshOp) {
+      return false;
+    }
+
+    const camera = cameraRef.current;
+    if (!camera) return false;
+    const rect = captureEl.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) return false;
+    // Ignore downs that miss this viewport (window-level listener).
+    if (
+      ev.clientX < rect.left ||
+      ev.clientX > rect.right ||
+      ev.clientY < rect.top ||
+      ev.clientY > rect.bottom
+    ) {
+      return false;
+    }
+
+    const mouseX = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+    const mouseY = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(mouseX, mouseY), camera);
+
+    const paintTargets: THREE.Object3D[] = [];
+    const seen = new Set<string>();
+    const addTarget = (obj: THREE.Object3D) => {
+      const id = obj.userData?.meshId as string | undefined;
+      if (!id || !(obj instanceof THREE.Mesh) || seen.has(id)) return;
+      seen.add(id);
+      paintTargets.push(obj);
+    };
+    const resolved = resolvePaintMesh();
+    if (resolved) addTarget(resolved);
+    if (meshesGroupRef.current) {
+      meshesGroupRef.current.children.forEach((child) => addTarget(child));
+    }
+    if (!paintTargets.length) return false;
+
+    const prevFirst = raycaster.firstHitOnly;
+    raycaster.firstHitOnly = true;
+    const hits = raycaster.intersectObjects(paintTargets, false);
+    raycaster.firstHitOnly = prevFirst;
+
+    const activeId = activeMeshIdRef.current;
+    const selected = selectedMeshIdsRef.current || [];
+    const preferred =
+      hits.find((h) => {
+        let cur: THREE.Object3D | null = h.object;
+        while (cur) {
+          const id = cur.userData?.meshId as string | undefined;
+          if (id && (id === activeId || selected.includes(id))) return true;
+          cur = cur.parent;
+        }
+        return false;
+      }) || hits[0];
+
+    if (!preferred?.uv) return false;
+
+    let hitMeshId = activeId;
+    let cur: THREE.Object3D | null = preferred.object;
+    while (cur) {
+      if (cur.userData?.meshId) {
+        hitMeshId = cur.userData.meshId;
+        break;
+      }
+      cur = cur.parent;
+    }
+
+    if (hitMeshId && hitMeshId !== activeId) {
+      // Retarget — do not start a stroke until PixelPaint remounts.
+      paintStrokeCtlRef.current.end();
+      setActiveMeshId(hitMeshId);
+      setSelectedMeshIds?.([hitMeshId]);
+      return true; // consume event
+    }
+
+    if (preferred.object instanceof THREE.Mesh) {
+      activeMeshObjectRef.current = preferred.object;
+    }
+
+    const faceMap = (preferred.object as THREE.Mesh).geometry?.userData?.triangleToFaceId as string[] | undefined;
+    const faceId = preferred.faceIndex != null ? faceMap?.[preferred.faceIndex] ?? null : null;
+    startPaintStrokeFromHit(
+      ev.pointerId,
+      { x: ev.clientX, y: ev.clientY },
+      { x: preferred.uv.x, y: preferred.uv.y },
+      faceId,
+      captureEl,
+    );
+    return true;
+  };
+
+  // Window + canvas capture: OrbitControls never sees LMB; React re-renders cannot drop the drag.
+  useEffect(() => {
+    if (!toolState.isPainting3D) {
+      paintStrokeCtlRef.current.end();
+      restorePaintOrbitControls(controlsRef.current, {
+        enable: true,
+        allowRotate: cameraType === 'perspective',
+      });
+      // Leaving paint → restore standard LMB orbit.
+      if (controlsRef.current && activeWorkspaceMode !== 'blockout') {
+        applyStandardOrbitMouseButtons(controlsRef.current);
+      }
+      return;
+    }
+
+    restorePaintOrbitControls(controlsRef.current, {
+      enable: !isPainting3DActiveRef.current,
+      allowRotate: cameraType === 'perspective',
+    });
+    if (transformControlsRef.current) {
+      transformControlsRef.current.enabled = false;
+      transformControlsRef.current.getHelper().visible = false;
+    }
+
+    let canvasEl: HTMLCanvasElement | null = null;
+
+    const consumeIfPaint = (ev: PointerEvent) => {
+      const canvas = rendererRef.current?.domElement;
+      if (!canvas) return;
+      if (tryBeginPaintAtClientRef.current(ev, canvas)) {
+        // Do NOT preventDefault — that suppresses compatibility mousemove/mouseup
+        // for the whole gesture. After a WebGL pointercancel those mouse events
+        // are the only way hold-drag continues (dots-only without them).
+        // stopImmediatePropagation is enough to keep OrbitControls off LMB.
+        ev.stopImmediatePropagation();
+      }
+    };
+
+    const onWindowDown = (ev: PointerEvent) => {
+      // Only claim LMB paint; let Alt orbit / other buttons through.
+      if (ev.button !== 0 || ev.ctrlKey) return;
+      if (ev.altKey) {
+        applyPaintAltOrbitMouseButtons(controlsRef.current);
+        return;
+      }
+      consumeIfPaint(ev);
+    };
+
+    const onCanvasDown = (ev: PointerEvent) => {
+      consumeIfPaint(ev);
+    };
+
+    const onKeyUp = (ev: KeyboardEvent) => {
+      // Alt release must restore paint LMB binding or orbit stays armed.
+      if (ev.key === 'Alt' && !isPainting3DActiveRef.current) {
+        restorePaintOrbitControls(controlsRef.current, {
+          enable: true,
+          allowRotate: cameraType === 'perspective',
+        });
+      }
+    };
+
+    const bindCanvas = () => {
+      const canvas = rendererRef.current?.domElement ?? null;
+      if (!canvas || canvas === canvasEl) return;
+      if (canvasEl) canvasEl.removeEventListener('pointerdown', onCanvasDown, true);
+      canvasEl = canvas;
+      canvas.addEventListener('pointerdown', onCanvasDown, { capture: true });
+    };
+
+    bindCanvas();
+    // Renderer may mount after paint mode turns on — retry a few frames.
+    let frames = 0;
+    let raf = 0;
+    const retry = () => {
+      bindCanvas();
+      frames += 1;
+      if (!canvasEl && frames < 120) raf = requestAnimationFrame(retry);
+    };
+    if (!canvasEl) raf = requestAnimationFrame(retry);
+
+    window.addEventListener('pointerdown', onWindowDown, { capture: true });
+    window.addEventListener('keyup', onKeyUp);
+
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      window.removeEventListener('pointerdown', onWindowDown, true);
+      window.removeEventListener('keyup', onKeyUp);
+      if (canvasEl) canvasEl.removeEventListener('pointerdown', onCanvasDown, true);
+      // Only end the stroke when leaving paint mode — not on cameraType remount
+      // mid-drag (that used to cut strokes to a single stamp).
+    };
+  }, [toolState.isPainting3D, cameraType, activeWorkspaceMode]);
+
+  useEffect(() => {
+    if (!toolState.isPainting3D) {
+      paintStrokeCtlRef.current.end();
+    }
+  }, [toolState.isPainting3D]);
+
+  useEffect(() => () => {
+    paintStrokeCtlRef.current.dispose();
+  }, []);
+
+  const handlePointerUp = (_e?: React.PointerEvent<HTMLDivElement>) => {
     if (modalActiveRef.current || toolStateRef.current.modalTransform) return;
 
-    const activePaintPointer = paintPointerIdRef.current;
-    if (e && activePaintPointer != null && e.pointerId !== activePaintPointer) return;
+    // Paint strokes are owned by paintStrokeCtlRef (window pointerup).
+    // Do NOT end them here — React pointerup/cancel after begin-time setState
+    // was killing hold-drag and leaving only click dots.
 
-    if (isPainting3DActiveRef.current && onDirect3DPaintPixel) {
-      onDirect3DPaintPixel(0, 0, true);
-    }
-    isPainting3DActiveRef.current = false;
-    paintPointerIdRef.current = null;
-    setIsPainting3DActive(false);
-    lastPaintClientRef.current = null;
     isWeightPaintingRef.current = false;
     if (paintCursorRafRef.current) {
       cancelAnimationFrame(paintCursorRafRef.current);
       paintCursorRafRef.current = 0;
     }
     pendingPaintCursorRef.current = null;
-    if (controlsRef.current) {
-      const cur = toolStateRef.current;
-      const blocked =
-        cur.isCadDrawing ||
-        Boolean(cur.placeOnClick) ||
-        Boolean(cur.modalTransform) ||
-        Boolean(cur.modalMeshOp) ||
-        modalActiveRef.current;
-      controlsRef.current.enabled = !blocked;
-      applyStandardOrbitMouseButtons(controlsRef.current);
-      // Stay in paint / blockout-pen button map so the next LMB stroke isn't stolen incorrectly.
-      if (activeWorkspaceMode === 'blockout' && useVectorStore.getState().mode === 'pen') {
-        applyDrawToolOrbitMouseButtons(controlsRef.current, {
-          ortho: cameraType !== 'perspective',
-        });
-      } else if (cur.isPainting3D) {
-        applyPaintOrbitMouseButtons(controlsRef.current);
-      }
+    // Restore paint LMB binding after Alt+orbit (or any non-stroke gesture).
+    if (toolStateRef.current.isPainting3D && !isPainting3DActiveRef.current && !paintStrokeCtlRef.current.active) {
+      restorePaintNav();
     }
-
     // Marquee Selection Box Completion Handler
     if (isMarqueeDraggingRef.current && marqueeStartRef.current && containerRef.current && cameraRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
@@ -3804,21 +4311,13 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       !cur.modalMeshOp &&
       !isPainting3DActiveRef.current
     ) {
-      controlsRef.current.enabled = true;
-      applyStandardOrbitMouseButtons(controlsRef.current);
-      if (activeWorkspaceMode === 'blockout' && useVectorStore.getState().mode === 'pen') {
-        applyDrawToolOrbitMouseButtons(controlsRef.current, {
-          ortho: cameraType !== 'perspective',
-        });
-      } else if (cur.isPainting3D) {
-        applyPaintOrbitMouseButtons(controlsRef.current);
-      }
+      restorePaintNav();
     }
   };
 
   const handlePointerLeave = () => {
-    // Keep an active paint stroke alive — pointer capture continues delivering moves.
-    if (isPainting3DActiveRef.current || isWeightPaintingRef.current) {
+    // Keep an active paint stroke alive — controller owns window capture moves.
+    if (isPainting3DActiveRef.current || paintStrokeCtlRef.current.active || isWeightPaintingRef.current) {
       if (paintCursorRafRef.current) {
         cancelAnimationFrame(paintCursorRafRef.current);
         paintCursorRafRef.current = 0;
@@ -3926,94 +4425,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       return;
     }
 
-    // Direct 3D paint: LMB on the model paints; empty LMB orbits (default mouse map).
-    if (toolState.isPainting3D && onDirect3DPaintPixel && e.button === 0 && !e.ctrlKey && !e.altKey) {
-      const rect = containerRef.current.getBoundingClientRect();
-      const mouseX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      const mouseY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-      const raycaster = new THREE.Raycaster();
-      raycaster.setFromCamera(new THREE.Vector2(mouseX, mouseY), cameraRef.current);
-
-      // Prefer the active mesh; also accept any selected mesh so paint targets the selection.
-      // Raycast all scene meshes so a click can retarget the active object.
-      const paintTargets: THREE.Object3D[] = [];
-      const seen = new Set<string>();
-      const addTarget = (obj: THREE.Object3D) => {
-        const id = obj.userData?.meshId as string | undefined;
-        if (!id || !(obj instanceof THREE.Mesh) || seen.has(id)) return;
-        seen.add(id);
-        paintTargets.push(obj);
-      };
-      if (activeMeshObjectRef.current) addTarget(activeMeshObjectRef.current);
-      if (meshesGroupRef.current) {
-        meshesGroupRef.current.children.forEach((child) => addTarget(child));
-      }
-
-      let hit: THREE.Intersection | null = null;
-      let hitMeshId = activeMeshId;
-      if (paintTargets.length) {
-        const prevFirst = raycaster.firstHitOnly;
-        raycaster.firstHitOnly = true;
-        const hits = raycaster.intersectObjects(paintTargets, false);
-        raycaster.firstHitOnly = prevFirst;
-        // Prefer a hit on the active / selected mesh when several overlap.
-        const preferred =
-          hits.find((h) => {
-            let cur: THREE.Object3D | null = h.object;
-            while (cur) {
-              const id = cur.userData?.meshId as string | undefined;
-              if (id && (id === activeMeshId || selectedMeshIds.includes(id))) return true;
-              cur = cur.parent;
-            }
-            return false;
-          }) || hits[0];
-        if (preferred) {
-          hit = preferred;
-          let cur: THREE.Object3D | null = preferred.object;
-          while (cur) {
-            if (cur.userData?.meshId) {
-              hitMeshId = cur.userData.meshId;
-              break;
-            }
-            cur = cur.parent;
-          }
-        }
-      }
-
-      // Clicking a different mesh selects it for painting (Pixel Paint follows activeMesh).
-      if (hit && hitMeshId && hitMeshId !== activeMeshId) {
-        setActiveMeshId(hitMeshId);
-        setSelectedMeshIds([hitMeshId]);
-        // Wait for texture studio remount before starting a stroke.
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-      }
-
-      const uv = hit?.uv;
-      if (hit && uv) {
-        isPainting3DActiveRef.current = true;
-        paintPointerIdRef.current = e.pointerId;
-        setIsPainting3DActive(true);
-        lastPaintClientRef.current = { x: e.clientX, y: e.clientY };
-        if (controlsRef.current) controlsRef.current.enabled = false;
-        try {
-          e.currentTarget.setPointerCapture(e.pointerId);
-        } catch {
-          /* ignore */
-        }
-        if (meshTexturesRef.current.get(activeMeshId)?.texture) {
-          meshTexturesRef.current.get(activeMeshId)!.texture.needsUpdate = true;
-        }
-        const faceMap = (hit.object as THREE.Mesh).geometry?.userData?.triangleToFaceId as string[] | undefined;
-        const faceId = hit.faceIndex != null ? faceMap?.[hit.faceIndex] ?? null : null;
-        onDirect3DPaintPixel(uv.x, uv.y, false, faceId);
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-      }
-
-      // Missed the model — leave OrbitControls free for camera orbit
+    // 3D paint LMB is owned exclusively by the canvas-native capture listener.
+    // Do NOT stopPropagation here — that prevented the canvas handler from ever firing.
+    if (toolState.isPainting3D && e.button === 0 && !e.ctrlKey && !e.altKey) {
       return;
     }
 
@@ -4303,93 +4717,28 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(new THREE.Vector2(mouseX, mouseY), cameraRef.current);
 
+    // Active stroke moves are owned by paintStrokeCtlRef (canvas/window capture).
+    // Here we only update the hover brush cursor when idle.
     if (toolState.isPainting3D && activeMeshObjectRef.current) {
+      if (isPainting3DActiveRef.current || paintStrokeCtlRef.current.active) return;
       const paintMesh = activeMeshObjectRef.current;
-      if (
-        isPainting3DActiveRef.current &&
-        paintPointerIdRef.current === e.pointerId &&
-        (e.buttons & 1) !== 0 &&
-        onDirect3DPaintPixel &&
-        cameraRef.current
-      ) {
-        const from = lastPaintClientRef.current;
-        const to = { x: e.clientX, y: e.clientY };
-        // After a miss, don't bridge from off-mesh screen positions — that sweeps
-        // rays across the silhouette and stamps stray dots near face tops/edges.
-        const bridging = !!from;
-        const sampleFrom = from ?? to;
-        const skipStart = bridging;
-        const texImage = meshTexturesRef.current.get(activeMeshId)?.texture?.image as
-          | { width?: number }
-          | undefined;
-        const texSize =
-          textureCanvas?.width
-          || texImage?.width
-          || 64;
-        const strokeHits = samplePaintStrokeUvs(
-          raycaster,
-          cameraRef.current,
-          paintMesh,
-          rect,
-          sampleFrom,
-          to,
-          {
-            maxSteps: 64,
-            textureSize: texSize,
-            skipStart,
-            // Samples are screen-space ray hits, so crossing a real model edge is safe.
-            // Do not lock to the starting polygon or the stroke stops at face boundaries.
-            maxUvJump: 0,
-            // Imported and double-sided meshes can have reversed triangle winding.
-            // A facing filter rejects valid visible hits on those surfaces.
-            minFacing: 0,
-          },
-        );
-
-        // Empty strokeHits can simply mean the pointer stayed in the same texel.
-        setRayFromPointer(raycaster, cameraRef.current, to.x, to.y, rect);
-        const endHit = pickPaintUv(raycaster, paintMesh);
-
-        if (strokeHits.length > 0) {
-          lastPaintClientRef.current = to;
-          const last = strokeHits[strokeHits.length - 1];
-          schedulePaintCursor({
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top,
-            u: last.uv.x,
-            v: last.uv.y,
-          });
-          if (meshTexturesRef.current.get(activeMeshId)?.texture) {
-            meshTexturesRef.current.get(activeMeshId)!.texture.needsUpdate = true;
-          }
-          for (const sample of strokeHits) {
-            onDirect3DPaintPixel(sample.uv.x, sample.uv.y, false, sample.faceId);
-          }
-        } else if (endHit) {
-          lastPaintClientRef.current = to;
-          schedulePaintCursor({
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top,
-            u: endHit.uv.x,
-            v: endHit.uv.y,
-          });
-        } else {
-          // Left the mesh / locked face — don't gap-fill across the silhouette.
-          lastPaintClientRef.current = null;
-          schedulePaintCursor(null);
-        }
+      const paintHits = raycaster.intersectObject(paintMesh);
+      if (paintHits.length > 0 && paintHits[0].uv) {
+        schedulePaintCursor({
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top,
+          u: paintHits[0].uv.x,
+          v: paintHits[0].uv.y,
+          hit: true,
+        });
       } else {
-        const paintHits = raycaster.intersectObject(paintMesh);
-        if (paintHits.length > 0 && paintHits[0].uv) {
-          schedulePaintCursor({
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top,
-            u: paintHits[0].uv.x,
-            v: paintHits[0].uv.y,
-          });
-        } else {
-          schedulePaintCursor(null);
-        }
+        schedulePaintCursor({
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top,
+          u: 0,
+          v: 0,
+          hit: false,
+        });
       }
       return;
     }
@@ -4400,6 +4749,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         y: e.clientY - rect.top,
         u: 0,
         v: 0,
+        hit: false,
       });
     }
 
@@ -4474,69 +4824,154 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const totalFaces = meshes.reduce((acc, m) => acc + m.faces.length, 0);
   const isBlockout = activeWorkspaceMode === 'blockout';
 
+  /**
+   * Always-visible answer to "which mode am I in and what is selected?".
+   * Counts come from the shared selection helper so stale IDs are not counted.
+   */
+  const componentReadout = (() => {
+    const mode = toolState.editMode;
+    if (mode !== 'vertex' && mode !== 'edge' && mode !== 'face') return null;
+    const ids =
+      mode === 'vertex' ? selectedVertexIds : mode === 'edge' ? selectedEdgeIds : selectedFaceIds;
+    const hovering =
+      mode === 'vertex' ? Boolean(hoveredVertexId)
+        : mode === 'edge' ? Boolean(hoveredEdgeId)
+          : Boolean(hoveredFaceId);
+    const { selected, total } = selectionCounts(activeMesh, mode, ids);
+    return { label: mode.toUpperCase(), selected, total, hovering };
+  })();
+
   return (
-    <div className="relative w-full h-full overflow-hidden bg-[#1b1b1b] select-none font-sans">
+    <div className="relative w-full h-full overflow-hidden bg-[#141518] select-none font-sans">
       <div
         ref={containerRef}
         onPointerDownCapture={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
         onPointerLeave={handlePointerLeave}
-        className={`w-full h-full ${
+        className={`w-full h-full touch-none ${
           toolState.isCadDrawing
             ? 'cursor-cell'
             : toolState.placeOnClick
             ? 'cursor-crosshair'
+            : toolState.isPainting3D && paintCursor?.hit
+            ? 'cursor-none'
             : toolState.isPainting3D || toolState.rigMode === 'skin'
             ? 'cursor-crosshair'
             : 'cursor-default'
         }`}
+        style={toolState.isPainting3D ? { touchAction: 'none' } : undefined}
       />
 
       <VectorOverlay kind={cameraType as VectorViewportKind} active={isBlockout} />
 
       {(toolState.isPainting3D || toolState.rigMode === 'skin') && paintCursor && (
         <div
-          className={`absolute pointer-events-none z-20 rounded-full border-2 shadow-[0_0_0_1px_#000] ${
-            toolState.rigMode === 'skin' ? 'border-[#ec5b62]' : 'border-white shadow-[0_0_0_1px_#000,0_0_12px_#d946ef]'
+          className={`sp-paint-cursor absolute pointer-events-none z-20 ${
+            toolState.rigMode === 'skin'
+              ? 'sp-paint-cursor--skin'
+              : isPainting3DActive
+                ? 'sp-paint-cursor--active'
+                : paintCursor.hit
+                  ? 'sp-paint-cursor--hit'
+                  : 'sp-paint-cursor--miss'
           }`}
           style={{
             left: paintCursor.x,
             top: paintCursor.y,
-            width: Math.max(12, 10 + (toolState.brushSize || 2) * (toolState.rigMode === 'skin' ? 8 : 3)),
-            height: Math.max(12, 10 + (toolState.brushSize || 2) * (toolState.rigMode === 'skin' ? 8 : 3)),
-            transform: 'translate(-50%, -50%)',
+            width: Math.max(
+              16,
+              (toolState.brushSize || 2) * (toolState.rigMode === 'skin' ? 10 : 7),
+            ),
+            height: Math.max(
+              16,
+              (toolState.brushSize || 2) * (toolState.rigMode === 'skin' ? 10 : 7),
+            ),
             background:
               toolState.rigMode === 'skin'
                 ? 'rgba(236,91,98,.15)'
+                : !paintCursor.hit
+                ? 'transparent'
                 : toolState.drawTool === 'eraser'
-                ? 'rgba(244,63,94,.18)'
-                : `${toolState.activeColor}33`,
+                ? 'rgba(244,63,94,.22)'
+                : `${toolState.activeColor || '#ed7300'}55`,
           }}
-          title={toolState.rigMode === 'skin' ? 'Weight paint brush' : `U ${paintCursor.u.toFixed(3)} V ${paintCursor.v.toFixed(3)}`}
-        />
+          title={
+            toolState.rigMode === 'skin'
+              ? 'Weight paint brush'
+              : paintCursor.hit
+                ? `${toolState.drawTool || 'brush'} · ${toolState.brushSize || 1}px · UV ${paintCursor.u.toFixed(2)},${paintCursor.v.toFixed(2)}`
+                : 'Aim at the mesh to paint'
+          }
+        >
+          {toolState.isPainting3D && paintCursor.hit && (
+            <span className="sp-paint-cursor__label">
+              {(toolState.drawTool || 'pencil').slice(0, 1).toUpperCase()}
+              {toolState.brushSize || 1}
+            </span>
+          )}
+        </div>
+      )}
+
+      {toolState.isPainting3D && !isQuadSubViewport && (
+        <div className="sp-paint-dock" onPointerDown={(e) => e.stopPropagation()}>
+          <label className="sp-paint-dock__prop" title="Brush size ([ / ])">
+            <span>Size</span>
+            <input
+              type="range"
+              min={1}
+              max={16}
+              value={toolState.brushSize || 1}
+              onChange={(e) => setToolState((s) => ({ ...s, brushSize: +e.target.value }))}
+            />
+            <b>{toolState.brushSize || 1}</b>
+          </label>
+          <label className="sp-paint-dock__prop" title="Brush opacity">
+            <span>Op</span>
+            <input
+              type="range"
+              min={0.05}
+              max={1}
+              step={0.05}
+              value={toolState.paintOpacity ?? 1}
+              onChange={(e) => setToolState((s) => ({ ...s, paintOpacity: +e.target.value }))}
+            />
+            <b>{Math.round((toolState.paintOpacity ?? 1) * 100)}</b>
+          </label>
+          <button
+            type="button"
+            className={`sp-paint-dock__mirror ${toolState.paintMirrorU ? 'is-active' : ''}`}
+            title="Mirror U"
+            onClick={() => setToolState((s) => ({ ...s, paintMirrorU: !s.paintMirrorU }))}
+          >
+            M
+          </button>
+        </div>
       )}
 
       <div className="absolute top-2 left-2 flex flex-col items-start gap-1.5 z-10 font-mono text-[10px]">
         <div className="flex items-center gap-1.5 pointer-events-none">
         {isQuadSubViewport ? (
-          <span className="cad-card px-2 py-0.5 text-[#ff9a3c] font-extrabold uppercase border-[#4d4d4d] bg-[#1a1a1a]/90 backdrop-blur tracking-wider">
+          <span className="cad-card px-2 py-0.5 text-[#ff9a3c] font-extrabold uppercase border-[#3b3f46] bg-[#101114]/90 backdrop-blur tracking-wider">
             {cameraType} {cameraType === 'perspective' ? '3D' : 'ORTHO'}
           </span>
+        ) : toolState.isPainting3D ? (
+          <span className="cad-card px-2 py-0.5 text-[#ff9a3c] font-bold uppercase border-[#3b3f46] bg-[#191b1e]/90 tracking-wider">
+            3D Paint
+          </span>
         ) : (
-          <span className="cad-card px-2.5 py-1 text-[#ff9a3c] font-bold uppercase border-[#4d4d4d] bg-[#262626]">
+          <span className="px-2.5 py-1 rounded-lg bg-[#131417]/85 backdrop-blur-md border border-white/[0.08] shadow-lg shadow-black/30 text-[#ff9a3c] font-bold uppercase tracking-wider">
             {cameraType} VIEWPORT ({toolState.editMode.toUpperCase()} MODE)
           </span>
         )}
         {toolState.modalTransform && (
-          <span className="cad-card px-2.5 py-1 text-[#e68619] font-bold border-[#e68619]/50 bg-[#262626] animate-pulse">
+          <span className="cad-card px-2.5 py-1 text-[#e68619] font-bold border-[#e68619]/50 bg-[#191b1e] animate-pulse">
             {toolState.modalTransform === 'translate' ? 'GRAB (G)' : toolState.modalTransform === 'rotate' ? 'ROTATE (R)' : 'SCALE (S)'}
             {' · move mouse · LMB confirm · Esc/RMB cancel · gizmo for fine-tune'}
           </span>
         )}
         {toolState.modalMeshOp && (
-          <span className="cad-card px-2.5 py-1 text-[#e68619] font-bold border-[#e68619]/50 bg-[#262626] animate-pulse">
+          <span className="cad-card px-2.5 py-1 text-[#e68619] font-bold border-[#e68619]/50 bg-[#191b1e] animate-pulse">
             {toolState.modalMeshOp === 'extrude'
               ? 'EXTRUDE (E)'
               : toolState.modalMeshOp === 'inset'
@@ -4558,43 +4993,48 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           </span>
         )}
         {toolState.isPainting3D && (
-          <span className="cad-card px-2.5 py-1 text-[#ffb366] font-bold border-[#ed7300] bg-[#262626]">
-            3D PAINT ({toolState.drawTool?.toUpperCase() || 'PENCIL'}) · {PAINT_NAV_HINT}
+          <span className="sp-paint-hud" title={PAINT_NAV_HINT}>
+            <b>{(toolState.drawTool || 'pencil').toUpperCase()}</b>
+            <span>{toolState.brushSize || 1}px</span>
+            <span>{Math.round((toolState.paintOpacity ?? 1) * 100)}%</span>
+            {paintCursor?.hit ? (
+              <span className="sp-paint-hud__uv is-hot">on mesh</span>
+            ) : (
+              <span className="sp-paint-hud__miss">aim mesh · hold-drag paints</span>
+            )}
           </span>
         )}
         {toolState.placeOnClick && (
-          <span className="cad-card px-2.5 py-1 text-[#00ffcc] font-bold border-cyan-700 bg-[#262626] animate-pulse">
+          <span className="cad-card px-2.5 py-1 text-[#00ffcc] font-bold border-cyan-700 bg-[#191b1e] animate-pulse">
             PLACEMENT MODE: CLICK ANYWHERE TO DROP {toolState.activePrimitive.toUpperCase()} GHOST
           </span>
         )}
         {toolState.isCadDrawing && (
-          <span className="cad-card px-2.5 py-1 text-emerald-400 font-bold border-emerald-900 bg-[#262626] animate-pulse">
+          <span className="cad-card px-2.5 py-1 text-emerald-400 font-bold border-emerald-900 bg-[#191b1e] animate-pulse">
             CAD DRAWING: {cadStep === 1 ? 'PART 1 (FLAT WIDTH & DEPTH)' : cadStep === 2 ? 'PART 2 (3D HEIGHT EXTRUSION)' : 'CLICK GRID TO START'}
           </span>
         )}
-        {hoveredVertexId && (
-          <span className="cad-card px-2.5 py-1 text-rose-400 font-bold border-rose-900 bg-[#262626] animate-pulse">
-            HOVER: VERTEX #{hoveredVertexId}
+        {!toolState.isPainting3D && componentReadout && (
+          <span className="sp-select-readout" title="Active edit mode and selection count">
+            <b className="sp-select-readout__mode">{componentReadout.label}</b>
+            <span className="sp-select-readout__count">
+              {componentReadout.selected} / {componentReadout.total}
+            </span>
+            {componentReadout.hovering && <i className="sp-select-readout__hover">hover</i>}
           </span>
         )}
-        {hoveredEdgeId && (
-          <span className="cad-card px-2.5 py-1 text-[#ff9a3c] font-bold border-cyan-900 bg-[#262626] animate-pulse">
-            HOVER: EDGE #{hoveredEdgeId}
+        {!toolState.isPainting3D && toolState.editMode === 'object' && (
+          <span className="sp-select-readout" title="Objects selected in the scene">
+            <b className="sp-select-readout__mode">OBJECT</b>
+            <span className="sp-select-readout__count">
+              {selectedMeshIds.length} / {meshes.length}
+            </span>
+            {hoveredMeshId && <i className="sp-select-readout__hover">hover</i>}
           </span>
         )}
-        {hoveredFaceId && (
-          <span className="cad-card px-2.5 py-1 text-amber-400 font-bold border-amber-900 bg-[#262626] animate-pulse">
-            HOVER: FACE #{hoveredFaceId}
-          </span>
-        )}
-        {hoveredMeshId && (
-          <span className="cad-card px-2.5 py-1 text-cyan-400 font-bold border-cyan-900 bg-[#262626]">
-            HOVER: MESH #{hoveredMeshId}
-          </span>
-        )}
-        {!isQuadSubViewport && (
-          <span className="cad-card px-2.5 py-1 text-[#cccccc] bg-[#262626] border-[#4d4d4d]">
-            GRID: {toolState.gridSnap === 0 ? 'OFF' : `${toolState.gridSnap}u`}
+        {!toolState.isPainting3D && !isQuadSubViewport && (
+          <span className="px-2.5 py-1 rounded-lg bg-[#131417]/85 backdrop-blur-md border border-white/[0.08] shadow-lg shadow-black/30 text-[#9ba0a8]">
+            GRID: <strong className="text-[#c6cad1]">{toolState.gridSnap === 0 ? 'OFF' : `${toolState.gridSnap}u`}</strong>
           </span>
         )}
         {toolState.rigMode === 'skin' && (
@@ -4623,41 +5063,45 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
       {!isQuadSubViewport && (
         <div className="absolute top-2 right-2 flex flex-col items-end gap-1 z-10 font-mono text-[10px]">
-          <div className="cad-card p-1 flex gap-1 bg-[#262626] border-[#4d4d4d]">
-            <button onClick={() => setViewOrientation('top')} className="px-2 py-0.5 cad-button font-bold">
+          <div className="p-1 flex items-center gap-0.5 rounded-lg bg-[#131417]/85 backdrop-blur-md border border-white/[0.08] shadow-lg shadow-black/30">
+            <button onClick={() => setViewOrientation('top')} className="px-2 py-1 rounded-[5px] font-bold text-[#9ba0a8] hover:text-white hover:bg-[#33363c] transition-colors">
               TOP
             </button>
-            <button onClick={() => setViewOrientation('front')} className="px-2 py-0.5 cad-button font-bold">
+            <button onClick={() => setViewOrientation('front')} className="px-2 py-1 rounded-[5px] font-bold text-[#9ba0a8] hover:text-white hover:bg-[#33363c] transition-colors">
               FRONT
             </button>
-            <button onClick={() => setViewOrientation('side')} className="px-2 py-0.5 cad-button font-bold">
+            <button onClick={() => setViewOrientation('side')} className="px-2 py-1 rounded-[5px] font-bold text-[#9ba0a8] hover:text-white hover:bg-[#33363c] transition-colors">
               SIDE
             </button>
-            <button onClick={() => setViewOrientation('iso')} className="px-2 py-0.5 cad-button font-bold text-[#ff9a3c]">
+            <button onClick={() => setViewOrientation('iso')} className="px-2 py-1 rounded-[5px] font-bold text-[#ff9a3c] hover:text-white hover:bg-[#33363c] transition-colors">
               3D ISO
             </button>
+            <span className="w-px h-3.5 bg-white/10 mx-0.5" />
             <button
               onClick={() => setToolState((s) => ({ ...s, xray: !s.xray }))}
-              className={`px-2 py-0.5 cad-button font-bold transition flex items-center gap-1 ${toolState.xray ? 'text-[#ed7300] border-[#ed7300]/40 bg-[#ed7300]/10' : 'text-[#8c8c8c]'}`}
+              className={`px-2 py-1 rounded-[5px] font-bold transition-colors ${toolState.xray ? 'text-[#ff9a3c] bg-[#ed7300]/15' : 'text-[#858a93] hover:text-white hover:bg-[#33363c]'}`}
               title="Toggle X-Ray (Alt+Z) — see through meshes like Blender"
             >
-              <span>[X-Ray: {toolState.xray ? 'ON' : 'OFF'}]</span>
+              X-Ray{toolState.xray ? ' · ON' : ''}
             </button>
             <button
               onClick={() => setToolState((s) => ({ ...s, showBones: s.showBones !== undefined ? !s.showBones : !shouldShowBones }))}
-              className={`px-2 py-0.5 cad-button font-bold transition flex items-center gap-1 ${shouldShowBones ? 'text-[#00ffff] border-[#00ffff]/40 bg-[#00ffff]/10' : 'text-[#8c8c8c]'}`}
+              className={`px-2 py-1 rounded-[5px] font-bold transition-colors ${shouldShowBones ? 'text-[#5fd0a0] bg-[#2d9d78]/15' : 'text-[#858a93] hover:text-white hover:bg-[#33363c]'}`}
               title="Toggle Skeleton / Bone Visibility in Viewport"
             >
-              <span>[Bones: {shouldShowBones ? 'ON' : 'OFF'}]</span>
+              Bones{shouldShowBones ? ' · ON' : ''}
             </button>
             {onOpenUVModal && (
-              <button
-                onClick={onOpenUVModal}
-                className="px-2.5 py-0.5 bg-[#ed7300] text-white font-bold rounded hover:bg-[#ff9a3c] transition shadow-md shadow-[#ed7300]/30 flex items-center gap-1"
-                title="Open UV Mapping Studio Popup (Hotkey: U)"
-              >
-                <span>[UV Studio]</span>
-              </button>
+              <>
+                <span className="w-px h-3.5 bg-white/10 mx-0.5" />
+                <button
+                  onClick={onOpenUVModal}
+                  className="px-2.5 py-1 rounded-[5px] bg-gradient-to-b from-[#f9821a] to-[#e06d00] text-white font-bold hover:from-[#ff9a3c] hover:to-[#ed7300] transition shadow-sm shadow-[#ed7300]/30"
+                  title="Open UV Mapping Studio Popup (Hotkey: U)"
+                >
+                  UV Studio
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -4679,8 +5123,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         placement={isBlockout ? 'top-right' : 'bottom-right'}
       />
 
-      {!isQuadSubViewport && (
-        <div className="absolute bottom-2 left-2 cad-card px-3 py-1 text-[10px] font-mono flex items-center gap-3 bg-[#262626] border-[#4d4d4d]">
+      {!isQuadSubViewport && !toolState.isPainting3D && (
+        <div className="absolute bottom-2 left-2 px-3 py-1.5 text-[10px] font-mono flex items-center gap-3 rounded-lg bg-[#131417]/85 backdrop-blur-md border border-white/[0.08] shadow-lg shadow-black/30 text-[#9ba0a8]">
           <span>Scene Objects: <strong className="text-amber-400">{meshes.length}</strong></span>
           <span>Rig Bones: <strong className="text-[#ed7300]">{bones.length}</strong></span>
           <span>Total Verts: <strong className="text-[#ff9a3c]">{totalVerts}</strong></span>

@@ -1,11 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  GripHorizontal, X, Search, Box, Sparkles, Layers, User, Dog, Shield,
+  GripHorizontal, X, Search, Box, Sparkles, User, Dog, Shield,
   Trees, Disc, Cylinder, Globe, Pyramid, Grid, Maximize2, Minus, Plus
 } from 'lucide-react';
 import type { PrimitiveType, Vector3D, CADMesh } from '../types/cad';
 import { generatePrimitive } from '../utils/meshUtils';
-import { createHumanoidRig, createQuadrupedRig, createTailChainRig } from '../utils/rigging';
 
 interface AssetBrowserModalProps {
   isOpen: boolean;
@@ -127,7 +126,7 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({
 
   return (
     <div
-      className="fixed z-50 shadow-2xl rounded-xl border border-[#4d4d4d] bg-[#2a2a2a]/95 backdrop-blur-lg font-mono text-[11px] select-none text-[#cccccc] flex flex-col overflow-hidden"
+      className="fixed z-50 shadow-2xl rounded-xl border border-[#3b3f46] bg-[#202226]/95 backdrop-blur-lg font-mono text-[11px] select-none text-[#c6cad1] flex flex-col overflow-hidden"
       style={{
         left: `${position.x}px`,
         top: `${position.y}px`,
@@ -138,24 +137,24 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({
       {/* Movable Window Title Header */}
       <div
         onMouseDown={handleMouseDown}
-        className="h-10 px-3 flex items-center justify-between border-b border-[#1a1a1a] bg-[#222222] cursor-grab active:cursor-grabbing flex-shrink-0"
+        className="h-10 px-3 flex items-center justify-between border-b border-[#101114] bg-[#222222] cursor-grab active:cursor-grabbing flex-shrink-0"
       >
         <div className="flex items-center gap-2 font-bold text-[#ff9a3c]">
-          <GripHorizontal className="w-4 h-4 text-[#666666]" />
+          <GripHorizontal className="w-4 h-4 text-[#51565f]" />
           <Box className="w-4 h-4 text-[#ed7300]" />
           <span>3D ASSET & PRIMITIVE BROWSER</span>
         </div>
         <div className="flex items-center gap-1">
           <button
             onClick={() => setIsMinimized(!isMinimized)}
-            className="p-1 hover:bg-[#333333] rounded text-[#888888] hover:text-white"
+            className="p-1 hover:bg-[#26282d] rounded text-[#7e838c] hover:text-white"
             title={isMinimized ? 'Expand Browser' : 'Minimize Browser'}
           >
             {isMinimized ? <Maximize2 className="w-3.5 h-3.5" /> : <Minus className="w-3.5 h-3.5" />}
           </button>
           <button
             onClick={onClose}
-            className="p-1 hover:bg-rose-900/40 hover:text-rose-400 rounded text-[#888888]"
+            className="p-1 hover:bg-rose-900/40 hover:text-rose-400 rounded text-[#7e838c]"
             title="Close Asset Browser"
           >
             <X className="w-3.5 h-3.5" />
@@ -166,8 +165,8 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({
       {!isMinimized && (
         <div className="flex-1 flex overflow-hidden">
           {/* Left Category Sidebar */}
-          <div className="w-44 border-r border-[#1a1a1a] bg-[#262626] p-2 flex flex-col gap-1 flex-shrink-0">
-            <div className="px-2 py-1 text-[9px] uppercase tracking-wider font-bold text-[#666666]">Categories</div>
+          <div className="w-44 border-r border-[#101114] bg-[#191b1e] p-2 flex flex-col gap-1 flex-shrink-0">
+            <div className="px-2 py-1 text-[9px] uppercase tracking-wider font-bold text-[#51565f]">Categories</div>
             {CATEGORIES.map((cat) => (
               <button
                 key={cat.id}
@@ -175,7 +174,7 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({
                 className={`px-2.5 py-1.5 rounded-lg flex items-center gap-2 font-semibold transition text-[10px] ${
                   selectedCategory === cat.id
                     ? 'bg-[#ed7300] text-white shadow-md shadow-[#ed7300]/20'
-                    : 'text-[#999999] hover:bg-[#222222] hover:text-white'
+                    : 'text-[#8b909a] hover:bg-[#222222] hover:text-white'
                 }`}
               >
                 {cat.icon}
@@ -185,16 +184,16 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({
           </div>
 
           {/* Right Main Asset Grid */}
-          <div className="flex-1 flex flex-col p-3 overflow-hidden bg-[#2a2a2a]">
+          <div className="flex-1 flex flex-col p-3 overflow-hidden bg-[#202226]">
             {/* Search Input Bar */}
             <div className="relative mb-3 flex-shrink-0">
-              <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-[#666666]" />
+              <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-[#51565f]" />
               <input
                 type="text"
                 placeholder="Search primitives, characters, props..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-[#222222] border border-[#333333] text-xs text-white outline-none focus:border-[#ed7300] transition"
+                className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-[#222222] border border-[#26282d] text-xs text-white outline-none focus:border-[#ed7300] transition"
               />
             </div>
 
@@ -204,21 +203,21 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({
                 <div
                   key={asset.id}
                   onClick={() => handleSpawn(asset)}
-                  className="group relative border border-[#1a1a1a] hover:border-[#ed7300] bg-[#2e2e2e] hover:bg-[#252525] p-3 rounded-xl cursor-pointer transition flex flex-col justify-between shadow-sm hover:shadow-lg hover:shadow-[#ed7300]/10"
+                  className="group relative border border-[#101114] hover:border-[#ed7300] bg-[#24262b] hover:bg-[#252525] p-3 rounded-xl cursor-pointer transition flex flex-col justify-between shadow-sm hover:shadow-lg hover:shadow-[#ed7300]/10"
                 >
                   <div>
-                    <div className="w-10 h-10 rounded-lg bg-[#2a2a2a] border border-[#1a1a1a] flex items-center justify-center mb-2 group-hover:scale-105 transition">
+                    <div className="w-10 h-10 rounded-lg bg-[#202226] border border-[#101114] flex items-center justify-center mb-2 group-hover:scale-105 transition">
                       {asset.icon}
                     </div>
                     <div className="font-bold text-white text-[11px] mb-0.5 group-hover:text-[#ff9a3c] transition">
                       {asset.name}
                     </div>
-                    <div className="text-[9px] text-[#888888] line-clamp-2 leading-tight">
+                    <div className="text-[9px] text-[#7e838c] line-clamp-2 leading-tight">
                       {asset.description}
                     </div>
                   </div>
 
-                  <button className="mt-2.5 w-full py-1 rounded bg-[#2a2a2a] group-hover:bg-[#ed7300] text-[#aaaaaa] group-hover:text-white font-bold text-[9px] transition flex items-center justify-center gap-1">
+                  <button className="mt-2.5 w-full py-1 rounded bg-[#202226] group-hover:bg-[#ed7300] text-[#aaaaaa] group-hover:text-white font-bold text-[9px] transition flex items-center justify-center gap-1">
                     <Plus className="w-3 h-3" /> Spawn in Scene
                   </button>
                 </div>

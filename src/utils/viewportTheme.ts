@@ -20,10 +20,10 @@ export const VIEWPORT_THEME = {
   /** Hover / active gizmo axis */
   axisActive: 0xed7300,
   /** Perspective floor — charcoal like OutlineForge LIVE 3D (not orange). */
-  gridMajor: 0x565656,
-  gridMinor: 0x303030,
+  gridMajor: 0x43474e,
+  gridMinor: 0x24262b,
   gridOrthoMajor: 0xc96a00,
-  gridOrthoMinor: 0x383838,
+  gridOrthoMinor: 0x2b2e33,
   /** Active mesh/component selection — bright brand amber, distinct from the red X axis. */
   selection: 0xff9a3c,
   hover: 0xec5b62,

@@ -4,19 +4,26 @@ import type { CADMesh, Vertex, Face, Vector3D } from '../types/cad';
 import { generateId, createEdgesFromFaces } from './meshUtils';
 import { finalizeEditableMesh } from './topology/validate';
 
-function emptyMesh(name: string): CADMesh {
+/**
+ * Wraps parsed geometry in an identity-transformed CADMesh and finalizes topology
+ * (derives logical edges, face normals, and UV integrity).
+ */
+function buildImportedMesh(name: string, vertices: Vertex[], faces: Face[]): CADMesh {
   return finalizeEditableMesh({
-    id: generateId(),
+    id: generateId('mesh'),
     name,
-    type: 'custom',
     position: { x: 0, y: 0, z: 0 },
     rotation: { x: 0, y: 0, z: 0 },
     scale: { x: 1, y: 1, z: 1 },
     visible: true,
-    vertices: [],
-    faces: [],
-    edges: [],
+    vertices,
+    faces,
+    edges: faces.length ? createEdgesFromFaces(faces) : [],
   });
+}
+
+function emptyMesh(name: string): CADMesh {
+  return buildImportedMesh(name, [], []);
 }
 
 function weldKey(x: number, y: number, z: number) {
@@ -89,18 +96,7 @@ export function parseOBJ(objContent: string, meshName: string = 'Imported_Mesh')
     }
   }
 
-  return finalizeEditableMesh({
-    id: generateId(),
-    name: meshName,
-    type: 'custom',
-    position: { x: 0, y: 0, z: 0 },
-    rotation: { x: 0, y: 0, z: 0 },
-    scale: { x: 1, y: 1, z: 1 },
-    visible: true,
-    vertices,
-    faces,
-    edges: createEdgesFromFaces(faces),
-  });
+  return buildImportedMesh(meshName, vertices, faces);
 }
 
 /** ASCII STL parser. */
@@ -140,18 +136,7 @@ export function parseSTL(stlContent: string, meshName: string = 'Imported_STL'):
     }
   }
 
-  return finalizeEditableMesh({
-    id: generateId(),
-    name: meshName,
-    type: 'custom',
-    position: { x: 0, y: 0, z: 0 },
-    rotation: { x: 0, y: 0, z: 0 },
-    scale: { x: 1, y: 1, z: 1 },
-    visible: true,
-    vertices,
-    faces,
-    edges: createEdgesFromFaces(faces),
-  });
+  return buildImportedMesh(meshName, vertices, faces);
 }
 
 /** Binary STL parser (ArrayBuffer). */
@@ -208,18 +193,7 @@ export function parseSTLBinary(buffer: ArrayBuffer, meshName: string = 'Imported
     });
   }
 
-  return finalizeEditableMesh({
-    id: generateId(),
-    name: meshName,
-    type: 'custom',
-    position: { x: 0, y: 0, z: 0 },
-    rotation: { x: 0, y: 0, z: 0 },
-    scale: { x: 1, y: 1, z: 1 },
-    visible: true,
-    vertices,
-    faces,
-    edges: createEdgesFromFaces(faces),
-  });
+  return buildImportedMesh(meshName, vertices, faces);
 }
 
 /** ASCII PLY parser. */
@@ -278,18 +252,7 @@ export function parsePLY(plyContent: string, meshName: string = 'Imported_PLY'):
     }
   }
 
-  return finalizeEditableMesh({
-    id: generateId(),
-    name: meshName,
-    type: 'custom',
-    position: { x: 0, y: 0, z: 0 },
-    rotation: { x: 0, y: 0, z: 0 },
-    scale: { x: 1, y: 1, z: 1 },
-    visible: true,
-    vertices,
-    faces,
-    edges: createEdgesFromFaces(faces),
-  });
+  return buildImportedMesh(meshName, vertices, faces);
 }
 
 function threeGeometryToCADMesh(geometry: THREE.BufferGeometry, name: string, transform?: THREE.Matrix4): CADMesh {
@@ -328,18 +291,7 @@ function threeGeometryToCADMesh(geometry: THREE.BufferGeometry, name: string, tr
     faces.push({ id: generateId(), vertexIds: ids, uvs });
   }
 
-  return finalizeEditableMesh({
-    id: generateId(),
-    name,
-    type: 'custom',
-    position: { x: 0, y: 0, z: 0 },
-    rotation: { x: 0, y: 0, z: 0 },
-    scale: { x: 1, y: 1, z: 1 },
-    visible: true,
-    vertices,
-    faces,
-    edges: createEdgesFromFaces(faces),
-  });
+  return buildImportedMesh(name, vertices, faces);
 }
 
 /** Import glTF / GLB via Three.js GLTFLoader → editable CADMesh list. */

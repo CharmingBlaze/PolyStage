@@ -81,7 +81,7 @@ export const SmoothSlider: React.FC<SmoothSliderProps> = ({
         title={title}
         className="anim-smooth-slider"
         style={{
-          background: `linear-gradient(to right, ${accent} 0%, ${accent} ${pct}%, #2a2a2a ${pct}%, #2a2a2a 100%)`,
+          background: `linear-gradient(to right, ${accent} 0%, ${accent} ${pct}%, #202226 ${pct}%, #202226 100%)`,
           ['--anim-slider-accent' as string]: accent,
         }}
         onPointerDown={(e) => {

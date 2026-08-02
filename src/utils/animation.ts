@@ -115,6 +115,92 @@ export function createDefaultClip(
   };
 }
 
+export type GameClipKind = 'idle' | 'walk' | 'run' | 'attack' | 'emote' | 'death';
+
+export const GAME_CLIP_PRESETS: Array<{
+  id: GameClipKind;
+  label: string;
+  hint: string;
+  duration: number;
+  loopMode: AnimationClip['loopMode'];
+  fps: number;
+}> = [
+  { id: 'idle', label: 'Idle', hint: 'Looping stand / breathe', duration: 2, loopMode: 'loop', fps: 24 },
+  { id: 'walk', label: 'Walk', hint: 'Looping walk cycle', duration: 1, loopMode: 'loop', fps: 30 },
+  { id: 'run', label: 'Run', hint: 'Looping run cycle', duration: 0.7, loopMode: 'loop', fps: 30 },
+  { id: 'attack', label: 'Attack', hint: 'One-shot action', duration: 0.85, loopMode: 'once', fps: 30 },
+  { id: 'emote', label: 'Emote', hint: 'Gesture / reaction', duration: 2.5, loopMode: 'once', fps: 24 },
+  { id: 'death', label: 'Death', hint: 'Hold final pose', duration: 1.5, loopMode: 'hold', fps: 24 },
+];
+
+/** Create a game-ready empty clip sized for the action type (keys at rest pose t=0). */
+export function createGameClip(
+  meshes: CADMesh[],
+  bones: CADBone[],
+  kind: GameClipKind = 'idle',
+  name?: string,
+): AnimationClip {
+  const preset = GAME_CLIP_PRESETS.find((p) => p.id === kind) || GAME_CLIP_PRESETS[0];
+  const clip = createDefaultClip(meshes, bones, name || preset.label);
+  return {
+    ...clip,
+    duration: preset.duration,
+    fps: preset.fps,
+    loopMode: preset.loopMode,
+    tracks: clip.tracks.map((track) => ({
+      ...track,
+      // Game clips start with a single rest key — animate forward from here.
+      posKeyframes: track.posKeyframes.slice(0, 1),
+      rotKeyframes: track.rotKeyframes.slice(0, 1),
+      sclKeyframes: track.sclKeyframes.slice(0, 1),
+    })),
+  };
+}
+
+/** Duplicate a clip with fresh ids (for variants / takes). */
+export function duplicateClip(clip: AnimationClip, name?: string): AnimationClip {
+  const remapKf = (frames: typeof clip.tracks[0]['posKeyframes']) =>
+    frames.map((kf) => ({ ...kf, id: id('kf'), value: { ...kf.value } }));
+  return {
+    ...clip,
+    id: id('clip'),
+    name: name || `${clip.name} Copy`,
+    tracks: clip.tracks.map((track) => ({
+      ...track,
+      posKeyframes: remapKf(track.posKeyframes),
+      rotKeyframes: remapKf(track.rotKeyframes),
+      sclKeyframes: remapKf(track.sclKeyframes),
+      texFrameKeyframes: track.texFrameKeyframes
+        ? remapKf(track.texFrameKeyframes)
+        : undefined,
+      textureClipKeys: track.textureClipKeys?.map((kf) => ({
+        ...kf,
+        id: id('kf'),
+      })),
+    })),
+  };
+}
+
+/** Insert rest-pose keys for every bone at time (quick “pose zero” for game anim). */
+export function keyBonesAtRest(
+  clip: AnimationClip,
+  bones: CADBone[],
+  time = 0,
+): AnimationClip {
+  let next = clip;
+  bones.forEach((bone) => {
+    const pos = bone.restPosition || bone.position;
+    const rot = bone.restRotation || bone.rotation;
+    const scl = bone.restScale || bone.scale;
+    next = autoKeyTarget(next, bone.id, 'bone', bone.name, {
+      position: pos,
+      rotation: rot,
+      scale: scl,
+    }, time);
+  });
+  return next;
+}
+
 export function wrapTime(time: number, duration: number, loopMode: AnimationClip['loopMode']): number {
   if (duration <= 0) return 0;
   if (loopMode === 'loop') {
@@ -127,8 +213,10 @@ export function wrapTime(time: number, duration: number, loopMode: AnimationClip
 export interface EvaluatedPose {
   bones: CADBone[];
   meshes: CADMesh[];
-  cameras?: CADCamera[];
-  lights?: CADLight[];
+  /** Always present; falls back to the unposed scene cameras when the clip has no camera tracks. */
+  cameras: CADCamera[];
+  /** Always present; falls back to the unposed scene lights when the clip has no light tracks. */
+  lights: CADLight[];
 }
 
 /**
@@ -197,6 +285,17 @@ export function evaluateClipAtTime(
       }
       lightMap.set(track.targetId, light);
     }
+  });
+
+  // Ambient auto-play flipbooks tick even without a mesh track in the clip.
+  const trackedMeshIds = new Set(
+    clip.tracks.filter((tr) => tr.targetType === 'mesh').map((tr) => tr.targetId),
+  );
+  meshMap.forEach((mesh, meshId) => {
+    if (trackedMeshIds.has(meshId)) return;
+    if (!mesh.textureAnimation?.autoPlay) return;
+    const tex = resolveMeshTextureAtTime(mesh, undefined, t);
+    if (tex.dataUrl) mesh.textureCanvasDataUrl = tex.dataUrl;
   });
 
   return {

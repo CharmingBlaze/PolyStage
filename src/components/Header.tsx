@@ -1,10 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  FileCode,
-  FolderOpen,
-  Save,
-  Download,
   RotateCcw,
   RotateCw,
   HelpCircle,
@@ -46,7 +42,8 @@ type MenuItem =
       danger?: boolean;
       active?: boolean;
       icon?: React.ReactNode;
-      onClick: () => void;
+      /** Omitted when the host app did not wire the action; the item renders disabled. */
+      onClick?: () => void;
     }
   | { type: 'sep' };
 
@@ -136,7 +133,7 @@ function MenuDropdown({
         type="button"
         onClick={() => setOpenMenu(open ? null : id)}
         className={`px-2 py-0.5 text-[11px] transition ${
-          open ? 'bg-[#4d4d4d] text-white' : accent ? 'text-[#ed7300] hover:bg-[#404040]' : 'text-[#cccccc] hover:bg-[#404040] hover:text-white'
+          open ? 'bg-[#3b3f46] text-white' : accent ? 'text-[#ed7300] hover:bg-[#34383f]' : 'text-[#c6cad1] hover:bg-[#34383f] hover:text-white'
         }`}
       >
         {label}
@@ -155,25 +152,25 @@ function MenuDropdown({
                 <button
                   key={`${item.label}-${i}`}
                   type="button"
-                  disabled={item.disabled}
+                  disabled={item.disabled || !item.onClick}
                   onClick={() => {
-                    if (item.disabled) return;
+                    if (item.disabled || !item.onClick) return;
                     item.onClick();
                     setOpenMenu(null);
                   }}
-                  className={`w-full px-3 py-1.5 flex items-center justify-between gap-6 text-left text-[11px] transition ${
-                    item.disabled
+                  className={`w-full px-3 py-1.5 rounded-[5px] flex items-center justify-between gap-6 text-left text-[11px] transition ${
+                    item.disabled || !item.onClick
                       ? 'text-[#6e6e6e] cursor-not-allowed'
                       : item.danger
-                        ? 'text-[#ec5b62] hover:bg-[#3a3a3a]'
-                        : 'text-[#cccccc] hover:bg-[#ed7300] hover:text-white'
+                        ? 'text-[#ec5b62] hover:bg-[#2e3136]'
+                        : 'text-[#c6cad1] hover:bg-[#ed7300] hover:text-white'
                   }`}
                 >
                   <span className="flex items-center gap-2">
                     {item.icon}
                     {item.label}
                   </span>
-                  {item.shortcut && <span className="font-mono text-[10px] text-[#8c8c8c]">{item.shortcut}</span>}
+                  {item.shortcut && <span className="font-mono text-[10px] text-[#858a93]">{item.shortcut}</span>}
                 </button>
               )
             )}
@@ -489,17 +486,17 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <div
       ref={headerShellRef}
-      className="relative sp-menubar select-none z-[5000] font-sans text-[#cccccc]"
+      className="relative sp-menubar select-none z-[5000] font-sans text-[#c6cad1]"
     >
       {headerCollapsed ? (
-        <div className="h-6 px-2 flex items-center gap-2 bg-[#333333]">
+        <div className="h-6 px-2 flex items-center gap-2 bg-[#26282d]">
           <BrandMark size={16} className="shrink-0 shadow-sm" />
-          <span className="text-[10px] text-[#8c8c8c] font-mono truncate">{APP_FULL}</span>
+          <span className="text-[10px] text-[#858a93] font-mono truncate">{APP_FULL}</span>
           <div className="flex-1" />
           <button
             type="button"
             onClick={() => setHeaderCollapsed(false)}
-            className="h-5 px-1.5 rounded border border-[#4d4d4d] bg-[#262626] text-[#8c8c8c] hover:text-white hover:border-[#ed7300] flex items-center gap-1 text-[9px] font-mono"
+            className="h-5 px-1.5 rounded border border-[#3b3f46] bg-[#191b1e] text-[#858a93] hover:text-white hover:border-[#ed7300] flex items-center gap-1 text-[9px] font-mono"
             title="Show header"
           >
             <ChevronDown className="w-3 h-3" />
@@ -507,12 +504,12 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         </div>
       ) : (
-        <div className="h-9 px-2 flex items-center gap-1.5 bg-[#333333] overflow-x-auto overflow-y-visible custom-scrollbar">
+        <div className="h-9 px-2 flex items-center gap-1.5 bg-[#26282d] overflow-x-auto overflow-y-visible custom-scrollbar">
           {/* Brand + menus */}
           <div className="flex items-center gap-1.5 shrink-0">
             <BrandMark size={20} className="shrink-0 shadow-md" />
-            <span className="font-semibold text-[11px] text-[#e8e8e8] whitespace-nowrap hidden md:inline">
-              {APP_NAME} <span className="text-[9px] text-[#8c8c8c] font-mono">{APP_YEAR}</span>
+            <span className="font-semibold text-[11px] text-[#eaedf1] whitespace-nowrap hidden md:inline">
+              {APP_NAME} <span className="text-[9px] text-[#858a93] font-mono">{APP_YEAR}</span>
             </span>
             <div className="sp-sep-v h-3.5 mx-0.5 self-center" />
             <div ref={menuBarRef} className="flex items-center gap-0.5 text-[11px]">
@@ -599,7 +596,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Scene */}
-          <div className="flex items-center gap-1 bg-[#262626] px-1.5 py-0.5 rounded border border-[#1a1a1a] shrink-0 min-w-0">
+          <div className="flex items-center gap-1 bg-[#191b1e] px-1.5 py-0.5 rounded border border-[#101114] shrink-0 min-w-0">
             <Layers className="w-3 h-3 text-[#e68619] shrink-0" />
             {isRenamingScene ? (
               <input
@@ -618,13 +615,13 @@ export const Header: React.FC<HeaderProps> = ({
                 className="bg-transparent font-mono text-[10px] text-[#e68619] font-bold outline-none cursor-pointer max-w-[140px]"
               >
                 {scenes.map((scene: CADScene) => (
-                  <option key={scene.id} value={scene.id} className="bg-[#262626] text-[#e68619]">
+                  <option key={scene.id} value={scene.id} className="bg-[#191b1e] text-[#e68619]">
                     {scene.name} ({scene.meshes.length})
                   </option>
                 ))}
               </select>
             )}
-            <button type="button" onClick={handleStartRenameScene} className="p-0.5 text-[#8c8c8c] hover:text-white" title="Rename Scene">
+            <button type="button" onClick={handleStartRenameScene} className="p-0.5 text-[#858a93] hover:text-white" title="Rename Scene">
               <Edit2 className="w-3 h-3" />
             </button>
             <button type="button" onClick={onAddScene} className="p-0.5 text-[#ed7300] hover:text-white" title="Add Scene">
@@ -640,22 +637,22 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="flex-1 min-w-2" />
 
           {/* History */}
-          <div className="flex items-center gap-0.5 bg-[#262626] p-0.5 rounded border border-[#1a1a1a] shrink-0">
-            <button type="button" onClick={undo} disabled={!canUndo} className={`p-1 rounded hover:bg-[#404040] ${!canUndo && 'opacity-30'}`} title="Undo">
+          <div className="flex items-center gap-0.5 bg-[#191b1e] p-0.5 rounded border border-[#101114] shrink-0">
+            <button type="button" onClick={undo} disabled={!canUndo} className={`p-1 rounded hover:bg-[#34383f] ${!canUndo && 'opacity-30'}`} title="Undo">
               <RotateCcw className="w-3 h-3" />
             </button>
-            <button type="button" onClick={redo} disabled={!canRedo} className={`p-1 rounded hover:bg-[#404040] ${!canRedo && 'opacity-30'}`} title="Redo">
+            <button type="button" onClick={redo} disabled={!canRedo} className={`p-1 rounded hover:bg-[#34383f] ${!canRedo && 'opacity-30'}`} title="Redo">
               <RotateCw className="w-3 h-3" />
             </button>
           </div>
 
           {/* Viewport layout */}
-          <div className="flex items-center gap-0.5 bg-[#262626] p-0.5 rounded border border-[#1a1a1a] font-mono text-[10px] shrink-0">
+          <div className="flex items-center gap-0.5 bg-[#191b1e] p-0.5 rounded border border-[#101114] font-mono text-[10px] shrink-0">
             <button
               type="button"
               onClick={() => setToolState((s) => ({ ...s, viewportLayout: 'single' }))}
               className={`px-1.5 py-0.5 rounded flex items-center gap-0.5 ${
-                toolState.viewportLayout === 'single' ? 'bg-[#ed7300] text-white font-bold' : 'text-[#888] hover:text-white'
+                toolState.viewportLayout === 'single' ? 'bg-[#ed7300] text-white font-bold' : 'text-[#7e838c] hover:text-white'
               }`}
               title="Single view"
             >
@@ -675,7 +672,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }));
               }}
               className={`px-1.5 py-0.5 rounded flex items-center gap-0.5 ${
-                toolState.viewportLayout === 'quad' ? 'bg-[#ed7300] text-white font-bold' : 'text-[#888] hover:text-white'
+                toolState.viewportLayout === 'quad' ? 'bg-[#ed7300] text-white font-bold' : 'text-[#7e838c] hover:text-white'
               }`}
               title="Quad view"
             >
@@ -685,15 +682,15 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Shading */}
-          <div className="flex items-center gap-1 bg-[#262626] px-1.5 py-0.5 rounded border border-[#1a1a1a] font-mono text-[10px] shrink-0">
+          <div className="flex items-center gap-1 bg-[#191b1e] px-1.5 py-0.5 rounded border border-[#101114] font-mono text-[10px] shrink-0">
             <Eye className="w-3 h-3 text-[#ed7300]" />
             <select
               value={toolState.viewMode}
               onChange={(e) => setToolState((s) => ({ ...s, viewMode: e.target.value as ViewMode }))}
-              className="bg-transparent font-mono text-[10px] text-[#e8e8e8] font-bold outline-none cursor-pointer max-w-[88px]"
+              className="bg-transparent font-mono text-[10px] text-[#eaedf1] font-bold outline-none cursor-pointer max-w-[88px]"
             >
               {viewModes.map((mode) => (
-                <option key={mode.id} value={mode.id} className="bg-[#262626] text-white">
+                <option key={mode.id} value={mode.id} className="bg-[#191b1e] text-white">
                   {mode.label}
                 </option>
               ))}
@@ -704,7 +701,7 @@ export const Header: React.FC<HeaderProps> = ({
               className={`ml-0.5 px-1.5 py-0.5 rounded border text-[9px] font-bold transition ${
                 toolState.xray
                   ? 'border-[#ed7300]/50 bg-[#ed7300]/20 text-[#ff9a3c]'
-                  : 'border-transparent text-[#8c8c8c] hover:text-white'
+                  : 'border-transparent text-[#858a93] hover:text-white'
               }`}
               title="X-Ray (Alt+Z) — see through meshes"
             >
@@ -713,12 +710,12 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Quick docks — icon buttons */}
-          <div className="flex items-center gap-0.5 bg-[#262626] p-0.5 rounded border border-[#1a1a1a] shrink-0">
+          <div className="flex items-center gap-0.5 bg-[#191b1e] p-0.5 rounded border border-[#101114] shrink-0">
             {onToggleOutliner && (
               <button
                 type="button"
                 onClick={onToggleOutliner}
-                className={`p-1 rounded ${isOutlinerOpen ? 'bg-[#ed7300] text-white' : 'text-[#8c8c8c] hover:text-white'}`}
+                className={`p-1 rounded ${isOutlinerOpen ? 'bg-[#ed7300] text-white' : 'text-[#858a93] hover:text-white'}`}
                 title="Floating Outliner (O)"
               >
                 <Layers className="w-3 h-3" />
@@ -728,7 +725,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 onClick={onToggleToolWindow}
-                className={`p-1 rounded ${isToolWindowOpen ? 'bg-[#ff9a3c] text-white' : 'text-[#8c8c8c] hover:text-white'}`}
+                className={`p-1 rounded ${isToolWindowOpen ? 'bg-[#ff9a3c] text-white' : 'text-[#858a93] hover:text-white'}`}
                 title="Tool Palette (Shift+T)"
               >
                 <Sparkles className="w-3 h-3" />
@@ -738,7 +735,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 onClick={onTogglePalette}
-                className={`p-1 rounded ${isPaletteOpen ? 'bg-[#ed7300] text-white' : 'text-[#8c8c8c] hover:text-white'}`}
+                className={`p-1 rounded ${isPaletteOpen ? 'bg-[#ed7300] text-white' : 'text-[#858a93] hover:text-white'}`}
                 title="Primitives"
               >
                 <Box className="w-3 h-3" />
@@ -747,7 +744,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={onOpenAssetBrowser || onOpenPresets}
-              className="p-1 rounded text-[#e68619] hover:bg-[#404040]"
+              className="p-1 rounded text-[#e68619] hover:bg-[#34383f]"
               title="3D Assets"
             >
               <Layers className="w-3 h-3" />
@@ -756,7 +753,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 onClick={onOpenImportModal}
-                className="p-1 rounded text-[#8c8c8c] hover:text-white hover:bg-[#404040]"
+                className="p-1 rounded text-[#858a93] hover:text-white hover:bg-[#34383f]"
                 title="Import 3D (Ctrl+I)"
               >
                 <Upload className="w-3 h-3" />
@@ -769,7 +766,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={onOpenShortcuts}
-              className="p-1 hover:bg-[#404040] text-[#8c8c8c] hover:text-[#ed7300] rounded"
+              className="p-1 hover:bg-[#34383f] text-[#858a93] hover:text-[#ed7300] rounded"
               title="Shortcuts (?)"
             >
               <HelpCircle className="w-3 h-3" />
@@ -777,7 +774,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={() => setHeaderCollapsed(true)}
-              className="h-6 px-1.5 rounded border border-[#4d4d4d] bg-[#262626] text-[#8c8c8c] hover:text-white hover:border-[#ed7300] flex items-center gap-1 text-[9px] font-mono"
+              className="h-6 px-1.5 rounded border border-[#3b3f46] bg-[#191b1e] text-[#858a93] hover:text-white hover:border-[#ed7300] flex items-center gap-1 text-[9px] font-mono"
               title="Hide header to free vertical space"
             >
               <PanelTopClose className="w-3.5 h-3.5" />

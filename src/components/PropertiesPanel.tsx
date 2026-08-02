@@ -190,13 +190,13 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#333333] text-[#cccccc] font-sans text-xs select-none">
+    <div className="flex flex-col h-full bg-[#26282d] text-[#c6cad1] font-sans text-xs select-none">
       <div className="panel-header justify-between">
         <span className="flex items-center gap-1.5">
           <Sliders className="w-3.5 h-3.5 text-[#ed7300]" />
           Properties
         </span>
-        <span className="text-[#999999] truncate max-w-[40%] normal-case tracking-normal font-medium">{displayName}</span>
+        <span className="text-[#8b909a] truncate max-w-[40%] normal-case tracking-normal font-medium">{displayName}</span>
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-4 custom-scrollbar">
@@ -206,7 +206,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
           </div>
         )}
 
-        <div className="cad-card p-2.5 space-y-3 border border-[#4d4d4d] bg-[#262626]">
+        <div className="cad-card p-2.5 space-y-3 border border-[#3b3f46] bg-[#191b1e]">
           <span className="text-[9px] font-mono font-bold text-[#ff9a3c] uppercase tracking-wider block flex items-center gap-1">
             <Box className="w-3 h-3 text-[#ff9a3c]" />
             TRANSFORM NUMERICS
@@ -214,10 +214,10 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
           <div className="space-y-2 font-mono text-[10px]">
             <div>
-              <span className="text-[#888888] block mb-1">POSITION (X, Y, Z):</span>
+              <span className="text-[#7e838c] block mb-1">POSITION (X, Y, Z):</span>
               <div className="grid grid-cols-3 gap-1">
                 {(['x', 'y', 'z'] as (keyof Vector3D)[]).map((axis) => (
-                  <div key={axis} className="flex items-center bg-[#262626] px-2 py-0.5 rounded border border-[#4d4d4d]">
+                  <div key={axis} className="flex items-center bg-[#191b1e] px-2 py-0.5 rounded border border-[#3b3f46]">
                     <span className="text-rose-400 font-bold uppercase mr-1">{axis}:</span>
                     <input
                       type="number"
@@ -232,10 +232,10 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             </div>
 
             <div>
-              <span className="text-[#888888] block mb-1">ROTATION (DEG):</span>
+              <span className="text-[#7e838c] block mb-1">ROTATION (DEG):</span>
               <div className="grid grid-cols-3 gap-1">
                 {(['x', 'y', 'z'] as (keyof Vector3D)[]).map((axis) => (
-                  <div key={axis} className="flex items-center bg-[#262626] px-2 py-0.5 rounded border border-[#4d4d4d]">
+                  <div key={axis} className="flex items-center bg-[#191b1e] px-2 py-0.5 rounded border border-[#3b3f46]">
                     <span className="text-amber-400 font-bold uppercase mr-1">{axis}:</span>
                     <input
                       type="number"
@@ -250,10 +250,10 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             </div>
 
             <div>
-              <span className="text-[#888888] block mb-1">SCALE (X, Y, Z):</span>
+              <span className="text-[#7e838c] block mb-1">SCALE (X, Y, Z):</span>
               <div className="grid grid-cols-3 gap-1">
                 {(['x', 'y', 'z'] as (keyof Vector3D)[]).map((axis) => (
-                  <div key={axis} className="flex items-center bg-[#262626] px-2 py-0.5 rounded border border-[#4d4d4d]">
+                  <div key={axis} className="flex items-center bg-[#191b1e] px-2 py-0.5 rounded border border-[#3b3f46]">
                     <span className="text-emerald-400 font-bold uppercase mr-1">{axis}:</span>
                     <input
                       type="number"
@@ -270,7 +270,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
         </div>
 
         {!sceneTarget && (
-          <div className="cad-card p-2.5 space-y-3 border border-[#4d4d4d] bg-[#262626]">
+          <div className="cad-card p-2.5 space-y-3 border border-[#3b3f46] bg-[#191b1e]">
             <span className="text-[9px] font-mono font-bold text-amber-400 uppercase tracking-wider block flex items-center gap-1">
               <Sparkles className="w-3 h-3 text-amber-400" />
               PBR MATERIAL PRESETS
@@ -288,7 +288,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                 <button
                   key={id}
                   onClick={() => applyMaterialPreset(id)}
-                  className="py-1 bg-[#404040] border border-[#444] text-[#ddd] font-mono text-[9px] font-bold rounded hover:border-[#ed7300] transition"
+                  className="py-1 bg-[#34383f] border border-[#383c42] text-[#ddd] font-mono text-[9px] font-bold rounded hover:border-[#ed7300] transition"
                 >
                   {label}
                 </button>
@@ -303,12 +303,12 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                   title={swatch}
                   onClick={() => setToolState((s) => ({ ...s, activeColor: swatch }))}
                   className={`w-5 h-5 rounded border ${
-                    toolState.activeColor === swatch ? 'border-white scale-110' : 'border-[#444]'
+                    toolState.activeColor === swatch ? 'border-white scale-110' : 'border-[#383c42]'
                   }`}
                   style={{ backgroundColor: swatch }}
                 />
               ))}
-              <span className="flex items-center gap-1 text-[#888888] ml-1">
+              <span className="flex items-center gap-1 text-[#7e838c] ml-1">
                 <Palette className="w-3 h-3" />
                 {toolState.activeColor}
               </span>

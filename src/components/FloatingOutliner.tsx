@@ -155,7 +155,7 @@ export const FloatingOutliner: React.FC<FloatingOutlinerProps> = ({
       >
         <span className="sp-outliner__accent" aria-hidden />
         <div className="min-w-0 flex-1 flex items-center gap-1.5 px-1">
-          <GripHorizontal className="w-3.5 h-3.5 text-[#999999] shrink-0" />
+          <GripHorizontal className="w-3.5 h-3.5 text-[#8b909a] shrink-0" />
           <Layers className="w-3.5 h-3.5 text-[#ed7300] shrink-0" />
           <div className="min-w-0">
             <div className="sp-outliner__title">Outliner</div>

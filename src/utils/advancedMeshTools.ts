@@ -1,5 +1,5 @@
-import type { CADMesh, Face, Vertex, Edge, Vector3D } from '../types/cad';
-import { generateId, createEdgesFromFaces } from './meshUtils';
+import type { CADMesh, Face, Vertex } from '../types/cad';
+import { generateId } from './meshUtils';
 import { finalizeEditableMesh } from './topology/validate';
 import { findEdgeLoop, applyLoopCut } from './meshCutTools';
 import { chamferEdges } from './bevelOps';

@@ -65,6 +65,10 @@ export const BlockoutRefToolbar: React.FC<Props> = ({ plane }) => {
         }}
       />
 
+      <span className="blockout-plane-chip" data-plane={plane}>
+        Ref
+      </span>
+
       {!refImage ? (
         <button
           type="button"

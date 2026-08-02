@@ -38,7 +38,6 @@ describe('meshCutTools', () => {
   it('knife splits a quad between two opposite edge midpoints', () => {
     const cube = createPrimitiveMesh('cube');
     const face = cube.faces.find((f) => f.vertexIds.length === 4)!;
-    const n = face.vertexIds.length;
     const e0 = cube.edges.find(
       (e) => edgeKey(e.v1Id, e.v2Id) === edgeKey(face.vertexIds[0], face.vertexIds[1]),
     )!;

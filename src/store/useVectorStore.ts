@@ -348,7 +348,7 @@ export const useVectorStore = create<VectorStore>((set, get) => {
     activePlane: 'front',
     snap: true,
     snapSize: 0.1,
-    verticalSegments: 10,
+    verticalSegments: 8,
     radialSegments: 12,
     thickness: DEFAULT_BLOCKOUT_THICKNESS,
     capStyle: 'game',
@@ -863,10 +863,19 @@ export const useVectorStore = create<VectorStore>((set, get) => {
         ...get().paths,
         [plane]: { ...path, closed: true },
       };
+      const nextPaths = withAutomaticCompanion(closedPaths, plane);
+      const companionPlane =
+        plane === 'front' ? 'side' : plane === 'side' ? 'front' : null;
+      const seededCompanion =
+        companionPlane &&
+        !closedPaths[companionPlane].closed &&
+        !closedPaths[companionPlane].anchors.length &&
+        nextPaths[companionPlane].anchors.length >= 4;
       set({
-        ...syncActivePaths(withAutomaticCompanion(closedPaths, plane)),
+        ...syncActivePaths(nextPaths),
         ...clearSelection(),
-        activePlane: plane,
+        // Jump to the auto-seeded companion cage so width/depth is easy to edit next.
+        activePlane: seededCompanion && companionPlane ? companionPlane : plane,
         mode: 'edit',
         mirrorWidth: true,
         pointEditMode: 'symmetric',

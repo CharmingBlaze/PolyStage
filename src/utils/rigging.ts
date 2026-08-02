@@ -150,7 +150,25 @@ export function getBoneWorldMatrices(bones: CADBone[], rest: boolean) {
       new THREE.Vector3(scale.x, scale.y, scale.z),
     );
     const parent = bone.parentId ? bones.find((candidate) => candidate.id === bone.parentId) : null;
-    const world = parent ? resolve(parent, visiting).clone().multiply(local) : local;
+    let world = local;
+    if (parent) {
+      const parentWorld = resolve(parent, visiting);
+      if (bone.inheritRotation === false) {
+        // Keep parent translation/scale chain, but ignore parent rotation for this bone.
+        const parentPos = new THREE.Vector3();
+        const parentQuat = new THREE.Quaternion();
+        const parentScale = new THREE.Vector3();
+        parentWorld.decompose(parentPos, parentQuat, parentScale);
+        const parentTranslate = new THREE.Matrix4().compose(
+          parentPos,
+          new THREE.Quaternion(),
+          parentScale,
+        );
+        world = parentTranslate.multiply(local);
+      } else {
+        world = parentWorld.clone().multiply(local);
+      }
+    }
     matrices.set(bone.id, world);
     visiting.delete(bone.id);
     return world;

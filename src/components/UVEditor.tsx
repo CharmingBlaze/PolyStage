@@ -333,7 +333,8 @@ export const UVEditor: React.FC<UVEditorProps> = ({
     drawRef.current();
   };
 
-  const pushLiveUvPreview = (positions: Map<UvVertexId, UVCoord>) => {
+  /** Coalesce live drag previews into one commit per frame, reading the latest ref value. */
+  const pushLiveUvPreview = () => {
     if (livePreviewRafRef.current) return;
     livePreviewRafRef.current = requestAnimationFrame(() => {
       livePreviewRafRef.current = 0;
@@ -521,7 +522,7 @@ export const UVEditor: React.FC<UVEditorProps> = ({
         next.set(id, value);
       });
       tempPositionsRef.current=next;
-      pushLiveUvPreview(next);
+      pushLiveUvPreview();
     }
     drawRef.current();
   };
@@ -669,16 +670,16 @@ export const UVEditor: React.FC<UVEditorProps> = ({
     const dpr=window.devicePixelRatio||1,w=canvas.clientWidth,h=canvas.clientHeight;
     ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
     // PolyStage charcoal stage (not navy/cyan)
-    ctx.fillStyle='#2b2b2b';ctx.fillRect(0,0,w,h);
+    ctx.fillStyle='#1e2023';ctx.fillRect(0,0,w,h);
     const v=viewRef.current;
     // Neighboring tiles / checker — charcoal tones
     for(let tu=-1;tu<=1;tu++)for(let tv=-1;tv<=1;tv++){
       const x=v.x+tu*v.scale,y=v.y+tv*v.scale;
-      ctx.fillStyle=(tu===0&&tv===0)?'#262626':'#222222';ctx.fillRect(x,y,v.scale,v.scale);
+      ctx.fillStyle=(tu===0&&tv===0)?'#191b1e':'#222222';ctx.fillRect(x,y,v.scale,v.scale);
       const tile=Math.max(8,v.scale/16);for(let yy=0;yy<v.scale;yy+=tile)for(let xx=0;xx<v.scale;xx+=tile){
-        if((Math.floor(xx/tile)+Math.floor(yy/tile))%2===0){ctx.fillStyle=tu===0&&tv===0?'#303030':'#282828';ctx.fillRect(x+xx,y+yy,tile,tile)}
+        if((Math.floor(xx/tile)+Math.floor(yy/tile))%2===0){ctx.fillStyle=tu===0&&tv===0?'#303030':'#1e2023';ctx.fillRect(x+xx,y+yy,tile,tile)}
       }
-      ctx.strokeStyle=tu===0&&tv===0?'#ed7300':'#3a3a3a';ctx.lineWidth=tu===0&&tv===0?2:1;ctx.strokeRect(x,y,v.scale,v.scale);
+      ctx.strokeStyle=tu===0&&tv===0?'#ed7300':'#2e3136';ctx.lineWidth=tu===0&&tv===0?2:1;ctx.strokeRect(x,y,v.scale,v.scale);
       if(tu!==0||tv!==0){ctx.fillStyle='#6a6a6a';ctx.font='10px monospace';ctx.fillText(`${1001+tu+tv*10}`,x+6,y+14)}
     }
     if(showTexture&&textureCanvas&&textureCanvas.width>0&&textureCanvas.height>0){
@@ -724,11 +725,17 @@ export const UVEditor: React.FC<UVEditorProps> = ({
       }else ctx.fillStyle=overlap?'rgba(236,91,98,.45)':selected?'rgba(237,115,0,.28)':'rgba(255,255,255,.04)';
       ctx.fill();
       // Perforated (dashed) face borders — stronger dash on selection
-      ctx.strokeStyle=overlap?'#ec5b62':selected?'#ed7300':'#7a7a7a';
-      ctx.lineWidth=selected?2.4:1.25;
-      ctx.setLineDash(selected ? [5, 4] : [3, 3]);
+      ctx.strokeStyle=overlap?'#ec5b62':selected?'#ed7300':'#6e6e6e';
+      ctx.lineWidth=selected?2.6:1.15;
+      ctx.setLineDash(selected ? [6, 3] : [2, 3]);
       ctx.stroke();
       ctx.setLineDash([]);
+      if (selected && !showDistortion) {
+        ctx.strokeStyle = 'rgba(255, 200, 120, 0.35)';
+        ctx.lineWidth = 4;
+        ctx.setLineDash([]);
+        ctx.stroke();
+      }
       if(showLabels&&v.scale>100){
         const cx=pts.reduce((n,p)=>n+p.x,0)/pts.length,cy=pts.reduce((n,p)=>n+p.y,0)/pts.length;
         ctx.fillStyle=selected?'#ffffff':'#aaaaaa';ctx.font='10px monospace';ctx.textAlign='center';ctx.fillText(`${index+1}`,cx,cy+3);
@@ -737,12 +744,12 @@ export const UVEditor: React.FC<UVEditorProps> = ({
     topology.edges.forEach(edge=>{
       const a=uvToScreen(getPosition(edge.cornerA)),b=uvToScreen(getPosition(edge.cornerB)),selected=selectedUvEdges.has(edge.id);
       ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
-      ctx.strokeStyle=selected?'#ff9a3c':edge.seam?'#ec5b62':edge.boundary?'#cccccc':'#666666';
+      ctx.strokeStyle=selected?'#ff9a3c':edge.seam?'#ec5b62':edge.boundary?'#c6cad1':'#51565f';
       ctx.lineWidth=selected?3:edge.seam||edge.boundary?2:1;ctx.setLineDash(edge.seam?[5,3]:[]);ctx.stroke();ctx.setLineDash([]);
     });
     if(mode==='vertex')topology.vertices.forEach(vertex=>{
       const p=uvToScreen(getPosition(vertex.id)),selected=selectedUvVertices.has(vertex.id);
-      ctx.beginPath();ctx.arc(p.x,p.y,selected?5:3.5,0,Math.PI*2);ctx.fillStyle=selected?'#ed7300':vertex.pinned?'#ec5b62':'#e6e6e6';ctx.fill();ctx.strokeStyle='#1a1a1a';ctx.lineWidth=1.5;ctx.stroke();
+      ctx.beginPath();ctx.arc(p.x,p.y,selected?5:3.5,0,Math.PI*2);ctx.fillStyle=selected?'#ed7300':vertex.pinned?'#ec5b62':'#e6e6e6';ctx.fill();ctx.strokeStyle='#101114';ctx.lineWidth=1.5;ctx.stroke();
       if(vertex.pinned){ctx.fillStyle='#ffb0b0';ctx.font='9px sans-serif';ctx.fillText('•',p.x,p.y+3)}
     });
 
@@ -769,20 +776,20 @@ export const UVEditor: React.FC<UVEditorProps> = ({
       ctx.arc(rotateHandle.x, rotateHandle.y, HANDLE_R, 0, Math.PI * 2);
       ctx.fillStyle = transform === 'rotate' ? '#ed7300' : '#ff9a3c';
       ctx.fill();
-      ctx.strokeStyle = '#1a1a1a';
+      ctx.strokeStyle = '#101114';
       ctx.lineWidth = 1.5;
       ctx.stroke();
       // Small rotate glyph
       ctx.beginPath();
       ctx.arc(rotateHandle.x, rotateHandle.y, 3, -0.8, Math.PI * 1.2);
-      ctx.strokeStyle = '#1a1a1a';
+      ctx.strokeStyle = '#101114';
       ctx.lineWidth = 1.2;
       ctx.stroke();
 
       // Corner scale handles
       corners.forEach((c) => {
         ctx.fillStyle = transform === 'scale' ? '#ed7300' : '#ff9a3c';
-        ctx.strokeStyle = '#1a1a1a';
+        ctx.strokeStyle = '#101114';
         ctx.lineWidth = 1.5;
         ctx.fillRect(c.x - HANDLE_R / 2, c.y - HANDLE_R / 2, HANDLE_R, HANDLE_R);
         ctx.strokeRect(c.x - HANDLE_R / 2, c.y - HANDLE_R / 2, HANDLE_R, HANDLE_R);
@@ -797,7 +804,7 @@ export const UVEditor: React.FC<UVEditorProps> = ({
       ctx.closePath();
       ctx.fillStyle = transform === 'move' ? '#ed7300' : '#ff9a3c';
       ctx.fill();
-      ctx.strokeStyle = '#1a1a1a';
+      ctx.strokeStyle = '#101114';
       ctx.lineWidth = 1.5;
       ctx.stroke();
       ctx.restore();
@@ -1067,12 +1074,19 @@ export const UVEditor: React.FC<UVEditorProps> = ({
           />
           <div className="uv-hud-top pointer-events-none">
             <span className="uv-badge">{mode.toUpperCase()} · {transform.toUpperCase()}</span>
+            <span className="uv-badge is-sync">
+              {sync === 'both' ? 'SYNC BOTH' : sync === '3d-to-uv' ? '3D → UV' : sync === 'uv-to-3d' ? 'UV → 3D' : 'SYNC OFF'}
+            </span>
             {textureLocked && <span className="uv-badge is-warn">TEXTURE LOCKED</span>}
             {selectedFacesLocked && <span className="uv-badge is-warn">FACES LOCKED</span>}
             {boxSelectArmed && <span className="uv-badge is-accent">DRAG BOX</span>}
+            {overlaps.size > 0 && showOverlaps && (
+              <span className="uv-badge is-warn">{overlaps.size} OVERLAP{overlaps.size === 1 ? '' : 'S'}</span>
+            )}
           </div>
           <div className="uv-hud-bottom">
             <button type="button" onClick={() => frame(false)} className="uv-btn" title="Frame all (Home)"><ZoomIn size={11} /></button>
+            <button type="button" onClick={() => frame(true)} className="uv-btn" title="Frame selection (F)">F</button>
             <button type="button" onClick={() => setBoxSelectArmed(true)} className={toolButton(boxSelectArmed)} title="Box select (B)"><BoxSelect size={11} /></button>
             {mode === 'vertex' && <button type="button" onClick={togglePinned} className="uv-btn" title="Pin selected"><Pin size={11} /></button>}
           </div>
@@ -1164,9 +1178,15 @@ export const UVEditor: React.FC<UVEditorProps> = ({
         <span>
           {referenceLayer
             ? `REF ${referenceLayer.locked ? 'LOCKED' : editReferenceImage ? 'EDITING' : 'READY'}`
-            : `${mode.toUpperCase()} · ${mode === 'vertex' ? selectedUvVertices.size : mode === 'edge' ? selectedUvEdges.size : selectedFaceIds.length} selected`}
+            : `${mode.toUpperCase()} · ${mode === 'vertex' ? selectedUvVertices.size : mode === 'edge' ? selectedUvEdges.size : mode === 'island' ? selectedIslandIds.size : selectedFaceIds.length} selected · G/R/S transform · B box · F frame`}
         </span>
-        <span>{snap === 'pixel' ? `Snap ${textureResolution.width}×${textureResolution.height}` : snap} · {textureResolution.width}×{textureResolution.height} · {zoomPercent}%{snap !== 'none' ? ' · rotate snaps 15°' : ''}</span>
+        <span>
+          {snap === 'pixel' ? `Snap ${textureResolution.width}×${textureResolution.height}` : `Snap ${snap}`}
+          {' · '}{textureResolution.width}×{textureResolution.height}
+          {' · '}{zoomPercent}%
+          {overlaps.size ? ` · ${overlaps.size} overlap` : ''}
+          {snap !== 'none' ? ' · rotate snaps 15°' : ''}
+        </span>
         <span>{cursorUv ? `${cursorUv.u.toFixed(3)}, ${cursorUv.v.toFixed(3)}` : 'U — V —'}</span>
       </footer>
     </div>

@@ -33,6 +33,9 @@ export const BlockoutSilhouetteToolbar: React.FC<Props> = ({ plane }) => {
 
   return (
     <div className="blockout-sil-toolbar pointer-events-auto">
+      <span className="blockout-plane-chip" data-plane={plane}>
+        {plane === 'front' ? 'Front · Width' : 'Side · Depth'}
+      </span>
       {canSeed ? (
         <>
           <button
@@ -49,8 +52,8 @@ export const BlockoutSilhouetteToolbar: React.FC<Props> = ({ plane }) => {
           </button>
           <span className="blockout-ref-hint">
             {plane === 'front'
-              ? 'Side profile ready — add Front lines to edit width'
-              : 'Front ready — add Side lines to edit depth'}
+              ? 'Side profile ready — click to seed a width cage'
+              : 'Front ready — click to seed a depth cage'}
           </span>
         </>
       ) : null}
@@ -73,6 +76,13 @@ export const BlockoutSilhouetteToolbar: React.FC<Props> = ({ plane }) => {
           >
             Free Move
           </button>
+          {self.closed ? (
+            <span className="blockout-ref-hint is-ok">Closed · ready to loft</span>
+          ) : (
+            <span className="blockout-ref-hint">
+              {mode === 'pen' ? 'Click to add · double-click / first point to close' : 'Drag points · Alt-click edge to insert'}
+            </span>
+          )}
         </>
       ) : null}
     </div>
