@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { isInputFocused } from '../hooks/useGlobalShortcuts';
 import {
   bindPaint3DHost,
   paint3dBridge,
@@ -984,7 +985,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
   // Hotkeys
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+      if (isInputFocused()) return;
       const k = e.key.toLowerCase();
       const select = (next: PaintTool) => {
         setTool(next);

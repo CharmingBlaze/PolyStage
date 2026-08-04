@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { isInputFocused } from './hooks/useGlobalShortcuts';
 import { Header } from './components/Header';
 import { Toolbar } from './components/Toolbar';
 import { Viewport3D } from './components/Viewport3D';
@@ -832,7 +834,7 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) return;
+      if (isInputFocused()) return;
 
       // Animation editor owns G/R/S/Esc modal transforms while active.
       if (workspaceModeRef.current === 'animation') return;
@@ -2106,6 +2108,7 @@ export const App: React.FC = () => {
             className={`h-full relative overflow-hidden ${activeWorkspaceMode === 'blockout' ? 'vector-panel-host' : ''}`}
             style={{ width: editorSplitOpen ? `calc(${100 - uvPanelPercent}% - 8px)` : '100%' }}
           >
+          <ErrorBoundary fallbackTitle="3D Studio Workspace Encountered an Error">
           {activeWorkspaceMode === 'animation' ? (
               <Suspense fallback={<WorkspaceLoading label="Animation Studio" />}>
               <CutsceneStudio
@@ -2224,6 +2227,7 @@ export const App: React.FC = () => {
               layout={activeWorkspaceMode === 'blockout' ? 'blockout' : 'quad'}
             />
           )}
+          </ErrorBoundary>
 
           {activeWorkspaceMode === 'blockout' && (
             <VectorPanel

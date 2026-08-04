@@ -1128,27 +1128,33 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
     resizeObserver?.observe(containerRef.current);
     requestAnimationFrame(() => applyRendererSize(true));
 
+    const particleSystems = particleSystemsRef.current;
+    const viewportMeshes = viewportMeshesRef.current;
+    const viewportBones = viewportBonesRef.current;
+    const viewportCams = viewportCamsRef.current;
+    const meshTextureCache = meshTextureCacheRef.current;
+
     return () => {
       cancelAnimationFrame(raf);
       if (resizeRaf) cancelAnimationFrame(resizeRaf);
       window.removeEventListener('resize', onResize);
       resizeObserver?.disconnect();
       syncRendererSizeRef.current = () => {};
-      particleSystemsRef.current.forEach((s) => s.dispose());
-      particleSystemsRef.current.clear();
-      viewportMeshesRef.current.forEach((entry) => {
+      particleSystems.forEach((s) => s.dispose());
+      particleSystems.clear();
+      viewportMeshes.forEach((entry) => {
         entry.mesh.geometry.dispose();
         entry.mat.dispose();
         entry.edges?.geometry.dispose();
         (entry.edges?.material as THREE.Material | undefined)?.dispose?.();
       });
-      viewportMeshesRef.current.clear();
-      viewportBonesRef.current.forEach((joint) => {
+      viewportMeshes.clear();
+      viewportBones.forEach((joint) => {
         joint.geometry.dispose();
         (joint.material as THREE.Material).dispose();
       });
-      viewportBonesRef.current.clear();
-      viewportCamsRef.current.forEach((helper) => {
+      viewportBones.clear();
+      viewportCams.forEach((helper) => {
         helper.traverse((obj) => {
           const mesh = obj as THREE.Mesh;
           mesh.geometry?.dispose();
@@ -1157,7 +1163,7 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
           else mat?.dispose();
         });
       });
-      viewportCamsRef.current.clear();
+      viewportCams.clear();
       if (shadowCatcherRef.current) {
         shadowCatcherRef.current.geometry.dispose();
         (shadowCatcherRef.current.material as THREE.Material).dispose();
@@ -1171,8 +1177,8 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
       if (renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement);
       liveTextureRef.current?.dispose();
       liveTextureRef.current = null;
-      meshTextureCacheRef.current.forEach((entry) => entry.texture.dispose());
-      meshTextureCacheRef.current.clear();
+      meshTextureCache.forEach((entry) => entry.texture.dispose());
+      meshTextureCache.clear();
     };
   }, []);
 

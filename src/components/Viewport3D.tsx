@@ -827,6 +827,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       tControls.dispose();
       controls.dispose();
       clearAndDisposeGroup(meshesGroupRef.current);
+      const vectorRefTextures = vectorRefTexturesRef.current;
+      const meshTextures = meshTexturesRef.current;
+
       clearAndDisposeGroup(verticesGroupRef.current);
       clearAndDisposeGroup(edgesGroupRef.current);
       clearAndDisposeGroup(bonesGroupRef.current);
@@ -844,10 +847,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         disposeObject3D(vectorRefGroupRef.current, { disposeTextures: false });
         vectorRefGroupRef.current = null;
       }
-      vectorRefTexturesRef.current.forEach((tex) => tex.dispose());
-      vectorRefTexturesRef.current.clear();
-      meshTexturesRef.current.forEach((entry) => entry.texture.dispose());
-      meshTexturesRef.current.clear();
+      vectorRefTextures.forEach((tex) => tex.dispose());
+      vectorRefTextures.clear();
+      meshTextures.forEach((entry) => entry.texture.dispose());
+      meshTextures.clear();
       if (renderer.domElement.parentNode) {
         renderer.domElement.parentNode.removeChild(renderer.domElement);
       }
