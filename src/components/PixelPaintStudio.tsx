@@ -65,8 +65,14 @@ import {
   drawBresenham,
   drawEllipseOutline,
   floodFill,
+  generateColorRamp,
+  generatePixelOutline,
+  getSymmetryPoints,
   hexToRgba,
   rgbaToHex,
+  shouldDitherPixel,
+  type DitherPattern,
+  type SymmetryMode,
 } from '../utils/pixelPaint';
 import { islandUvBoundsForFace } from '../utils/paintStroke';
 import { isStandard2DPanButton } from '../utils/viewportNav';
@@ -306,6 +312,9 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     }
     return 'aseprite';
   });
+  const [symmetryMode, setSymmetryMode] = useState<SymmetryMode>('off');
+  const [tilingPreview, setTilingPreview] = useState(false);
+  const [ditherPattern, setDitherPattern] = useState<DitherPattern>('bayer4x4');
   const [paletteMenuOpen, setPaletteMenuOpen] = useState(false);
   const sizeMenuRef = useRef<HTMLDivElement | null>(null);
   const paletteMenuRef = useRef<HTMLDivElement | null>(null);
@@ -336,6 +345,8 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
   });
   const [frameIndex, setFrameIndex] = useState(0);
   const [activeLayerId, setActiveLayerId] = useState(frames[0].layers[0].id);
+
+  const colorRamp = useMemo(() => generateColorRamp(toolState.activeColor || '#ed7300'), [toolState.activeColor]);
 
   const layerCanvasMap = useRef(new Map<string, HTMLCanvasElement>());
   const onTextureUpdatedRef = useRef(onTextureUpdated);
@@ -1113,7 +1124,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
         if (erase) {
           ctx.clearRect(x, y, 1, 1);
         } else if (dither) {
-          if ((x + y) % 2 === 0) {
+          if (shouldDitherPixel(x, y, ditherPattern)) {
             ctx.fillStyle = color;
             ctx.fillRect(x, y, 1, 1);
           }
@@ -1200,13 +1211,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paintBridgeRef]);
 
-  const applyToolAt = (px: number, py: number) => {
-    const canvas = activeLayerCanvas();
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d')!;
-    ctx.imageSmoothingEnabled = false;
-    markLargeStrokeDirty();
-
+  const applySingleToolAt = (ctx: CanvasRenderingContext2D, px: number, py: number) => {
     if (tool === 'picker') {
       const d = ctx.getImageData(px, py, 1, 1).data;
       if (d[3] > 0) setToolState((s) => ({ ...s, activeColor: rgbaToHex(d[0], d[1], d[2]) }));
@@ -1274,6 +1279,19 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     // pencil default
     plotBrush(ctx, px, py, false);
     paint();
+  };
+
+  const applyToolAt = (px: number, py: number) => {
+    const canvas = activeLayerCanvas();
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+    markLargeStrokeDirty();
+
+    const points = getSymmetryPoints(px, py, canvasSize, canvasSize, symmetryMode);
+    for (const pt of points) {
+      applySingleToolAt(ctx, pt.x, pt.y);
+    }
   };
 
   /** Pixel-Perfect only makes sense for a 1px hard-edged pencil / eraser stroke. */
@@ -1838,6 +1856,12 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     });
   };
 
+  const outlineLayer = () => {
+    withActiveLayer((ctx, c) => {
+      generatePixelOutline(ctx, c.width, c.height, toolState.activeColor || '#000000');
+    });
+  };
+
   const clearLayer = () => {
     withActiveLayer((ctx, c) => {
       // Explicit reset to a solid paintable surface (does not remove UV island layout).
@@ -1854,49 +1878,6 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       ctx.globalAlpha = 1;
       ctx.fillStyle = toolState.activeColor || '#ffffff';
       ctx.fillRect(0, 0, c.width, c.height);
-    });
-  };
-
-  const outlineLayer = () => {
-    withActiveLayer((ctx, c) => {
-      const src = ctx.getImageData(0, 0, c.width, c.height);
-      const out = ctx.createImageData(c.width, c.height);
-      const s = src.data;
-      const o = out.data;
-      const w = c.width;
-      const h = c.height;
-      const color = hexToRgba(toolState.activeColor || '#ed7300');
-      for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-          const i = (y * w + x) * 4;
-          if (s[i + 3] < 8) continue;
-          let edge = false;
-          for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-            const nx = x + dx;
-            const ny = y + dy;
-            if (nx < 0 || ny < 0 || nx >= w || ny >= h) {
-              edge = true;
-              break;
-            }
-            if (s[(ny * w + nx) * 4 + 3] < 8) {
-              edge = true;
-              break;
-            }
-          }
-          if (edge) {
-            o[i] = color[0];
-            o[i + 1] = color[1];
-            o[i + 2] = color[2];
-            o[i + 3] = 255;
-          } else {
-            o[i] = s[i];
-            o[i + 1] = s[i + 1];
-            o[i + 2] = s[i + 2];
-            o[i + 3] = s[i + 3];
-          }
-        }
-      }
-      ctx.putImageData(out, 0, 0);
     });
   };
 
@@ -2053,6 +2034,41 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
             <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
             P-Perfect
           </button>
+          <button
+            type="button"
+            className={`pixel-paint__text-btn flex items-center gap-1 ${symmetryMode !== 'off' ? 'is-active !border-cyan-500 !text-cyan-400 font-bold' : ''}`}
+            onClick={() => {
+              const modes: SymmetryMode[] = ['off', 'horizontal', 'vertical', 'radial'];
+              const nextIdx = (modes.indexOf(symmetryMode) + 1) % modes.length;
+              setSymmetryMode(modes[nextIdx]);
+            }}
+            title="Toggle Symmetry Mode (Off → Horizontal → Vertical → 4-Way Radial)"
+          >
+            <Grid3x3 className="w-3.5 h-3.5 text-cyan-400" />
+            Sym: {symmetryMode.toUpperCase()}
+          </button>
+          <button
+            type="button"
+            className={`pixel-paint__text-btn flex items-center gap-1 ${tilingPreview ? 'is-active !border-emerald-500 !text-emerald-400 font-bold' : ''}`}
+            onClick={() => setTilingPreview((v) => !v)}
+            title="3x3 Tileable Texture Repeat Preview"
+          >
+            <Layers className="w-3.5 h-3.5 text-emerald-400" />
+            Tile View
+          </button>
+          {tool === 'dither' && (
+            <select
+              value={ditherPattern}
+              onChange={(e) => setDitherPattern(e.target.value as DitherPattern)}
+              className="bg-[#1e2023] text-amber-400 text-[10px] font-bold rounded px-1.5 py-0.5 outline-none border border-[#3b3f46]"
+              title="Select Dither Matrix Pattern"
+            >
+              <option value="bayer4x4">Bayer 4x4</option>
+              <option value="bayer2x2">Bayer 2x2</option>
+              <option value="checker">Checkerboard</option>
+              <option value="stripe">45° Stripe</option>
+            </select>
+          )}
         </div>
 
         <div className="pixel-paint__seg">
@@ -2253,6 +2269,37 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                   }}
                 />
               )}
+              {symmetryMode !== 'off' && (
+                <div className="absolute inset-0 pointer-events-none z-30">
+                  {(symmetryMode === 'horizontal' || symmetryMode === 'radial') && (
+                    <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-0.5 bg-cyan-400/80 shadow-[0_0_8px_#06b6d4]" />
+                  )}
+                  {(symmetryMode === 'vertical' || symmetryMode === 'radial') && (
+                    <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-0.5 bg-cyan-400/80 shadow-[0_0_8px_#06b6d4]" />
+                  )}
+                </div>
+              )}
+              {tilingPreview && (
+                <div className="absolute inset-0 pointer-events-none z-0 opacity-40">
+                  {[-1, 0, 1].map((ox) =>
+                    [-1, 0, 1].map((oy) => {
+                      if (ox === 0 && oy === 0) return null;
+                      return (
+                        <div
+                          key={`tile_${ox}_${oy}`}
+                          className="absolute inset-0 border border-dashed border-emerald-400/50"
+                          style={{
+                            transform: `translate(${ox * 100}%, ${oy * 100}%)`,
+                            backgroundImage: displayRef.current ? `url(${displayRef.current.toDataURL()})` : undefined,
+                            backgroundSize: '100% 100%',
+                            imageRendering: 'pixelated',
+                          }}
+                        />
+                      );
+                    })
+                  )}
+                </div>
+              )}
               {showUvOverlay && mesh && mesh.faces.length > 0 && (
                 <svg
                   className="absolute inset-0 w-full h-full pointer-events-none"
@@ -2407,6 +2454,24 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                 style={{ background: c }}
               />
             ))}
+          </div>
+          <div className="px-2 pt-2 pb-2 bg-[#181a1d] border-t border-[#2e3136]">
+            <div className="text-[9px] uppercase tracking-wider text-[#8b909a] mb-1 font-bold flex items-center justify-between">
+              <span>Shading Ramp</span>
+              <span className="text-[8px] font-mono text-amber-400">Lite → Dark</span>
+            </div>
+            <div className="grid grid-cols-5 gap-1 p-1 bg-[#141518] rounded border border-[#2e3136]">
+              {colorRamp.map((shade, i) => (
+                <button
+                  key={`${shade}_${i}`}
+                  type="button"
+                  title={`Shade ${i + 1}: ${shade}`}
+                  onClick={() => setToolState((s) => ({ ...s, activeColor: shade }))}
+                  className={`h-5 rounded border hover:scale-105 transition-transform ${toolState.activeColor === shade ? 'border-amber-400 scale-105 shadow-sm' : 'border-[#3b3f46]'}`}
+                  style={{ backgroundColor: shade }}
+                />
+              ))}
+            </div>
           </div>
 
           <div className="pixel-paint__section-head">

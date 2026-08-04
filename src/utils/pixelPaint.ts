@@ -180,5 +180,172 @@ export const ASEPRITE_DEFAULT_PALETTE = [
   '#4d4d4d', '#8c8c8c', '#b3b3b3', '#e8e8e8', '#7b2cbf', '#f4a261', '#2a9d8f', '#e9c46a',
 ];
 
+export type SymmetryMode = 'off' | 'horizontal' | 'vertical' | 'radial';
+export type DitherPattern = 'bayer2x2' | 'bayer4x4' | 'checker' | 'stripe';
+
+/** Calculate mirrored coordinates for pixel drawing. */
+export function getSymmetryPoints(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  mode: SymmetryMode
+): Array<{ x: number; y: number }> {
+  const points: Array<{ x: number; y: number }> = [{ x, y }];
+  if (mode === 'off') return points;
+
+  const mirrorX = width - 1 - x;
+  const mirrorY = height - 1 - y;
+
+  if (mode === 'horizontal' || mode === 'radial') {
+    if (mirrorX !== x) points.push({ x: mirrorX, y });
+  }
+  if (mode === 'vertical' || mode === 'radial') {
+    if (mirrorY !== y) points.push({ x, y: mirrorY });
+  }
+  if (mode === 'radial') {
+    if (mirrorX !== x && mirrorY !== y) points.push({ x: mirrorX, y: mirrorY });
+  }
+  return points;
+}
+
+/** Check if pixel passes dither matrix pattern test. */
+export function shouldDitherPixel(x: number, y: number, pattern: DitherPattern): boolean {
+  if (pattern === 'checker') {
+    return (x + y) % 2 === 0;
+  }
+  if (pattern === 'stripe') {
+    return (x + y) % 3 === 0;
+  }
+  if (pattern === 'bayer2x2') {
+    const matrix = [
+      [0, 2],
+      [3, 1],
+    ];
+    return matrix[y % 2][x % 2] < 2;
+  }
+  if (pattern === 'bayer4x4') {
+    const matrix = [
+      [0, 8, 2, 10],
+      [12, 4, 14, 6],
+      [3, 11, 1, 9],
+      [15, 7, 13, 5],
+    ];
+    return matrix[y % 4][x % 4] < 8;
+  }
+  return true;
+}
+
+/** Convert RGB to HSL. */
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  r /= 255;
+  g /= 255;
+  b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0;
+  const l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / d + 2; break;
+      case b: h = (r - g) / d + 4; break;
+    }
+    h /= 6;
+  }
+  return [h, s, l];
+}
+
+/** Convert HSL back to RGB hex. */
+function hslToHex(h: number, s: number, l: number): string {
+  let r: number, g: number, b: number;
+  if (s === 0) {
+    r = g = b = l;
+  } else {
+    const hue2rgb = (p: number, q: number, t: number) => {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1 / 3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1 / 3);
+  }
+  return rgbaToHex(Math.round(r * 255), Math.round(g * 255), Math.round(b * 255));
+}
+
+/** Generate a 5-step shading color ramp from base color (Highlight, Light, Base, Shadow, Ambient). */
+export function generateColorRamp(baseHex: string): string[] {
+  const [r, g, b] = hexToRgba(baseHex);
+  const [h, s, l] = rgbToHsl(r, g, b);
+
+  const highlight = hslToHex(h, Math.max(0, s - 0.05), Math.min(0.95, l + 0.25));
+  const light = hslToHex(h, Math.max(0, s - 0.02), Math.min(0.9, l + 0.12));
+  const base = baseHex;
+  const shadow = hslToHex((h + 0.02) % 1, Math.min(1, s + 0.08), Math.max(0.08, l - 0.15));
+  const ambient = hslToHex((h + 0.04) % 1, Math.min(1, s + 0.15), Math.max(0.04, l - 0.28));
+
+  return [highlight, light, base, shadow, ambient];
+}
+
+/** 1-click Auto Outline: Draws a 1px solid stroke around all opaque non-transparent pixels. */
+export function generatePixelOutline(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  outlineHex: string
+): void {
+  const imgData = ctx.getImageData(0, 0, width, height);
+  const data = imgData.data;
+  const outlineRgba = hexToRgba(outlineHex);
+
+  const outlinePositions: Array<[number, number]> = [];
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = (y * width + x) * 4;
+      const alpha = data[idx + 3];
+      if (alpha === 0) {
+        // Check if any neighbor is opaque
+        let hasOpaqueNeighbor = false;
+        const neighbors = [
+          [x - 1, y],
+          [x + 1, y],
+          [x, y - 1],
+          [x, y + 1],
+        ];
+        for (const [nx, ny] of neighbors) {
+          if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+            const nIdx = (ny * width + nx) * 4;
+            if (data[nIdx + 3] > 0) {
+              hasOpaqueNeighbor = true;
+              break;
+            }
+          }
+        }
+        if (hasOpaqueNeighbor) {
+          outlinePositions.push([x, y]);
+        }
+      }
+    }
+  }
+
+  for (const [ox, oy] of outlinePositions) {
+    const oIdx = (oy * width + ox) * 4;
+    data[oIdx] = outlineRgba[0];
+    data[oIdx + 1] = outlineRgba[1];
+    data[oIdx + 2] = outlineRgba[2];
+    data[oIdx + 3] = 255;
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+}
+
 export { PAINT_PALETTES, getPaintPalette } from './paintPalettes';
 export type { PaintPalette, PaintPaletteId } from './paintPalettes';
