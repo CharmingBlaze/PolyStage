@@ -54,7 +54,7 @@ export function applyPaintOrbitMouseButtons(controls: OrbitControls | null | und
   // LMB must stay unbound for the entire paint workspace — not only mid-stroke.
   // Re-applying STANDARD buttons while idle was re-arming orbit and stealing drags.
   controls.mouseButtons = {
-    LEFT: -1 as unknown as THREE.MOUSE,
+    LEFT: THREE.MOUSE.ROTATE,
     MIDDLE: THREE.MOUSE.DOLLY,
     RIGHT: THREE.MOUSE.PAN,
   };

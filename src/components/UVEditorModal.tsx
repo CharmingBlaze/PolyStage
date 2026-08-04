@@ -1,10 +1,215 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { buildThreeGeometry } from '../utils/meshUtils';
 import {
   Box, Check, Compass, FlipHorizontal, FlipVertical, Grid3X3, Layers,
   Maximize2, Minimize2, Move, RotateCcw, RotateCw, ScanSearch, Sparkles,
   X, ZoomIn, ZoomOut,
 } from 'lucide-react';
 import type { CADMesh, Face, UVCoord } from '../types/cad';
+
+interface UV3DPreviewProps {
+  mesh: CADMesh;
+  selectedFaceIds: string[];
+  textureCanvas: HTMLCanvasElement | null;
+}
+
+const UV3DPreview: React.FC<UV3DPreviewProps> = ({ mesh, selectedFaceIds, textureCanvas }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const controlsRef = useRef<OrbitControls | null>(null);
+  const meshRef = useRef<THREE.Mesh | null>(null);
+  const wireframeRef = useRef<THREE.LineSegments | null>(null);
+  const highlightsGroupRef = useRef<THREE.Group | null>(null);
+  const textureRef = useRef<THREE.CanvasTexture | null>(null);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const width = containerRef.current.clientWidth;
+    const height = containerRef.current.clientHeight;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color('#141518');
+    sceneRef.current = scene;
+
+    const camera = new THREE.PerspectiveCamera(40, width / height, 0.01, 1000);
+    camera.position.set(2.5, 2, 4);
+    cameraRef.current = camera;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(width, height);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.shadowMap.enabled = true;
+    rendererRef.current = renderer;
+    containerRef.current.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controlsRef.current = controls;
+
+    const ambient = new THREE.AmbientLight(0xffffff, 0.35);
+    scene.add(ambient);
+
+    const keyLight = new THREE.DirectionalLight(0xffffff, 0.65);
+    keyLight.position.set(5, 8, 5);
+    scene.add(keyLight);
+
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
+    fillLight.position.set(-5, 4, -5);
+    scene.add(fillLight);
+
+    const grid = new THREE.GridHelper(6, 12, 0x3b3f46, 0x212327);
+    grid.position.y = -0.001;
+    scene.add(grid);
+
+    const highlights = new THREE.Group();
+    scene.add(highlights);
+    highlightsGroupRef.current = highlights;
+
+    let active = true;
+    const animate = () => {
+      if (!active) return;
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    };
+    animate();
+
+    const handleResize = () => {
+      if (!containerRef.current || !renderer || !camera) return;
+      const w = containerRef.current.clientWidth;
+      const h = containerRef.current.clientHeight;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      active = false;
+      window.removeEventListener('resize', handleResize);
+      controls.dispose();
+      renderer.dispose();
+      if (renderer.domElement && renderer.domElement.parentNode) {
+        renderer.domElement.parentNode.removeChild(renderer.domElement);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    if (meshRef.current) {
+      scene.remove(meshRef.current);
+      meshRef.current.geometry.dispose();
+      if (Array.isArray(meshRef.current.material)) {
+        meshRef.current.material.forEach((m) => m.dispose());
+      } else {
+        meshRef.current.material.dispose();
+      }
+      meshRef.current = null;
+    }
+    if (wireframeRef.current) {
+      scene.remove(wireframeRef.current);
+      wireframeRef.current.geometry.dispose();
+      (wireframeRef.current.material as THREE.Material).dispose();
+      wireframeRef.current = null;
+    }
+    if (highlightsGroupRef.current) {
+      while (highlightsGroupRef.current.children.length > 0) {
+        const child = highlightsGroupRef.current.children[0] as THREE.Mesh;
+        highlightsGroupRef.current.remove(child);
+        child.geometry.dispose();
+        (child.material as THREE.Material).dispose();
+      }
+    }
+
+    const geo = buildThreeGeometry(mesh);
+
+    let texture = textureRef.current;
+    if (textureCanvas) {
+      if (!texture) {
+        texture = new THREE.CanvasTexture(textureCanvas);
+        textureRef.current = texture;
+      } else {
+        texture.image = textureCanvas;
+        texture.needsUpdate = true;
+      }
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.minFilter = THREE.NearestFilter;
+      texture.magFilter = THREE.NearestFilter;
+    }
+
+    const material = new THREE.MeshStandardMaterial({
+      map: texture || null,
+      color: texture ? 0xffffff : 0xa5a6a8,
+      roughness: 0.6,
+      metalness: 0.1,
+      side: THREE.DoubleSide,
+    });
+
+    const mMesh = new THREE.Mesh(geo, material);
+    scene.add(mMesh);
+    meshRef.current = mMesh;
+
+    const box = new THREE.Box3().setFromObject(mMesh);
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+    mMesh.position.sub(center);
+
+    const wireGeo = new THREE.WireframeGeometry(geo);
+    const wireMat = new THREE.LineBasicMaterial({ color: 0x3b3f46, linewidth: 1 });
+    const wireframe = new THREE.LineSegments(wireGeo, wireMat);
+    scene.add(wireframe);
+    wireframeRef.current = wireframe;
+
+    if (highlightsGroupRef.current && selectedFaceIds.length > 0) {
+      const vertMap = new Map(mesh.vertices.map((v) => [v.id, v]));
+      mesh.faces.forEach((f) => {
+        if (!selectedFaceIds.includes(f.id)) return;
+        const fVerts = f.vertexIds.map((vId) => vertMap.get(vId)!).filter(Boolean);
+        if (fVerts.length < 3) return;
+
+        const positions: number[] = [];
+        for (let i = 1; i < fVerts.length - 1; i++) {
+          const p0 = fVerts[0];
+          const p1 = fVerts[i];
+          const p2 = fVerts[i + 1];
+          positions.push(
+            p0.x - center.x, p0.y - center.y, p0.z - center.z,
+            p1.x - center.x, p1.y - center.y, p1.z - center.z,
+            p2.x - center.x, p2.y - center.y, p2.z - center.z
+          );
+        }
+
+        const faceGeo = new THREE.BufferGeometry();
+        faceGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        faceGeo.computeVertexNormals();
+
+        const faceMat = new THREE.MeshBasicMaterial({
+          color: 0xed7300,
+          transparent: true,
+          opacity: 0.35,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          polygonOffset: true,
+          polygonOffsetFactor: -1,
+          polygonOffsetUnits: -1,
+        });
+
+        const faceMesh = new THREE.Mesh(faceGeo, faceMat);
+        highlightsGroupRef.current?.add(faceMesh);
+      });
+    }
+  }, [mesh, selectedFaceIds, textureCanvas]);
+
+  return <div ref={containerRef} className="w-full h-full absolute inset-0 overflow-hidden" />;
+};
 import {
   boxUnwrapFaces,
   cylindricalUnwrapFaces,
@@ -111,6 +316,7 @@ export const UVEditorModal: React.FC<UVEditorModalProps> = ({
   const [showOverlap, setShowOverlap] = useState(true);
   const [maximized, setMaximized] = useState(true);
   const [cursorUv, setCursorUv] = useState<UVCoord | null>(null);
+  const [show3DPreview, setShow3DPreview] = useState(true);
   const boardRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState>(null);
 
@@ -339,57 +545,73 @@ export const UVEditorModal: React.FC<UVEditorModalProps> = ({
               <label className="mt-2 flex items-center gap-2"><input type="checkbox" checked={showOverlap} onChange={(e) => setShowOverlap(e.target.checked)} className="accent-rose-500"/> Highlight overlaps</label>
               <label className="mt-2 flex items-center gap-2"><input type="checkbox" checked={showTexture} onChange={(e) => setShowTexture(e.target.checked)} className="accent-[#ed7300]"/> Texture preview</label>
               <label className="mt-2 flex items-center gap-2"><input type="checkbox" checked={showGrid} onChange={(e) => setShowGrid(e.target.checked)} className="accent-[#ed7300]"/> Pixel grid</label>
+              <label className="mt-2 flex items-center gap-2"><input type="checkbox" checked={show3DPreview} onChange={(e) => setShow3DPreview(e.target.checked)} className="accent-[#ed7300]"/> Show 3D Viewport</label>
             </section>
             <button className="text-[#8b909a] hover:text-[#ec5b62]" onClick={() => setMesh(resetMeshUVs(mesh))}>Reset all UVs</button>
           </aside>
 
-          <main
-            className="flex-1 relative overflow-hidden bg-[#252525]"
-            onWheel={(e) => setZoom((z) => Math.max(0.35, Math.min(8, z * (e.deltaY > 0 ? 0.9 : 1.1))))}
-            onContextMenu={(e) => e.preventDefault()}
-          >
-            <div className="absolute top-3 left-3 z-20 flex gap-1">
-              <button className={iconButton} onClick={() => setZoom((z) => Math.min(8, z * 1.2))}><ZoomIn size={14}/></button>
-              <button className={iconButton} onClick={() => setZoom((z) => Math.max(.35, z / 1.2))}><ZoomOut size={14}/></button>
-              <button className={iconButton} onClick={() => { setZoom(1); setPan({x: 0, y: 0}); }}><Move size={14}/> Frame all</button>
-            </div>
-            <div className="absolute top-3 right-3 z-20 rounded-sm bg-[#26282d]/95 border border-[#3b3f46] px-2 py-1 text-[10px] font-mono text-[#8b909a]">
-              {cursorUv ? `U ${cursorUv.u.toFixed(3)}  V ${cursorUv.v.toFixed(3)}` : 'A select all · R rotate · F fit'}
-            </div>
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div
-                ref={boardRef}
-                onPointerDown={onPointerDown}
-                onPointerMove={onPointerMove}
-                onPointerUp={endDrag}
-                onPointerCancel={endDrag}
-                className="relative pointer-events-auto w-[min(72vh,72vw)] aspect-square border-2 border-[#ed7300] shadow-[0_25px_80px_#000] origin-center touch-none"
-                style={{
-                  transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-                  backgroundColor: '#1e2023',
-                  backgroundImage: showGrid
-                    ? 'linear-gradient(rgba(237,115,0,0.12) 1px,transparent 1px),linear-gradient(90deg,rgba(237,115,0,0.12) 1px,transparent 1px),linear-gradient(45deg,#303030 25%,transparent 25%,transparent 75%,#303030 75%),linear-gradient(45deg,#303030 25%,#191b1e 25%,#191b1e 75%,#303030 75%)'
-                    : undefined,
-                  backgroundSize: showGrid ? `${100 / Math.max(1, snapDivisions)}% ${100 / Math.max(1, snapDivisions)}%,${100 / Math.max(1, snapDivisions)}% ${100 / Math.max(1, snapDivisions)}%,24px 24px,24px 24px` : undefined,
-                  backgroundPosition: showGrid ? '0 0,0 0,0 0,12px 12px' : undefined,
-                }}
-              >
-                {showTexture && textureUrl && <img src={textureUrl} className="absolute inset-0 w-full h-full opacity-70 pointer-events-none" style={{imageRendering: 'pixelated'}}/>}
-                <svg viewBox="0 0 1000 1000" className="absolute inset-0 w-full h-full overflow-visible">
-                  {mesh.faces.map((face, index) => {
-                    const isSelected = selected.includes(face.id);
-                    const isOverlap = showOverlap && overlaps.has(face.id);
-                    const points = face.uvs.map((p) => `${p.u * 1000},${p.v * 1000}`).join(' ');
-                    return <g key={face.id}>
-                      <polygon points={points} fill={isOverlap ? '#ec5b623d' : isSelected ? '#ed730038' : '#ffffff0a'} stroke={isOverlap ? '#ec5b62' : isSelected ? '#ed7300' : '#7a7a7a'} strokeWidth={isSelected ? 4 : 2}/>
-                      {isSelected && <text x={getFaceUVBounds(face.uvs).cu * 1000} y={getFaceUVBounds(face.uvs).cv * 1000} textAnchor="middle" fill="#ffffff" fontSize="22" className="pointer-events-none">{index + 1}</text>}
-                      {mode === 'vertex' && face.uvs.map((p, i) => <circle key={i} cx={p.u * 1000} cy={p.v*1000} r={activeVertex?.faceId === face.id && activeVertex.index === i ? 11 : 7} fill={activeVertex?.faceId === face.id && activeVertex.index === i ? '#ed7300' : '#e6e6e6'} stroke="#101114" strokeWidth="3"/>)}
-                    </g>;
-                  })}
-                </svg>
+          <div className="flex-1 min-w-0 flex relative bg-[#252525]">
+            <main
+              className="flex-1 relative overflow-hidden"
+              onWheel={(e) => setZoom((z) => Math.max(0.35, Math.min(8, z * (e.deltaY > 0 ? 0.9 : 1.1))))}
+              onContextMenu={(e) => e.preventDefault()}
+            >
+              <div className="absolute top-3 left-3 z-20 flex gap-1">
+                <button className={iconButton} onClick={() => setZoom((z) => Math.min(8, z * 1.2))}><ZoomIn size={14}/></button>
+                <button className={iconButton} onClick={() => setZoom((z) => Math.max(.35, z / 1.2))}><ZoomOut size={14}/></button>
+                <button className={iconButton} onClick={() => { setZoom(1); setPan({x: 0, y: 0}); }}><Move size={14}/> Frame all</button>
               </div>
-            </div>
-          </main>
+              <div className="absolute top-3 right-3 z-20 rounded-sm bg-[#26282d]/95 border border-[#3b3f46] px-2 py-1 text-[10px] font-mono text-[#8b909a]">
+                {cursorUv ? `U ${cursorUv.u.toFixed(3)}  V ${cursorUv.v.toFixed(3)}` : 'A select all · R rotate · F fit'}
+              </div>
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div
+                  ref={boardRef}
+                  onPointerDown={onPointerDown}
+                  onPointerMove={onPointerMove}
+                  onPointerUp={endDrag}
+                  onPointerCancel={endDrag}
+                  className="relative pointer-events-auto w-[min(72vh,72vw)] aspect-square border-2 border-[#ed7300] shadow-[0_25px_80px_#000] origin-center touch-none"
+                  style={{
+                    transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                    backgroundColor: '#1e2023',
+                    backgroundImage: showGrid
+                      ? 'linear-gradient(rgba(237,115,0,0.12) 1px,transparent 1px),linear-gradient(90deg,rgba(237,115,0,0.12) 1px,transparent 1px),linear-gradient(45deg,#303030 25%,transparent 25%,transparent 75%,#303030 75%),linear-gradient(45deg,#303030 25%,#191b1e 25%,#191b1e 75%,#303030 75%)'
+                      : undefined,
+                    backgroundSize: showGrid ? `${100 / Math.max(1, snapDivisions)}% ${100 / Math.max(1, snapDivisions)}%,${100 / Math.max(1, snapDivisions)}% ${100 / Math.max(1, snapDivisions)}%,24px 24px,24px 24px` : undefined,
+                    backgroundPosition: showGrid ? '0 0,0 0,0 0,12px 12px' : undefined,
+                  }}
+                >
+                  {showTexture && textureUrl && <img src={textureUrl} className="absolute inset-0 w-full h-full opacity-70 pointer-events-none" style={{imageRendering: 'pixelated'}}/>}
+                  <svg viewBox="0 0 1000 1000" className="absolute inset-0 w-full h-full overflow-visible">
+                    {mesh.faces.map((face, index) => {
+                      const isSelected = selected.includes(face.id);
+                      const isOverlap = showOverlap && overlaps.has(face.id);
+                      const points = face.uvs.map((p) => `${p.u * 1000},${p.v * 1000}`).join(' ');
+                      return <g key={face.id}>
+                        <polygon points={points} fill={isOverlap ? '#ec5b623d' : isSelected ? '#ed730038' : '#ffffff0a'} stroke={isOverlap ? '#ec5b62' : isSelected ? '#ed7300' : '#7a7a7a'} strokeWidth={isSelected ? 4 : 2}/>
+                        {isSelected && <text x={getFaceUVBounds(face.uvs).cu * 1000} y={getFaceUVBounds(face.uvs).cv * 1000} textAnchor="middle" fill="#ffffff" fontSize="22" className="pointer-events-none">{index + 1}</text>}
+                        {mode === 'vertex' && face.uvs.map((p, i) => <circle key={i} cx={p.u * 1000} cy={p.v*1000} r={activeVertex?.faceId === face.id && activeVertex.index === i ? 11 : 7} fill={activeVertex?.faceId === face.id && activeVertex.index === i ? '#ed7300' : '#e6e6e6'} stroke="#101114" strokeWidth="3"/>)}
+                      </g>;
+                    })}
+                  </svg>
+                </div>
+              </div>
+            </main>
+
+            {show3DPreview && (
+              <div className="w-[38%] min-w-[320px] bg-[#141518] relative border-l border-[#3b3f46]">
+                <UV3DPreview
+                  mesh={mesh}
+                  selectedFaceIds={selected}
+                  textureCanvas={textureCanvas}
+                />
+                <div className="absolute top-3 right-3 z-20 rounded-sm bg-[#26282d]/95 border border-[#3b3f46] px-2 py-1 text-[9px] font-mono text-[#8b909a] pointer-events-none">
+                  3D PREVIEW
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         <footer className="adobe-statusbar h-9 shrink-0 px-4 justify-between text-[10px]">

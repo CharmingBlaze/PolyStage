@@ -128,7 +128,7 @@ function beginLocked(target: HTMLCanvasElement) {
 }
 
 /** Pixel-art tools stamp hard squares. Soft circular falloff smears on low-res atlases. */
-function useHardSquareStamp(paintTool: Paint3DTool): boolean {
+function shouldUseHardSquareStamp(paintTool: Paint3DTool): boolean {
   return (
     paintTool === 'pencil'
     || paintTool === 'eraser'
@@ -198,7 +198,7 @@ function stampAt(
   } else {
     // Match PixelPaintStudio: hard opaque squares. Soft+alpha looked like skewed
     // smears on the mesh (bilinear-looking blobs) while the UV editor stayed crisp.
-    const soft = !useHardSquareStamp(paintTool) && size > 1;
+    const soft = !shouldUseHardSquareStamp(paintTool) && size > 1;
     const alpha = Math.max(0, Math.min(1, opacity));
     for (const t of collectBrushTexels(cx, cy, size, soft)) {
       if (t.x < 0 || t.y < 0 || t.x >= w || t.y >= h) continue;

@@ -17,6 +17,7 @@ import type {
 } from '../types/cad';
 import { createDefaultEnvironment } from '../utils/cutsceneEnv';
 import { lightDistanceFromScale } from '../utils/sceneHelpers';
+import { recenterMeshOrigin } from '../utils/meshUtils';
 
 interface PropertiesPanelProps {
   mesh: CADMesh;
@@ -172,6 +173,12 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     patchTransform({ scale: { ...scale, [axis]: Math.max(0.01, val) } });
   };
 
+  const handleRecenterOrigin = () => {
+    if (!sceneTarget) {
+      setMesh(recenterMeshOrigin(mesh));
+    }
+  };
+
   const adobeSwatches = [
     '#ed7300', '#ff9a3c', '#ff0055', '#f59e0b', '#10b981', '#8b5cf6',
     '#ec4899', '#6366f1', '#3b82f6', '#06b6d4', '#14b8a6', '#22c55e',
@@ -266,6 +273,18 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                 ))}
               </div>
             </div>
+
+            {!sceneTarget && (
+              <button
+                type="button"
+                onClick={handleRecenterOrigin}
+                className="w-full mt-2 h-7 bg-[#2e3136] text-[#ed7300] border border-[#3b3f46] hover:bg-[#34383f] hover:text-[#ff9a3c] rounded flex items-center justify-center font-mono text-[9px] font-bold tracking-wider gap-1.5 transition"
+                title="Recenter the object's pivot point to its geometric center without shifting its world position"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                RECENTER OBJECT PIVOT
+              </button>
+            )}
           </div>
         </div>
 
