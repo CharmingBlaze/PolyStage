@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BoxSelect, ChevronDown, CircleDot, FlipHorizontal, FlipVertical,
   Grid3X3, ImagePlus, Link2, Lock, Maximize2, Move, MousePointer2, Pin,
-  RotateCcw, RotateCw, Scissors, Trash2, Unlink2, Unlock, ZoomIn,
+  RotateCcw, RotateCw, Scissors, Trash2, Unlink2, Unlock, ZoomIn, X,
 } from 'lucide-react';
 import type { CADMesh, Face, UVCoord } from '../types/cad';
 import {
@@ -33,6 +33,7 @@ interface UVEditorProps {
   textureCanvas: HTMLCanvasElement | null;
   onTextureUpdated?: (canvas: HTMLCanvasElement) => void;
   onOpenUVModal?: () => void;
+  onClose?: () => void;
 }
 
 type TransformMode = 'move' | 'rotate' | 'scale';
@@ -101,7 +102,7 @@ function hitHandle(p: Point, handle: Point, radius = HANDLE_R + 2) {
 
 export const UVEditor: React.FC<UVEditorProps> = ({
   mesh, setMesh, meshes = [], activeMeshId, onSelectMesh,
-  selectedFaceIds, setSelectedFaceIds, textureCanvas, onTextureUpdated, onOpenUVModal,
+  selectedFaceIds, setSelectedFaceIds, textureCanvas, onTextureUpdated, onOpenUVModal, onClose,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -1047,6 +1048,26 @@ export const UVEditor: React.FC<UVEditorProps> = ({
             )}
           </div>
         </details>
+        {onOpenUVModal && (
+          <button
+            type="button"
+            className={toolButton()}
+            title="Expand UV Studio to full window"
+            onClick={onOpenUVModal}
+          >
+            <Maximize2 size={12} />
+          </button>
+        )}
+        {onClose && (
+          <button
+            type="button"
+            className={`${toolButton()} hover:!bg-[#e5484d] hover:!text-white`}
+            title="Close UV split view (restore normal viewport)"
+            onClick={onClose}
+          >
+            <X size={12} />
+          </button>
+        )}
       </div>
 
       <div className="flex-1 min-h-0 flex">

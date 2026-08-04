@@ -2015,6 +2015,11 @@ export const App: React.FC = () => {
       return;
     }
 
+    if (uvSplitOpen) {
+      setUvSplitOpen(false);
+      return;
+    }
+
     setActiveWorkspaceMode('modeling');
     setUvSplitOpen(true);
     setIsToolWindowOpen(false);
@@ -2339,6 +2344,7 @@ export const App: React.FC = () => {
                     textureCanvas={textureCanvasRef.current}
                     onTextureUpdated={handleUvTextureLoaded}
                     onOpenUVModal={() => setIsUVModalOpen(true)}
+                    onClose={() => setUvSplitOpen(false)}
                   />
                 )}
               </section>

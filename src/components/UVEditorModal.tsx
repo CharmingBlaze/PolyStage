@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { buildThreeGeometry } from '../utils/meshUtils';
@@ -439,9 +440,9 @@ export const UVEditorModal: React.FC<UVEditorModalProps> = ({
   const iconButton = 'adobe-control h-8 px-2.5';
   const modeButton = (active: boolean) => `${iconButton} ${active ? 'is-active' : ''}`;
 
-  return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm p-3 flex items-center justify-center">
-      <div className={`adobe-workspace flex flex-col overflow-hidden rounded-md border border-[#3b3f46] shadow-2xl ${maximized ? 'w-full h-full' : 'w-[1100px] h-[760px]'}`}>
+  return createPortal(
+    <div className="fixed inset-0 z-[100000] bg-black/85 backdrop-blur-md p-3 flex items-center justify-center">
+      <div className={`adobe-workspace flex flex-col overflow-hidden rounded-lg border border-[#3b3f46] shadow-2xl ${maximized ? 'w-full h-full' : 'w-[1100px] h-[760px]'}`}>
         <header className="adobe-panel-header h-12 shrink-0 px-4 justify-between">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-8 h-8 rounded bg-[rgba(237,115,0,.18)] text-[#ed7300] flex items-center justify-center shrink-0"><Box size={17} /></div>
@@ -619,6 +620,7 @@ export const UVEditorModal: React.FC<UVEditorModalProps> = ({
           <button onClick={onClose} className="adobe-control is-active h-7 px-4 font-semibold"><Check size={13}/> Apply UVs</button>
         </footer>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
