@@ -11,6 +11,28 @@ import { generateId } from './meshUtils';
 
 const id = (prefix: string) => `${prefix}_${generateId()}`;
 
+export function createCustomTextureClip(
+  name: string,
+  frameIds: string[],
+  loop = true,
+): MeshTextureAnimClip {
+  return {
+    id: id('texclip'),
+    name: name.trim() || 'Custom Clip',
+    frameIds,
+    loop,
+  };
+}
+
+export function duplicateTextureClip(clip: MeshTextureAnimClip): MeshTextureAnimClip {
+  return {
+    ...clip,
+    id: id('texclip'),
+    name: `${clip.name} (Copy)`,
+    frameIds: [...clip.frameIds],
+  };
+}
+
 export function createPresetTextureClips(frames: MeshTextureAnimFrame[]): MeshTextureAnimClip[] {
   const byTag = (tag: string) => frames.filter((f) => f.tags?.includes(tag)).map((f) => f.id);
   const presets: Array<{ name: string; tag: string }> = [

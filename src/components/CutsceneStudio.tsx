@@ -9,11 +9,11 @@ import {
   Key, Move, RotateCw, Maximize2, Minimize2, Trash2, ChevronRight, ChevronDown, ChevronUp, Minus, Layers, Bone,
   PanelLeftClose, PanelLeft, ChevronsDownUp, Settings2, Box, EyeOff,
   ZoomIn, ZoomOut, SkipBack, SkipForward, StepBack, StepForward, Sun, Lightbulb, Music,
-  Crosshair, Aperture, Copy, Gamepad2, Clapperboard,
+  Crosshair, Aperture, Copy, Gamepad2, Clapperboard, X,
 } from 'lucide-react';
 import type {
   AnimationClip, CADBone, CADCamera, CADLight, CADLightType, CADMesh, EnvironmentSettings,
-  ParticleEmitter, WeatherPreset, Vector3D,
+  ParticleEmitter, WeatherPreset, Vector3D, TextureClipKey,
 } from '../types/cad';
 import type { CutsceneSequence } from '../types/sequence';
 import { buildThreeGeometry } from '../utils/meshUtils';
@@ -1658,6 +1658,27 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
       }),
     );
     setSelectedKeyframeId(null);
+  };
+
+  const deleteTextureClipKey = (targetId: string, clipKey: TextureClipKey) => {
+    if (!activeClip) return;
+    setClips((prev) =>
+      prev.map((c) => {
+        if (c.id !== activeClip.id) return c;
+        return {
+          ...c,
+          tracks: c.tracks.map((track) => {
+            if (track.targetId !== targetId) return track;
+            return {
+              ...track,
+              textureClipKeys: (track.textureClipKeys || []).filter(
+                (k) => !(k.time === clipKey.time && k.clipId === clipKey.clipId)
+              ),
+            };
+          }),
+        };
+      })
+    );
   };
 
   const handleGraphPatchKeyframe = (
@@ -5162,6 +5183,45 @@ export const CutsceneStudio: React.FC<CutsceneStudioProps> = ({
                                   }}
                                 />
                               ))}
+                              {track.textureClipKeys?.map((tck, idx) => {
+                                const mesh = meshes.find((m) => m.id === track.targetId);
+                                const clip = mesh?.textureAnimation?.clips?.find((c) => c.id === tck.clipId);
+                                const clipName = clip?.name || tck.clipId;
+                                const startX = tck.time * pxPerSec;
+                                const holdEnd = tck.holdUntil ?? (tck.time + 0.8);
+                                const widthPx = Math.max(32, (holdEnd - tck.time) * pxPerSec);
+
+                                return (
+                                  <div
+                                    key={`tck_${tck.clipId}_${idx}`}
+                                    style={{ left: startX, width: widthPx }}
+                                    className="absolute top-0.5 bottom-0.5 z-25 rounded bg-[#e68619]/45 border border-[#e68619] px-1.5 text-[9px] font-semibold text-amber-200 flex items-center justify-between truncate cursor-pointer shadow-sm group hover:bg-[#e68619]/75 transition-colors"
+                                    title={`Texture Clip: ${clipName} (${tck.time.toFixed(2)}s - ${holdEnd.toFixed(2)}s). Right-click to remove.`}
+                                    onPointerDown={(e) => {
+                                      e.stopPropagation();
+                                      setPlayhead(tck.time);
+                                    }}
+                                    onContextMenu={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      deleteTextureClipKey(track.targetId, tck);
+                                    }}
+                                  >
+                                    <span className="truncate flex-1 font-mono text-[9px] pointer-events-none">{clipName}</span>
+                                    <button
+                                      type="button"
+                                      className="opacity-0 group-hover:opacity-100 hover:text-rose-400 p-0.5 shrink-0"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        deleteTextureClipKey(track.targetId, tck);
+                                      }}
+                                      title="Delete texture clip key"
+                                    >
+                                      <X size={10} />
+                                    </button>
+                                  </div>
+                                );
+                              })}
                             </div>
                             {isExpanded && (
                               <div>
