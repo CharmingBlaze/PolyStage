@@ -144,6 +144,8 @@ export type PenPatchKind = 'polygon' | 'quad' | 'triangle' | 'segment' | 'curve'
 export interface PenPoint {
   id: string;
   position: Vec3;
+  /** When set, commit reuses this existing mesh vertex instead of creating one. */
+  meshVertexId?: string;
 }
 
 export interface PenPatch {
@@ -187,11 +189,11 @@ export function createPenSession(settings: PenToolSettings, plane: ConstructionP
 /**
  * Work plane for a viewport click.
  *
- * First vertex: this view's construction plane, or a perspective surface hit.
- * Later vertices stay on the session plane when the ray can hit it (so a cube
- * face or Top/Front/Side sketch stays planar). If the ray is parallel — Quad
- * Front after starting in Top — fall back to the current view so the polygon
- * becomes real 3D instead of failing to place.
+ * First vertex: this view's construction plane, or a mesh face under the cursor
+ * in any view. Later vertices stay on the session plane when the ray can hit it
+ * (a cube face or Top/Front/Side sketch stays planar). If the ray is parallel —
+ * Quad Front after starting in Top — fall back to the current view or a surface
+ * so the polygon becomes real 3D instead of failing to place.
  */
 export function resolvePenWorkPlane(opts: {
   view: DrawViewKind;
@@ -205,14 +207,10 @@ export function resolvePenWorkPlane(opts: {
   if (opts.hasPoints) {
     const locked = intersectRayPlane(opts.rayOrigin, opts.rayDir, opts.sessionPlane);
     if (locked) return opts.sessionPlane;
-    if (opts.view === 'perspective' && opts.surface) {
-      return makeConstructionPlane(opts.surface.point, opts.surface.normal);
-    }
+    if (opts.surface) return makeConstructionPlane(opts.surface.point, opts.surface.normal);
     return viewPlane;
   }
-  if (opts.view === 'perspective' && opts.surface) {
-    return makeConstructionPlane(opts.surface.point, opts.surface.normal);
-  }
+  if (opts.surface) return makeConstructionPlane(opts.surface.point, opts.surface.normal);
   return viewPlane;
 }
 
@@ -252,6 +250,40 @@ export interface PenClickOptions {
   insertAfterId?: string | null;
   /** Ctrl with Make Quads: create a single triangle instead of a quad. */
   triangle?: boolean;
+  /** Clicked an existing mesh vertex — reuse it on commit. */
+  meshVertexId?: string;
+}
+
+export function penFindByMeshVertex(session: PenSession, meshVertexId: string): PenPoint | undefined {
+  return session.points.find((p) => p.meshVertexId === meshVertexId);
+}
+
+/**
+ * Continue the chain through a vertex already in this session (including
+ * adopted mesh corners). Clicking the first point of a 3+ chain closes it.
+ */
+export function penConnectExisting(
+  session: PenSession,
+  pointId: string,
+  options: PenClickOptions = {},
+): PenSession {
+  if (!penFindPoint(session, pointId)) return session;
+  const min = penMinPatchPoints(session.settings);
+  if (options.newPolygon) {
+    let next = session;
+    if (next.activeIds.length >= min) next = penCommitActive(next);
+    return { ...next, activeIds: [pointId], currentPointId: pointId };
+  }
+  if (session.activeIds.length >= min && session.activeIds[0] === pointId) {
+    return penCommitActive(session);
+  }
+  if (session.activeIds[session.activeIds.length - 1] === pointId) return session;
+  if (session.activeIds.includes(pointId)) return session;
+  return {
+    ...session,
+    activeIds: [...session.activeIds, pointId],
+    currentPointId: pointId,
+  };
 }
 
 /**
@@ -265,8 +297,17 @@ export function penAddPoint(
   position: Vec3,
   options: PenClickOptions = {},
 ): PenSession {
+  if (options.meshVertexId) {
+    const existing = penFindByMeshVertex(session, options.meshVertexId);
+    if (existing) return penConnectExisting(session, existing.id, options);
+  }
+
   const settings = session.settings;
-  const point: PenPoint = { id: generateId(), position: vecClone(position) };
+  const point: PenPoint = {
+    id: generateId(),
+    position: vecClone(position),
+    ...(options.meshVertexId ? { meshVertexId: options.meshVertexId } : {}),
+  };
   let points = [...session.points, point];
   let activeIds = [...session.activeIds];
   const patches = [...session.patches];
@@ -382,16 +423,64 @@ export function penWeldPoints(session: PenSession, fromId: string, toId: string)
   };
 }
 
+/** True when this session point is welded to a mesh vertex and should not be dragged. */
+export function penPointIsLocked(point: PenPoint): boolean {
+  return Boolean(point.meshVertexId);
+}
+
+/** Snap a free session point onto an existing mesh vertex. */
+export function penBindMeshVertex(
+  session: PenSession,
+  pointId: string,
+  meshVertexId: string,
+  position: Vec3,
+): PenSession {
+  if (!penFindPoint(session, pointId)) return session;
+  return {
+    ...session,
+    points: session.points.map((p) =>
+      p.id === pointId ? { ...p, meshVertexId, position: vecClone(position) } : p,
+    ),
+    currentPointId: pointId,
+  };
+}
+
+/** Nearest overlay / mesh handle under the cursor, in viewport pixels. */
+export function penNearestScreenHit<T extends { id: string; sx: number; sy: number }>(
+  mouseX: number,
+  mouseY: number,
+  candidates: T[],
+  thresholdPx = 14,
+): T | null {
+  let best: T | null = null;
+  let bestD = thresholdPx * thresholdPx;
+  for (const c of candidates) {
+    const dx = c.sx - mouseX;
+    const dy = c.sy - mouseY;
+    const d = dx * dx + dy * dy;
+    if (d <= bestD) {
+      bestD = d;
+      best = c;
+    }
+  }
+  return best;
+}
+
 /** Backspace: drop the last placed vertex, else the last completed patch. */
 export function penUndoLastPoint(session: PenSession): PenSession {
   if (session.activeIds.length > 0) {
     const last = session.activeIds[session.activeIds.length - 1];
+    const activeIds = session.activeIds.slice(0, -1);
+    const stillUsed =
+      activeIds.includes(last) || session.patches.some((p) => p.pointIds.includes(last));
     return {
       ...session,
-      activeIds: session.activeIds.slice(0, -1),
-      points: session.points.filter((p) => p.id !== last),
-      patches: session.patches.filter((p) => !p.pointIds.includes(last)),
-      currentPointId: session.activeIds[session.activeIds.length - 2] ?? null,
+      activeIds,
+      points: stillUsed ? session.points : session.points.filter((p) => p.id !== last),
+      patches: stillUsed
+        ? session.patches
+        : session.patches.filter((p) => !p.pointIds.includes(last)),
+      currentPointId: activeIds[activeIds.length - 1] ?? null,
     };
   }
   if (session.patches.length > 0) {
@@ -549,9 +638,16 @@ export function penSessionToMesh(baseMesh: CADMesh, session: PenSession): PenCom
   const faceIds: string[] = [];
   const vertexIds: string[] = [];
 
-  const addVertex = (key: string, world: Vec3): string => {
+  const addVertex = (key: string, world: Vec3, meshVertexId?: string): string => {
     const existing = pointVertex.get(key);
     if (existing) return existing;
+    if (meshVertexId) {
+      const reused = vertices.find((v) => v.id === meshVertexId);
+      if (reused) {
+        pointVertex.set(key, reused.id);
+        return reused.id;
+      }
+    }
     const id = generateId();
     const local = worldPointToLocal(baseMesh, world);
     vertices.push({ id, x: local.x, y: local.y, z: local.z });
@@ -638,7 +734,7 @@ export function penSessionToMesh(baseMesh: CADMesh, session: PenSession): PenCom
     if (!createsFaces || patch.pointIds.length < 3) return;
     const ids = patch.pointIds.map((pid) => {
       const point = penFindPoint(session, pid);
-      return addVertex(pid, point ? point.position : pts[0]);
+      return addVertex(pid, point ? point.position : pts[0], point?.meshVertexId);
     });
     addFace(
       ids,
@@ -650,7 +746,7 @@ export function penSessionToMesh(baseMesh: CADMesh, session: PenSession): PenCom
 
   // Point / curve types still commit their vertices as a point cloud.
   if (!createsFaces) {
-    session.points.forEach((p) => addVertex(p.id, p.position));
+    session.points.forEach((p) => addVertex(p.id, p.position, p.meshVertexId));
   }
 
   return {

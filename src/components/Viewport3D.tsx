@@ -47,6 +47,21 @@ import {
   type Vec3,
 } from '../utils/primitiveDraw';
 import {
+  penAddPoint,
+  penBindMeshVertex,
+  penCommitActive,
+  penConnectExisting,
+  penFindPoint,
+  penMinPatchPoints,
+  penMovePoint,
+  penNearestScreenHit,
+  penOverlaySegments,
+  penPointIsLocked,
+  penWeldPoints,
+  resolvePenWorkPlane,
+  type PenSession,
+} from '../utils/penTool';
+import {
   beginModalMeshOp,
   applyModalAmount,
   type ModalMeshSession,
@@ -166,6 +181,10 @@ interface Viewport3DProps {
   setEnvironment?: (env: EnvironmentSettings | ((prev: EnvironmentSettings) => EnvironmentSettings)) => void;
   sceneSelection?: SceneSelection | null;
   setSceneSelection?: (sel: SceneSelection | null) => void;
+  penSession?: PenSession | null;
+  setPenSession?: React.Dispatch<React.SetStateAction<PenSession | null>>;
+  /** Frozen mesh from Pen activation — adopt these verts, not live-preview ids. */
+  penBaseMesh?: CADMesh | null;
 }
 
 export const Viewport3D: React.FC<Viewport3DProps> = ({
@@ -215,6 +234,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   setEnvironment,
   sceneSelection = null,
   setSceneSelection,
+  penSession = null,
+  setPenSession,
+  penBaseMesh = null,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -232,6 +254,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const edgesGroupRef = useRef<THREE.Group | null>(null);
   const facesHighlightGroupRef = useRef<THREE.Group | null>(null);
   const hoverHighlightGroupRef = useRef<THREE.Group | null>(null);
+  const penOverlayGroupRef = useRef<THREE.Group | null>(null);
   const cutPreviewGroupRef = useRef<THREE.Group | null>(null);
   const vectorGhostRef = useRef<THREE.Group | null>(null);
   const vectorRefGroupRef = useRef<THREE.Group | null>(null);
@@ -464,6 +487,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
   const [hoveredFaceId, setHoveredFaceId] = useState<string | null>(null);
   const [hoveredMeshId, setHoveredMeshId] = useState<string | null>(null);
+  const [penHoverSessionId, setPenHoverSessionId] = useState<string | null>(null);
+  const [penHoverMeshVertexId, setPenHoverMeshVertexId] = useState<string | null>(null);
+  const [penDragId, setPenDragId] = useState<string | null>(null);
+  const penDragIdRef = useRef<string | null>(null);
 
   const [marqueeBox, setMarqueeBox] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
   const marqueeStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -519,7 +546,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     const penBlockout = activeWorkspaceMode === 'blockout' && vectorMode === 'pen';
     const refEditing = activeWorkspaceMode === 'blockout' && vectorRefTool !== 'none';
-    if (refEditing || penBlockout) {
+    if (refEditing || penBlockout || toolState.isPenTool) {
       applyDrawToolOrbitMouseButtons(controlsRef.current, {
         ortho: cameraType !== 'perspective',
       });
@@ -539,6 +566,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     cameraType,
     vectorMode,
     vectorRefTool,
+    toolState.isPenTool,
   ]);
 
   // Re-apply orbit buttons when Vector Draw/Edit mode toggles.
@@ -775,6 +803,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     scene.add(hoverGroup);
     hoverHighlightGroupRef.current = hoverGroup;
 
+    const penOverlayGroup = new THREE.Group();
+    penOverlayGroup.name = 'penOverlay';
+    scene.add(penOverlayGroup);
+    penOverlayGroupRef.current = penOverlayGroup;
+
     const cutPreviewGroup = new THREE.Group();
     scene.add(cutPreviewGroup);
     cutPreviewGroupRef.current = cutPreviewGroup;
@@ -874,6 +907,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       clearAndDisposeGroup(bonesGroupRef.current);
       clearAndDisposeGroup(facesHighlightGroupRef.current);
       clearAndDisposeGroup(hoverHighlightGroupRef.current);
+      clearAndDisposeGroup(penOverlayGroupRef.current);
       clearAndDisposeGroup(vectorGhostRef.current);
       if (vectorRefGroupRef.current) {
         vectorRefGroupRef.current.traverse((obj) => {
@@ -1018,7 +1052,13 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         opacity: 0.85,
         depthWrite: false,
       });
-      const wire = new THREE.LineSegments(buildLogicalEdgeGeometry(cad), wireMat);
+      const wire = new THREE.LineSegments(
+        buildLogicalEdgeGeometry(cad, {
+          blockoutOrtho:
+            cameraType === 'front' || cameraType === 'side' ? cameraType : undefined,
+        }),
+        wireMat,
+      );
       wire.position.copy(mesh.position);
       wire.rotation.copy(mesh.rotation);
       wire.scale.copy(mesh.scale);
@@ -1062,7 +1102,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       cancelled = true;
       cancelAnimationFrame(raf);
     };
-  }, [activeWorkspaceMode, vectorRevision, vectorBuiltRevision]);
+  }, [activeWorkspaceMode, vectorRevision, vectorBuiltRevision, cameraType]);
 
   // Front + Side reference planes (3D sheets, same UVs both sides) in every blockout view.
   const vectorRefFront = useVectorStore((s) => s.refImages.front);
@@ -3204,7 +3244,13 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           linewidth: isHovered && activeWorkspaceMode !== 'blockout' ? 3 : 2,
           depthTest: !toolState.xray,
         });
-        const wireGeo = buildLogicalEdgeGeometry(displayMesh);
+        const wireGeo = buildLogicalEdgeGeometry(displayMesh, {
+          blockoutOrtho:
+            activeWorkspaceMode === 'blockout' &&
+            (cameraType === 'front' || cameraType === 'side')
+              ? cameraType
+              : undefined,
+        });
         const wireframe = new THREE.LineSegments(wireGeo, outlineMat);
         wireframe.position.copy(meshObj.position);
         wireframe.rotation.copy(meshObj.rotation);
@@ -3557,6 +3603,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           || activeWorkspaceMode === 'blockout'
           || toolState.isPainting3D
           || isPainting3DActiveRef.current
+          || toolState.isPenTool
         ) {
           transformControlsRef.current.enabled = false;
           transformControlsRef.current.getHelper().visible = false;
@@ -3576,7 +3623,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         transformControlsRef.current.getHelper().visible = false;
       }
     }
-  }, [meshes, bones, selectedBoneId, activeMeshId, hoveredMeshId, hoveredVertexId, hoveredFaceId, toolState.viewMode, toolState.editMode, toolState.rigMode, toolState.isCadDrawing, toolState.cadDrawPrimitive, toolState.placeOnClick, toolState.activePrimitive, toolState.showTriangulation, toolState.isPainting3D, toolState.xray, placementHover, drawSession, selectedVertexIds, selectedEdgeIds, selectedFaceIds, selectedMeshIds, renderSettings.wireframeColor, meshTextureTick, cameras, lights, particles, environment, sceneSelection, activeWorkspaceMode, vectorRevision, vectorBuiltRevision]);
+  }, [meshes, bones, selectedBoneId, activeMeshId, hoveredMeshId, hoveredVertexId, hoveredFaceId, toolState.viewMode, toolState.editMode, toolState.rigMode, toolState.isCadDrawing, toolState.cadDrawPrimitive, toolState.placeOnClick, toolState.activePrimitive, toolState.showTriangulation, toolState.isPainting3D, toolState.xray, toolState.isPenTool, placementHover, drawSession, selectedVertexIds, selectedEdgeIds, selectedFaceIds, selectedMeshIds, renderSettings.wireframeColor, meshTextureTick, cameras, lights, particles, environment, sceneSelection, activeWorkspaceMode, vectorRevision, vectorBuiltRevision, cameraType]);
 
   // Update edge hover/selection colors in place — avoid full scene rebuild on every hover
   useEffect(() => {
@@ -4098,6 +4145,141 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     });
   };
 
+  const projectPenToScreen = (world: Vec3, rect: DOMRect) => {
+    const cam = cameraRef.current;
+    if (!cam) return null;
+    const clip = toThree(world).project(cam);
+    if (!Number.isFinite(clip.x) || !Number.isFinite(clip.y) || clip.z > 1.05) return null;
+    return {
+      sx: (clip.x * 0.5 + 0.5) * rect.width,
+      sy: (-clip.y * 0.5 + 0.5) * rect.height,
+    };
+  };
+
+  const penSessionScreenHits = (session: PenSession, rect: DOMRect) => {
+    const hits: Array<{ id: string; sx: number; sy: number }> = [];
+    session.points.forEach((p) => {
+      const screen = projectPenToScreen(p.position, rect);
+      if (screen) hits.push({ id: p.id, ...screen });
+    });
+    return hits;
+  };
+
+  const penMeshScreenHits = (mesh: CADMesh, rect: DOMRect) => {
+    const hits: Array<{ id: string; sx: number; sy: number; world: Vec3 }> = [];
+    mesh.vertices.forEach((v) => {
+      const world = fromThree(localToWorld(mesh, v.x, v.y, v.z));
+      const screen = projectPenToScreen(world, rect);
+      if (screen) hits.push({ id: v.id, world, ...screen });
+    });
+    return hits;
+  };
+
+  const resolvePenClick = (
+    e: { clientX: number; clientY: number; altKey?: boolean; shiftKey?: boolean },
+    session: PenSession,
+  ) => {
+    const parsed = pointerRay(e);
+    if (!parsed) return null;
+    const surface = !e.altKey ? pickSurfaceHit(parsed.ray) : null;
+    const plane = resolvePenWorkPlane({
+      view: drawViewKind(),
+      sessionPlane: session.plane,
+      hasPoints: session.points.length > 0,
+      rayOrigin: fromThree(parsed.ray.origin),
+      rayDir: fromThree(parsed.ray.direction),
+      surface,
+    });
+    const hit = intersectRayPlane(
+      fromThree(parsed.ray.origin),
+      fromThree(parsed.ray.direction),
+      plane,
+    );
+    if (!hit) return null;
+    const snapped = snapForDraw(e, plane, hit);
+    return { plane, point: snapped.point, surface: Boolean(surface) };
+  };
+
+  const addPenHandle = (
+    group: THREE.Group,
+    world: Vec3,
+    color: number,
+    size: number,
+    userData: Record<string, unknown>,
+  ) => {
+    const cam = cameraRef.current;
+    const dist = cam ? cam.position.distanceTo(toThree(world)) : 4;
+    const scale = Math.max(0.016, Math.min(0.09, dist * 0.012)) * size;
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(scale, scale, scale),
+      new THREE.MeshBasicMaterial({
+        color,
+        depthTest: false,
+        transparent: true,
+        opacity: 0.95,
+      }),
+    );
+    mesh.position.copy(toThree(world));
+    mesh.renderOrder = 48;
+    mesh.userData = userData;
+    group.add(mesh);
+  };
+
+  useEffect(() => {
+    const group = penOverlayGroupRef.current;
+    if (!group) return;
+    clearAndDisposeGroup(group);
+    if (!toolState.isPenTool || !penSession) return;
+
+    const lineMat = new THREE.LineBasicMaterial({
+      color: 0x5eead4,
+      depthTest: false,
+      transparent: true,
+      opacity: 0.95,
+    });
+    penOverlaySegments(penSession).forEach((seg) => {
+      const geo = new THREE.BufferGeometry().setFromPoints(seg.map((p) => toThree(p)));
+      const line = new THREE.Line(geo, lineMat);
+      line.renderOrder = 46;
+      line.userData = { penSegment: true };
+      group.add(line);
+    });
+
+    const sessionIds = new Set(penSession.points.map((p) => p.meshVertexId).filter(Boolean) as string[]);
+    if (penBaseMesh) {
+      penBaseMesh.vertices.forEach((v) => {
+        if (sessionIds.has(v.id)) return;
+        addPenHandle(group, fromThree(localToWorld(penBaseMesh, v.x, v.y, v.z)), 0x93c5fd, 0.85, {
+          penMeshVertexId: v.id,
+        });
+      });
+    }
+
+    penSession.points.forEach((p) => {
+      const isCurrent = p.id === penSession.currentPointId;
+      addPenHandle(group, p.position, isCurrent ? 0xf8fafc : 0xe2e8f0, isCurrent ? 1.25 : 1, {
+        penPointId: p.id,
+      });
+    });
+  }, [toolState.isPenTool, penSession, penBaseMesh]);
+
+  useEffect(() => {
+    const group = penOverlayGroupRef.current;
+    if (!group) return;
+    group.children.forEach((child) => {
+      const mat = (child as THREE.Mesh).material;
+      if (!(mat instanceof THREE.MeshBasicMaterial)) return;
+      const pointId = child.userData.penPointId as string | undefined;
+      const meshId = child.userData.penMeshVertexId as string | undefined;
+      if (pointId) {
+        const hot = pointId === penHoverSessionId || pointId === penDragId;
+        mat.color.setHex(hot ? 0xfacc15 : pointId === penSession?.currentPointId ? 0xf8fafc : 0xe2e8f0);
+      } else if (meshId) {
+        mat.color.setHex(meshId === penHoverMeshVertexId ? 0xfacc15 : 0x93c5fd);
+      }
+    });
+  }, [penHoverSessionId, penHoverMeshVertexId, penDragId, penSession?.currentPointId]);
+
   const commitDrawnMesh = (preview: CreationPreview) => {
     if (!onSpawnDrawnPrimitive) return;
     const mesh = meshFromPreview(preview);
@@ -4519,7 +4701,31 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     paintStrokeCtlRef.current.dispose();
   }, []);
 
-  const handlePointerUp = (_e?: React.PointerEvent<HTMLDivElement>) => {
+  const handlePointerUp = (e?: React.PointerEvent<HTMLDivElement>) => {
+    if (penDragIdRef.current && setPenSession && penSession && containerRef.current) {
+      const dragId = penDragIdRef.current;
+      const rect = containerRef.current.getBoundingClientRect();
+      const mouseX = (e?.clientX ?? 0) - rect.left;
+      const mouseY = (e?.clientY ?? 0) - rect.top;
+      const sessionHit = e
+        ? penNearestScreenHit(
+            mouseX,
+            mouseY,
+            penSessionScreenHits(penSession, rect).filter((h) => h.id !== dragId),
+          )
+        : null;
+      const meshHit = e && penBaseMesh
+        ? penNearestScreenHit(mouseX, mouseY, penMeshScreenHits(penBaseMesh, rect))
+        : null;
+      if (sessionHit) {
+        setPenSession((s) => (s ? penWeldPoints(s, dragId, sessionHit.id) : s));
+      } else if (meshHit) {
+        setPenSession((s) => (s ? penBindMeshVertex(s, dragId, meshHit.id, meshHit.world) : s));
+      }
+      penDragIdRef.current = null;
+      setPenDragId(null);
+    }
+
     if (modalActiveRef.current || toolStateRef.current.modalTransform) return;
 
     // Paint strokes are owned by paintStrokeCtlRef (window pointerup).
@@ -4655,6 +4861,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     }
     handlePointerUp();
     setPaintCursor(null);
+    setPenHoverSessionId(null);
+    setPenHoverMeshVertexId(null);
   };
 
   const applyWeightPaintAtEvent = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -4738,6 +4946,80 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         controlsRef.current.enabled = true;
       }
       return;
+    }
+
+    if (toolState.isPenTool && setPenSession && e.button === 0) {
+      const session = penSession;
+      if (session && containerRef.current) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.detail === 2) {
+          setPenSession((s) => (s ? penCommitActive(s) : s));
+          return;
+        }
+        const rect = containerRef.current.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        const sessionHit = penNearestScreenHit(mouseX, mouseY, penSessionScreenHits(session, rect));
+        const meshHit = penBaseMesh
+          ? penNearestScreenHit(mouseX, mouseY, penMeshScreenHits(penBaseMesh, rect))
+          : null;
+        const clickOpts = { newPolygon: e.shiftKey, triangle: e.ctrlKey };
+
+        if (sessionHit) {
+          const point = penFindPoint(session, sessionHit.id);
+          const min = penMinPatchPoints(session.settings);
+          const isFirst = session.activeIds[0] === sessionHit.id;
+          const inChain = session.activeIds.includes(sessionHit.id);
+          if (isFirst && session.activeIds.length >= min) {
+            setPenSession(penConnectExisting(session, sessionHit.id, clickOpts));
+            return;
+          }
+          if (!inChain) {
+            setPenSession(penConnectExisting(session, sessionHit.id, clickOpts));
+            return;
+          }
+          if (point && !penPointIsLocked(point)) {
+            penDragIdRef.current = sessionHit.id;
+            setPenDragId(sessionHit.id);
+            try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+            return;
+          }
+          return;
+        }
+
+        if (meshHit) {
+          setPenSession((s) => {
+            if (!s) return s;
+            const next = penAddPoint(s, meshHit.world, { ...clickOpts, meshVertexId: meshHit.id });
+            return s.points.length === 0 ? { ...next, plane: resolvePenClick(e, s)?.plane ?? s.plane } : next;
+          });
+          return;
+        }
+
+        const placed = resolvePenClick(e, session);
+        if (!placed) return;
+        let point = placed.point;
+        let meshVertexId: string | undefined;
+        if (penBaseMesh) {
+          let best = 0.05;
+          penBaseMesh.vertices.forEach((v) => {
+            const world = fromThree(localToWorld(penBaseMesh, v.x, v.y, v.z));
+            const dist = Math.hypot(point.x - world.x, point.y - world.y, point.z - world.z);
+            if (dist < best) {
+              best = dist;
+              meshVertexId = v.id;
+              point = world;
+            }
+          });
+        }
+        setPenSession((s) => {
+          if (!s) return s;
+          const next = penAddPoint(s, point, { ...clickOpts, meshVertexId });
+          return s.points.length === 0 ? { ...next, plane: placed.plane } : next;
+        });
+        return;
+      }
     }
 
     // Skin-mode weight painting — LMB on mesh paints; miss keeps orbit/pan/zoom
@@ -5028,6 +5310,25 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     // setState and rebuild mesh outlines on every move.
     if (activeWorkspaceMode === 'blockout') return;
 
+    if (toolState.isPenTool && penSession && setPenSession && containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      const dragId = penDragIdRef.current;
+      if (dragId) {
+        const placed = resolvePenClick(e, penSession);
+        if (placed) setPenSession((s) => (s ? penMovePoint(s, dragId, placed.point) : s));
+        return;
+      }
+      const sessionHit = penNearestScreenHit(mouseX, mouseY, penSessionScreenHits(penSession, rect));
+      const meshHit = penBaseMesh
+        ? penNearestScreenHit(mouseX, mouseY, penMeshScreenHits(penBaseMesh, rect))
+        : null;
+      setPenHoverSessionId(sessionHit?.id ?? null);
+      setPenHoverMeshVertexId(sessionHit ? null : meshHit?.id ?? null);
+      return;
+    }
+
     if (isWeightPaintingRef.current) {
       applyWeightPaintAtEvent(e);
       return;
@@ -5182,7 +5483,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerLeave}
         className={`w-full h-full touch-none ${
-          toolState.isCadDrawing
+          toolState.isCadDrawing || toolState.isPenTool
             ? 'cursor-cell'
             : toolState.placeOnClick
             ? 'cursor-crosshair'
@@ -5354,6 +5655,13 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
               : drawSession.phase === 'height'
                 ? `height ${formatDrawDimensions({ x: 0, y: drawSession.height, z: 0 }).h}`
                 : 'click opposite corner'}
+          </span>
+        )}
+        {toolState.isPenTool && (
+          <span className="cad-card px-2.5 py-1 text-[#5eead4] font-bold border-cyan-800 bg-[#191b1e]">
+            PEN · {cameraType}
+            {penSession?.points.length ? ` · ${penSession.points.length} pts` : ' · click view, face, or a vertex'}
+            {' · LMB draw · MMB/RMB orbit'}
           </span>
         )}
         {!toolState.isPainting3D && componentReadout && (

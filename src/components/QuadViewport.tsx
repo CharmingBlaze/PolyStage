@@ -58,6 +58,7 @@ interface QuadViewportProps {
   layout?: 'quad' | 'blockout';
   penSession?: PenSession | null;
   setPenSession?: React.Dispatch<React.SetStateAction<PenSession | null>>;
+  penBaseMesh?: CADMesh | null;
 }
 
 export const QuadViewport: React.FC<QuadViewportProps> = ({
@@ -100,6 +101,7 @@ export const QuadViewport: React.FC<QuadViewportProps> = ({
   layout = 'quad',
   penSession = null,
   setPenSession,
+  penBaseMesh = null,
 }) => {
   const [splitRatioX, setSplitRatioX] = useState<number>(layout === 'blockout' ? 33.33 : 50);
   const [splitRatioY, setSplitRatioY] = useState<number>(50);
@@ -178,6 +180,7 @@ export const QuadViewport: React.FC<QuadViewportProps> = ({
     activeWorkspaceMode,
     penSession,
     setPenSession,
+    penBaseMesh,
   };
 
   return isBlockoutLayout ? (

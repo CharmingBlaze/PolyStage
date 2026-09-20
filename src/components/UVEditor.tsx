@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  BoxSelect, ChevronDown, CircleDot, FlipHorizontal, FlipVertical,
+  BoxSelect, ChevronDown, CircleDot, Download, FilePlus, FlipHorizontal, FlipVertical,
   Grid3X3, ImagePlus, Link2, Lock, Maximize2, Move, MousePointer2, Pin,
   RotateCcw, RotateCw, Scissors, Trash2, Unlink2, Unlock, ZoomIn, X,
 } from 'lucide-react';
@@ -143,6 +143,12 @@ export const UVEditor: React.FC<UVEditorProps> = ({
   const [referenceLayer, setReferenceLayer] = useState<ReferenceImageLayer | null>(null);
   const [editReferenceImage, setEditReferenceImage] = useState(false);
   const [textureLocked, setTextureLocked] = useState(false);
+  const [newImageModalOpen, setNewImageModalOpen] = useState(false);
+  const [newImageSize, setNewImageSize] = useState<number>(256);
+  const [newImageCustomSize, setNewImageCustomSize] = useState('');
+  const [newImageBg, setNewImageBg] = useState<'transparent' | 'white' | 'dark' | 'grid'>('transparent');
+  const [saveAsModalOpen, setSaveAsModalOpen] = useState(false);
+  const [saveAsFilename, setSaveAsFilename] = useState('');
 
   const selectedIslandIds = useMemo(
     () => new Set(selectedFaceIds.map((id) => topology.faceToIsland.get(id)).filter(Boolean) as string[]),
@@ -318,6 +324,55 @@ export const UVEditor: React.FC<UVEditorProps> = ({
     input.click();
     // Remove if the user cancels (no change event).
     window.setTimeout(() => input.remove(), 60_000);
+  };
+
+  const handleCreateNewImage = (size: number, bg: 'transparent' | 'white' | 'dark' | 'grid') => {
+    setNewImageModalOpen(false);
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.imageSmoothingEnabled = false;
+      if (bg === 'white') {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, size, size);
+      } else if (bg === 'dark') {
+        ctx.fillStyle = '#21242c';
+        ctx.fillRect(0, 0, size, size);
+      } else if (bg === 'grid') {
+        ctx.fillStyle = '#1e2128';
+        ctx.fillRect(0, 0, size, size);
+        ctx.fillStyle = '#282c35';
+        const step = Math.max(8, Math.floor(size / 16));
+        for (let y = 0; y < size; y += step) {
+          for (let x = 0; x < size; x += step) {
+            if ((Math.floor(x / step) + Math.floor(y / step)) % 2 === 0) {
+              ctx.fillRect(x, y, step, step);
+            }
+          }
+        }
+      } else {
+        ctx.clearRect(0, 0, size, size);
+      }
+    }
+    if (onTextureUpdated) {
+      onTextureUpdated(canvas);
+    }
+    setShowTexture(true);
+    setTextureLocked(false);
+  };
+
+  const handleSaveImageAs = (name: string) => {
+    if (!textureCanvas) return;
+    let clean = name.trim();
+    if (!clean) clean = (mesh?.name || 'texture').replace(/[^a-zA-Z0-9_\-]/g, '_') + '_uv';
+    if (!clean.toLowerCase().endsWith('.png')) clean += '.png';
+    const a = document.createElement('a');
+    a.href = textureCanvas.toDataURL('image/png');
+    a.download = clean;
+    a.click();
+    setSaveAsModalOpen(false);
   };
 
   const commitOperation = (positions: Map<UvVertexId, UVCoord> | null) => {
@@ -943,6 +998,43 @@ export const UVEditor: React.FC<UVEditorProps> = ({
 
         <div className="uv-seg" title="Mesh texture image">
           <span className="uv-seg-label">Image</span>
+          <button
+            type="button"
+            className="uv-btn"
+            onClick={() => {
+              setNewImageSize(textureCanvas ? Math.max(textureCanvas.width, textureCanvas.height) : 256);
+              setNewImageCustomSize('');
+              setNewImageBg('transparent');
+              setNewImageModalOpen(true);
+            }}
+            title="New blank texture image"
+          >
+            <FilePlus size={12} />
+            <span className="hidden sm:inline">New</span>
+          </button>
+          <button
+            type="button"
+            className="uv-btn"
+            onClick={() => openImagePicker('texture')}
+            title="Load image from disk as mesh texture"
+          >
+            <ImagePlus size={12} />
+            <span className="hidden sm:inline">Load</span>
+          </button>
+          <button
+            type="button"
+            className="uv-btn"
+            disabled={!textureCanvas}
+            onClick={() => {
+              setSaveAsFilename(`${(mesh.name || 'texture').replace(/[^a-zA-Z0-9_\-]/g, '_')}_uv.png`);
+              setSaveAsModalOpen(true);
+            }}
+            title="Save mesh texture as PNG"
+          >
+            <Download size={12} />
+            <span className="hidden sm:inline">Save As</span>
+          </button>
+          <div className="w-px h-3.5 bg-[var(--ts-border)] mx-0.5" />
           <button type="button" className="uv-btn" disabled={!textureCanvas || textureLocked} onClick={() => transformMeshTexture('flipH')} title="Flip texture H"><FlipHorizontal size={12} /></button>
           <button type="button" className="uv-btn" disabled={!textureCanvas || textureLocked} onClick={() => transformMeshTexture('flipV')} title="Flip texture V"><FlipVertical size={12} /></button>
           <button type="button" className="uv-btn" disabled={!textureCanvas || textureLocked} onClick={() => transformMeshTexture('rotCCW')} title="Rotate texture −90°"><RotateCcw size={12} /></button>
@@ -1167,6 +1259,41 @@ export const UVEditor: React.FC<UVEditorProps> = ({
             </div>
 
             <div className="uv-section-head">Texture image</div>
+            <div className="grid grid-cols-3 gap-1 px-2 pb-2">
+              <button
+                type="button"
+                className="uv-btn flex items-center justify-center gap-1 py-1"
+                onClick={() => {
+                  setNewImageSize(textureCanvas ? Math.max(textureCanvas.width, textureCanvas.height) : 256);
+                  setNewImageCustomSize('');
+                  setNewImageBg('transparent');
+                  setNewImageModalOpen(true);
+                }}
+                title="New blank image"
+              >
+                <FilePlus size={11} /> New
+              </button>
+              <button
+                type="button"
+                className="uv-btn flex items-center justify-center gap-1 py-1"
+                onClick={() => openImagePicker('texture')}
+                title="Load image from disk"
+              >
+                <ImagePlus size={11} /> Load
+              </button>
+              <button
+                type="button"
+                className="uv-btn flex items-center justify-center gap-1 py-1"
+                disabled={!textureCanvas}
+                onClick={() => {
+                  setSaveAsFilename(`${(mesh.name || 'texture').replace(/[^a-zA-Z0-9_\-]/g, '_')}_uv.png`);
+                  setSaveAsModalOpen(true);
+                }}
+                title="Save mesh texture as PNG"
+              >
+                <Download size={11} /> Save As
+              </button>
+            </div>
             <div className="uv-tool-grid">
               <button type="button" className="uv-btn" disabled={!textureCanvas || textureLocked} onClick={() => transformMeshTexture('flipH')}><FlipHorizontal size={13} /></button>
               <button type="button" className="uv-btn" disabled={!textureCanvas || textureLocked} onClick={() => transformMeshTexture('flipV')}><FlipVertical size={13} /></button>
@@ -1210,6 +1337,169 @@ export const UVEditor: React.FC<UVEditorProps> = ({
         </span>
         <span>{cursorUv ? `${cursorUv.u.toFixed(3)}, ${cursorUv.v.toFixed(3)}` : 'U — V —'}</span>
       </footer>
+
+      {newImageModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 select-none" onClick={() => setNewImageModalOpen(false)}>
+          <div className="bg-[#1a1d24] border border-[#3a3f4a] rounded-lg shadow-2xl p-4 w-[380px] max-w-full text-white" role="dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-7 h-7 rounded bg-[#00b4c4]/15 flex items-center justify-center text-[#00b4c4]">
+                <FilePlus size={16} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">New UV Texture</h3>
+                <p className="text-[10px] text-[#858a93]">Create a blank texture image for {mesh.name || 'this mesh'}</p>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3 my-3">
+              <div>
+                <label className="text-[10px] uppercase font-semibold tracking-wider text-[#858a93] block mb-1.5">
+                  Resolution Preset
+                </label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {([64, 128, 256, 512, 1024, 2048] as const).map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => {
+                        setNewImageSize(s);
+                        setNewImageCustomSize('');
+                      }}
+                      className={`h-7 rounded text-[11px] font-mono border transition-colors ${
+                        newImageSize === s && !newImageCustomSize
+                          ? 'bg-[#00b4c4]/20 border-[#00b4c4] text-[#00b4c4] font-bold'
+                          : 'bg-[#14171d] border-[#3a3f4a] text-[#c9ced6] hover:border-[#525968]'
+                      }`}
+                    >
+                      {s}×{s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] uppercase font-semibold tracking-wider text-[#858a93] block mb-1.5">
+                  Or Custom Size
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={8}
+                    max={4096}
+                    placeholder="e.g. 512"
+                    value={newImageCustomSize}
+                    onChange={(e) => setNewImageCustomSize(e.target.value)}
+                    className="flex-1 h-7 px-2 rounded bg-[#14171d] border border-[#3a3f4a] focus:border-[#00b4c4] text-[11px] font-mono text-white outline-none"
+                  />
+                  <span className="text-[11px] font-mono text-[#858a93]">px</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] uppercase font-semibold tracking-wider text-[#858a93] block mb-1.5">
+                  Background
+                </label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {(['transparent', 'white', 'dark', 'grid'] as const).map((b) => (
+                    <button
+                      key={b}
+                      type="button"
+                      onClick={() => setNewImageBg(b)}
+                      className={`h-7 rounded text-[10.5px] capitalize border transition-colors ${
+                        newImageBg === b
+                          ? 'bg-[#00b4c4]/20 border-[#00b4c4] text-[#00b4c4] font-semibold'
+                          : 'bg-[#14171d] border-[#3a3f4a] text-[#c9ced6] hover:border-[#525968]'
+                      }`}
+                    >
+                      {b}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#2d323b]">
+              <button
+                type="button"
+                className="px-3 py-1.5 rounded text-[11px] text-[#858a93] hover:text-white"
+                onClick={() => setNewImageModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="px-3 py-1.5 rounded text-[11px] font-semibold bg-[#00b4c4] hover:bg-[#00c8d7] text-[#0a1114]"
+                onClick={() => {
+                  let targetSize = newImageSize;
+                  if (newImageCustomSize) {
+                    const parsed = parseInt(newImageCustomSize, 10);
+                    if (Number.isFinite(parsed) && parsed >= 8 && parsed <= 4096) {
+                      targetSize = parsed;
+                    }
+                  }
+                  handleCreateNewImage(targetSize, newImageBg);
+                }}
+              >
+                Create Texture
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {saveAsModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 select-none" onClick={() => setSaveAsModalOpen(false)}>
+          <div className="bg-[#1a1d24] border border-[#3a3f4a] rounded-lg shadow-2xl p-4 w-[360px] max-w-full text-white" role="dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-7 h-7 rounded bg-[#00b4c4]/15 flex items-center justify-center text-[#00b4c4]">
+                <Download size={16} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">Save UV Texture As</h3>
+                <p className="text-[10px] text-[#858a93]">
+                  Export current texture ({textureResolution.width}×{textureResolution.height}) as PNG
+                </p>
+              </div>
+            </div>
+
+            <div className="my-3">
+              <label className="text-[10px] uppercase font-semibold tracking-wider text-[#858a93] block mb-1.5">
+                File Name
+              </label>
+              <input
+                type="text"
+                value={saveAsFilename}
+                onChange={(e) => setSaveAsFilename(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleSaveImageAs(saveAsFilename);
+                  }
+                }}
+                autoFocus
+                className="w-full h-8 px-2.5 rounded bg-[#14171d] border border-[#3a3f4a] focus:border-[#00b4c4] text-[12px] font-mono text-white outline-none"
+                placeholder="texture_uv.png"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#2d323b]">
+              <button
+                type="button"
+                className="px-3 py-1.5 rounded text-[11px] text-[#858a93] hover:text-white"
+                onClick={() => setSaveAsModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="px-3 py-1.5 rounded text-[11px] font-semibold bg-[#00b4c4] hover:bg-[#00c8d7] text-[#0a1114]"
+                onClick={() => handleSaveImageAs(saveAsFilename)}
+              >
+                Download PNG
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

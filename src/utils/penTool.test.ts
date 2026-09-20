@@ -11,8 +11,11 @@ import {
   penAddPoint,
   penAngleLabels,
   penBandTriangles,
+  penBindMeshVertex,
   penCommitActive,
+  penConnectExisting,
   penMovePoint,
+  penNearestScreenHit,
   penOverlaySegments,
   penPointOrder,
   penPolylineParams,
@@ -628,5 +631,108 @@ describe('resolvePenWorkPlane', () => {
       surface: { point: vec(0, 1, 0), normal: vec(0, 1, 0) },
     });
     expect(plane).toBe(face);
+  });
+
+  it('draws on a mesh surface in Front/Side, not only perspective', () => {
+    const plane = resolvePenWorkPlane({
+      view: 'front',
+      sessionPlane: top,
+      hasPoints: false,
+      rayOrigin: frontRay.origin,
+      rayDir: frontRay.dir,
+      surface: { point: vec(0, 0.5, 0.5), normal: vec(0, 0, 1) },
+    });
+    expect(plane.n.z).toBeCloseTo(1);
+    expect(plane.origin).toEqual(vec(0, 0.5, 0.5));
+  });
+});
+
+describe('Pen connect to existing mesh vertices', () => {
+  it('reuses cube corners instead of spawning duplicate verts', () => {
+    const cube = createBoxMesh(1, 1, 1);
+    const [a, b, c] = cube.vertices;
+    let s = session();
+    s = penAddPoint(s, localPointToWorld(cube, a), { meshVertexId: a.id });
+    s = penAddPoint(s, localPointToWorld(cube, b), { meshVertexId: b.id });
+    s = penAddPoint(s, localPointToWorld(cube, c), { meshVertexId: c.id });
+    s = penCommitActive(s);
+    const { mesh, vertexIds } = penSessionToMesh(cube, s);
+    expect(vertexIds).toEqual([]);
+    expect(mesh.vertices).toHaveLength(cube.vertices.length);
+    expect(mesh.faces).toHaveLength(cube.faces.length + 1);
+    expect(mesh.faces[mesh.faces.length - 1].vertexIds).toEqual([a.id, b.id, c.id]);
+  });
+
+  it('starts on an old vertex and draws new verts off it', () => {
+    const cube = createBoxMesh(1, 1, 1);
+    const corner = cube.vertices[0];
+    let s = session();
+    s = penAddPoint(s, localPointToWorld(cube, corner), { meshVertexId: corner.id });
+    s = penAddPoint(s, vec(2, 0, 0));
+    s = penAddPoint(s, vec(2, 0, 2));
+    s = penCommitActive(s);
+    const { mesh, vertexIds } = penSessionToMesh(cube, s);
+    expect(vertexIds).toHaveLength(2);
+    expect(mesh.vertices).toHaveLength(cube.vertices.length + 2);
+    expect(mesh.faces[mesh.faces.length - 1].vertexIds[0]).toBe(corner.id);
+  });
+
+  it('clicking the first vertex of a 3-chain closes the polygon', () => {
+    const cube = createBoxMesh(1, 1, 1);
+    const [a, b, c] = cube.vertices;
+    let s = session();
+    s = penAddPoint(s, localPointToWorld(cube, a), { meshVertexId: a.id });
+    s = penAddPoint(s, localPointToWorld(cube, b), { meshVertexId: b.id });
+    s = penAddPoint(s, localPointToWorld(cube, c), { meshVertexId: c.id });
+    const first = s.points[0];
+    s = penConnectExisting(s, first.id);
+    expect(s.activeIds).toHaveLength(0);
+    expect(s.patches).toHaveLength(1);
+    expect(s.patches[0].pointIds).toEqual([s.points[0].id, s.points[1].id, s.points[2].id]);
+  });
+
+  it('re-adding an already adopted mesh vertex continues that session point', () => {
+    const cube = createBoxMesh(1, 1, 1);
+    const [a, b] = cube.vertices;
+    let s = session();
+    s = penAddPoint(s, localPointToWorld(cube, a), { meshVertexId: a.id });
+    s = penAddPoint(s, localPointToWorld(cube, b), { meshVertexId: b.id });
+    const before = s.points.length;
+    s = penAddPoint(s, localPointToWorld(cube, a), { meshVertexId: a.id });
+    expect(s.points).toHaveLength(before);
+    expect(s.activeIds).toEqual([s.points[0].id, s.points[1].id]);
+  });
+
+  it('undo of a connected old vertex keeps it if the chain still uses it', () => {
+    const cube = createBoxMesh(1, 1, 1);
+    const a = cube.vertices[0];
+    let s = session();
+    s = penAddPoint(s, localPointToWorld(cube, a), { meshVertexId: a.id });
+    s = penAddPoint(s, vec(1.5, 0, 0));
+    s = penAddPoint(s, localPointToWorld(cube, a), { meshVertexId: a.id });
+    s = penUndoLastPoint(s);
+    expect(s.points[0].meshVertexId).toBe(a.id);
+    expect(s.activeIds[0]).toBe(s.points[0].id);
+  });
+
+  it('binds a free point onto an existing mesh vertex', () => {
+    const cube = createBoxMesh(1, 1, 1);
+    const a = cube.vertices[0];
+    let s = session();
+    s = penAddPoint(s, vec(0, 0, 0));
+    const id = s.points[0].id;
+    s = penBindMeshVertex(s, id, a.id, localPointToWorld(cube, a));
+    const { mesh, vertexIds } = penSessionToMesh(cube, s);
+    expect(vertexIds).toEqual([]);
+    expect(mesh.vertices).toHaveLength(cube.vertices.length);
+  });
+
+  it('picks the nearest screen-space handle', () => {
+    const hit = penNearestScreenHit(10, 10, [
+      { id: 'far', sx: 80, sy: 80 },
+      { id: 'near', sx: 12, sy: 11 },
+    ]);
+    expect(hit?.id).toBe('near');
+    expect(penNearestScreenHit(10, 10, [{ id: 'far', sx: 80, sy: 80 }])).toBeNull();
   });
 });

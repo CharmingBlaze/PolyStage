@@ -2443,6 +2443,9 @@ export const App: React.FC = () => {
               setEnvironment={setEnvironment}
               sceneSelection={sceneSelection}
               setSceneSelection={setSceneSelection}
+              penSession={penSession}
+              setPenSession={setPenSession}
+              penBaseMesh={penBaseMeshRef.current}
             />
           ) : (
             <QuadViewport
@@ -2485,6 +2488,7 @@ export const App: React.FC = () => {
               layout={activeWorkspaceMode === 'blockout' ? 'blockout' : 'quad'}
               penSession={penSession}
               setPenSession={setPenSession}
+              penBaseMesh={penBaseMeshRef.current}
             />
           )}
           </ErrorBoundary>
@@ -2914,6 +2918,7 @@ export const App: React.FC = () => {
         selectedFaceIds={selectedFaceIds}
         setSelectedFaceIds={setSelectedFaceIds}
         textureCanvas={textureCanvasRef.current}
+        onTextureUpdated={handleUvTextureLoaded}
       />
       <FloatingOutliner
         isOpen={isFloatingOutlinerOpen}

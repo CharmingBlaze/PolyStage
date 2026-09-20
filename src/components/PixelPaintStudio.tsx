@@ -43,6 +43,9 @@ import {
   ChevronDown,
   ImagePlus,
   Film,
+  FilePlus,
+  FolderOpen,
+  Save,
   Edit2,
   PlayCircle,
   X,
@@ -310,6 +313,12 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
   const [clipboardFrame, setClipboardFrame] = useState<FrameMeta | null>(null);
   const [sizeMenuOpen, setSizeMenuOpen] = useState(false);
   const [customSizeInput, setCustomSizeInput] = useState('');
+  const [newImageModalOpen, setNewImageModalOpen] = useState(false);
+  const [newImageSize, setNewImageSize] = useState<number>(256);
+  const [newImageCustomSize, setNewImageCustomSize] = useState('');
+  const [newImageBg, setNewImageBg] = useState<'transparent' | 'white' | 'color'>('transparent');
+  const [saveAsModalOpen, setSaveAsModalOpen] = useState(false);
+  const [saveAsFilename, setSaveAsFilename] = useState('');
   const [importPrompt, setImportPrompt] = useState<ImportPrompt | null>(null);
   const [importSize, setImportSize] = useState<PixelCanvasSize>(32);
   const [importSizeMenuOpen, setImportSizeMenuOpen] = useState(false);
@@ -1734,6 +1743,104 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     a.click();
   };
 
+  const handleCreateNewImage = (size: number, bg: 'transparent' | 'white' | 'color') => {
+    setCanvasSize(size);
+    setNewImageModalOpen(false);
+
+    layerCanvasMap.current.forEach((c) => {
+      c.width = 0;
+      c.height = 0;
+    });
+    layerCanvasMap.current.clear();
+
+    const layerId = uid('layer');
+    const c = createLayerCanvas(size, size, true);
+    const ctx = c.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, size, size);
+    if (bg === 'white') {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, size, size);
+    } else if (bg === 'color') {
+      ctx.fillStyle = toolState.activeColor || '#ffffff';
+      ctx.fillRect(0, 0, size, size);
+    }
+    layerCanvasMap.current.set(layerId, c);
+
+    undoStack.current = [];
+    redoStack.current = [];
+    largeStrokeBaselineRef.current = null;
+    bumpUndoUi((n) => n + 1);
+
+    if (compositeRef.current) {
+      compositeRef.current.width = size;
+      compositeRef.current.height = size;
+    }
+
+    onBindLiveTextureCanvasRef.current?.(c);
+
+    setFrames([
+      {
+        id: uid('frame'),
+        name: 'Frame 1',
+        durationMs: 100,
+        tags: ['idle'],
+        layers: [{ id: layerId, name: 'Layer 1', visible: true, opacity: 1 }],
+      },
+    ]);
+    setActiveLayerId(layerId);
+    setFrameIndex(0);
+    setSelection(null);
+
+    readyToPersistRef.current = true;
+    requestAnimationFrame(() => {
+      paint();
+      schedulePersist();
+      if (onTextureUpdated && compositeRef.current) {
+        onTextureUpdated(compositeRef.current, { immediate: true });
+      }
+    });
+  };
+
+  const handleSaveImageAs = (name: string) => {
+    let clean = name.trim();
+    if (!clean) clean = (mesh?.name || 'texture').replace(/[^a-zA-Z0-9_\-]/g, '_');
+    if (!clean.toLowerCase().endsWith('.png')) clean += '.png';
+    const c = getComposite();
+    const a = document.createElement('a');
+    a.href = c.toDataURL('image/png');
+    a.download = clean;
+    a.click();
+    setSaveAsModalOpen(false);
+  };
+
+  const handleTriggerLoadImage = () => {
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*,.png,.jpg,.jpeg,.webp,.gif,.bmp';
+    fileInput.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          const img = new Image();
+          img.onload = () => {
+            setImportSize(nearestCanvasSize(img.naturalWidth, img.naturalHeight));
+            setImportPrompt({
+              dataUrl: reader.result as string,
+              naturalW: img.naturalWidth,
+              naturalH: img.naturalHeight,
+            });
+          };
+          img.src = reader.result;
+        }
+      };
+      reader.readAsDataURL(file);
+    };
+    fileInput.click();
+  };
+
   const setFrameDuration = (ms: number) => {
     setFrames((prev) =>
       prev.map((f, i) => (i === frameIndex ? { ...f, durationMs: Math.max(16, Math.round(ms)) } : f)),
@@ -1954,6 +2061,46 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
         <span className="pixel-paint__mesh-name" title={mesh?.name || 'Texture'}>
           {mesh?.name || 'Texture'}
         </span>
+        <div className="pixel-paint__vdiv" />
+
+        {/* File Actions */}
+        <div className="pixel-paint__seg">
+          <button
+            type="button"
+            className="pixel-paint__text-btn flex items-center gap-1.5 px-2"
+            onClick={() => {
+              setNewImageSize(canvasSize);
+              setNewImageCustomSize('');
+              setNewImageBg('transparent');
+              setNewImageModalOpen(true);
+            }}
+            title="Create a new blank texture image"
+          >
+            <FilePlus className="w-3.5 h-3.5 text-[#00b4c4]" />
+            <span>New</span>
+          </button>
+          <button
+            type="button"
+            className="pixel-paint__text-btn flex items-center gap-1.5 px-2"
+            onClick={handleTriggerLoadImage}
+            title="Load an image from disk"
+          >
+            <FolderOpen className="w-3.5 h-3.5 text-[#00b4c4]" />
+            <span>Load</span>
+          </button>
+          <button
+            type="button"
+            className="pixel-paint__text-btn flex items-center gap-1.5 px-2"
+            onClick={() => {
+              setSaveAsFilename(`${(mesh?.name || 'texture').replace(/[^a-zA-Z0-9_\-]/g, '_')}.png`);
+              setSaveAsModalOpen(true);
+            }}
+            title="Save image as PNG"
+          >
+            <Save className="w-3.5 h-3.5 text-[#00b4c4]" />
+            <span>Save As</span>
+          </button>
+        </div>
         <div className="pixel-paint__vdiv" />
 
         <div className="pixel-paint__seg pixel-paint__size-menu" ref={sizeMenuRef}>
@@ -2936,6 +3083,195 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                 onClick={() => applyImportedImage('keep')}
               >
                 Keep as-is ({importPrompt.naturalW}×{importPrompt.naturalH})
+              </button>
+              <button
+                type="button"
+                className="pixel-paint__modal-btn"
+                onClick={() => setImportPrompt(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {newImageModalOpen && (
+        <div className="pixel-paint__modal-backdrop" onClick={() => setNewImageModalOpen(false)}>
+          <div className="pixel-paint__modal w-[380px] max-w-full" role="dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="pixel-paint__modal-icon">
+              <FilePlus className="w-5 h-5 text-[#00b4c4]" />
+            </div>
+            <h2 className="pixel-paint__modal-title">New Texture Image</h2>
+            <p className="pixel-paint__modal-copy">
+              Create a new blank canvas for {mesh?.name || 'this mesh'}. Existing layers will be reset.
+            </p>
+
+            <div className="flex flex-col gap-3 my-3">
+              <div>
+                <label className="text-[10px] uppercase font-semibold tracking-wider text-[var(--ts-text-muted,#858a93)] block mb-1.5">
+                  Resolution Preset
+                </label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {([32, 64, 128, 256, 512, 1024] as const).map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => {
+                        setNewImageSize(s);
+                        setNewImageCustomSize('');
+                      }}
+                      className={`h-7 rounded text-[11px] font-mono border transition-colors ${
+                        newImageSize === s && !newImageCustomSize
+                          ? 'bg-[#00b4c4]/20 border-[#00b4c4] text-[#00b4c4] font-bold'
+                          : 'bg-[#1a1d24] border-[#3a3f4a] text-[#c9ced6] hover:border-[#525968]'
+                      }`}
+                    >
+                      {s}×{s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] uppercase font-semibold tracking-wider text-[var(--ts-text-muted,#858a93)] block mb-1.5">
+                  Or Custom Dimension (Square)
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={8}
+                    max={4096}
+                    placeholder="e.g. 768"
+                    value={newImageCustomSize}
+                    onChange={(e) => setNewImageCustomSize(e.target.value)}
+                    className="flex-1 h-7 px-2 rounded bg-[#14171d] border border-[#3a3f4a] focus:border-[#00b4c4] text-[11px] font-mono text-white outline-none"
+                  />
+                  <span className="text-[11px] font-mono text-[#858a93]">px</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] uppercase font-semibold tracking-wider text-[var(--ts-text-muted,#858a93)] block mb-1.5">
+                  Background Fill
+                </label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setNewImageBg('transparent')}
+                    className={`h-7 rounded text-[10.5px] border transition-colors ${
+                      newImageBg === 'transparent'
+                        ? 'bg-[#00b4c4]/20 border-[#00b4c4] text-[#00b4c4] font-semibold'
+                        : 'bg-[#1a1d24] border-[#3a3f4a] text-[#c9ced6] hover:border-[#525968]'
+                    }`}
+                  >
+                    Transparent
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewImageBg('white')}
+                    className={`h-7 rounded text-[10.5px] border transition-colors ${
+                      newImageBg === 'white'
+                        ? 'bg-[#00b4c4]/20 border-[#00b4c4] text-[#00b4c4] font-semibold'
+                        : 'bg-[#1a1d24] border-[#3a3f4a] text-[#c9ced6] hover:border-[#525968]'
+                    }`}
+                  >
+                    White
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewImageBg('color')}
+                    className={`h-7 rounded text-[10.5px] border transition-colors flex items-center justify-center gap-1.5 ${
+                      newImageBg === 'color'
+                        ? 'bg-[#00b4c4]/20 border-[#00b4c4] text-[#00b4c4] font-semibold'
+                        : 'bg-[#1a1d24] border-[#3a3f4a] text-[#c9ced6] hover:border-[#525968]'
+                    }`}
+                  >
+                    <span
+                      className="w-2.5 h-2.5 rounded-full border border-black/50"
+                      style={{ backgroundColor: toolState.activeColor || '#00b4c4' }}
+                    />
+                    Color
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="pixel-paint__modal-actions">
+              <button
+                type="button"
+                className="pixel-paint__modal-btn is-primary"
+                onClick={() => {
+                  let targetSize = newImageSize;
+                  if (newImageCustomSize) {
+                    const parsed = parseInt(newImageCustomSize, 10);
+                    if (Number.isFinite(parsed) && parsed >= 8 && parsed <= 4096) {
+                      targetSize = parsed;
+                    }
+                  }
+                  handleCreateNewImage(targetSize, newImageBg);
+                }}
+              >
+                Create Image
+              </button>
+              <button
+                type="button"
+                className="pixel-paint__modal-btn"
+                onClick={() => setNewImageModalOpen(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {saveAsModalOpen && (
+        <div className="pixel-paint__modal-backdrop" onClick={() => setSaveAsModalOpen(false)}>
+          <div className="pixel-paint__modal w-[360px] max-w-full" role="dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="pixel-paint__modal-icon">
+              <Download className="w-5 h-5 text-[#00b4c4]" />
+            </div>
+            <h2 className="pixel-paint__modal-title">Save Image As</h2>
+            <p className="pixel-paint__modal-copy">
+              Export current texture ({canvasSize}×{canvasSize}) to a PNG file.
+            </p>
+
+            <div className="my-3">
+              <label className="text-[10px] uppercase font-semibold tracking-wider text-[var(--ts-text-muted,#858a93)] block mb-1.5">
+                File Name
+              </label>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={saveAsFilename}
+                  onChange={(e) => setSaveAsFilename(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleSaveImageAs(saveAsFilename);
+                    }
+                  }}
+                  autoFocus
+                  className="flex-1 h-8 px-2.5 rounded bg-[#14171d] border border-[#3a3f4a] focus:border-[#00b4c4] text-[12px] font-mono text-white outline-none"
+                  placeholder="texture.png"
+                />
+              </div>
+            </div>
+
+            <div className="pixel-paint__modal-actions">
+              <button
+                type="button"
+                className="pixel-paint__modal-btn is-primary"
+                onClick={() => handleSaveImageAs(saveAsFilename)}
+              >
+                Download PNG
+              </button>
+              <button
+                type="button"
+                className="pixel-paint__modal-btn"
+                onClick={() => setSaveAsModalOpen(false)}
+              >
+                Cancel
               </button>
             </div>
           </div>
