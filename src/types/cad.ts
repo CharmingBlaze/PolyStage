@@ -77,6 +77,28 @@ export interface Face {
   smoothingGroup?: string | number;
 }
 
+export type MaterialShading = 'pbr' | 'unlit' | 'toon' | 'glass' | 'metallic' | 'emissive';
+export type MaterialPattern = 'solid' | 'checker' | 'checker4' | 'brick' | 'grid' | 'dots' | 'stripes';
+export type MaterialSource = 'color' | 'uv' | 'painted';
+
+/** A reusable scene material. Meshes and faces link to this asset by id. */
+export interface MaterialAsset {
+  id: string;
+  name: string;
+  color: string;
+  shading: MaterialShading;
+  roughness: number;
+  metalness: number;
+  emissive: string;
+  emissiveIntensity: number;
+  pattern: MaterialPattern;
+  tileScale: number;
+  doubleSided: boolean;
+  /** Color needs no UVs, UV is a generated checker, painted stores an image atlas. */
+  source: MaterialSource;
+  textureDataUrl?: string;
+}
+
 export interface MeshTextureAnimFrame {
   id: string;
   name: string;
@@ -139,6 +161,8 @@ export interface CADMesh {
   edges: Edge[];
   /** Logical editable polygons (source of truth). */
   faces: Face[];
+  /** Primary reusable material. Individual faces may override this with Face.materialId. */
+  materialId?: string;
   textureCanvasDataUrl?: string;
   /**
    * Multi-frame texture strip for Pixel Paint + ANIM-driven animated textures
@@ -388,6 +412,8 @@ export interface CADScene {
   lights?: CADLight[];
   particles?: ParticleEmitter[];
   environment?: EnvironmentSettings;
+  materials?: MaterialAsset[];
+  activeMaterialId?: string | null;
   /** Premiere-style cutscene sequence (multi-track edit). */
   /** Premiere-style cutscene sequence (multi-track edit). */
   sequence?: import('./sequence').CutsceneSequence | null;
@@ -468,6 +494,10 @@ export interface ToolState {
   isPenTool?: boolean;
   /** Pen tool Properties panel state (Pen Type, Make Quads, Wall Mode, UVs, ...). */
   penSettings?: import('../utils/penTool').PenToolSettings;
+  /** Paint 3D-inspired freehand outline to editable topology operator. */
+  isDoodleTool?: boolean;
+  /** Persistent 3D Doodle options used by the contextual tool panel. */
+  doodleSettings?: import('../utils/doodle3d').DoodleSettings;
 }
 
 export interface RenderSettings {

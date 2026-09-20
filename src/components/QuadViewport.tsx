@@ -10,6 +10,7 @@ import type {
   ToolState,
   RenderSettings,
   WorkspaceMode,
+  MaterialAsset,
 } from '../types/cad';
 import type { KnifeHit } from '../utils/meshCutTools';
 import type { PenSession } from '../utils/penTool';
@@ -18,6 +19,7 @@ type PaneId = 'top' | 'front' | 'side' | 'perspective';
 
 interface QuadViewportProps {
   meshes: CADMesh[];
+  materials?: MaterialAsset[];
   activeMeshId: string;
   setActiveMeshId: (id: string) => void;
   setMesh: (updater: CADMesh | ((prev: CADMesh) => CADMesh)) => void;
@@ -63,6 +65,7 @@ interface QuadViewportProps {
 
 export const QuadViewport: React.FC<QuadViewportProps> = ({
   meshes,
+  materials,
   activeMeshId,
   setActiveMeshId,
   setMesh,
@@ -142,6 +145,7 @@ export const QuadViewport: React.FC<QuadViewportProps> = ({
 
   const shared = {
     meshes,
+    materials,
     activeMeshId,
     setActiveMeshId,
     setMesh,

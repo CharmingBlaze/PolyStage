@@ -3,7 +3,7 @@
  * Built for low/mid-poly game meshes:
  *   - Height rings follow Front/Side curves (taper to tips)
  *   - Missing axis uses configurable thickness (default 0.6 full width)
- *   - Side walls are quads; game caps are all-quad (inset loop + diameter strip)
+ *   - Side walls and game caps are quads; caps use a flat boundary-matched grid
  *   - Radial count snaps to multiples of 4 for mirror / UV seams
  *   - Top is optional and shapes the XZ cross-section (Front or Side required for height)
  */
@@ -85,7 +85,7 @@ export type VectorLoftOptions = {
    */
   gameTopology?: boolean;
   /**
-   * `game` — inset quad ring + diameter-strip fill (all quads, soft dome tip).
+   * `game` — flat quad-grid fill (no inset pinch).
    * `pointed` — single pole fan (organic tips, uses tris).
    * Default `game`.
    */
@@ -1049,8 +1049,7 @@ function ringCentroid(
 
 /**
  * Ring stack → wall quads + tip caps.
- * `game` caps: inset ring of quads + diameter-strip fill (all quads when sides even).
- * Soft dome: inset verts push slightly toward the tip for a game-friendly end.
+ * `game` caps: a planar quad grid bounded by the endpoint ring.
  * `pointed` caps: direct fan to silhouette tip (organic, uses tris).
  */
 function finishLoftWithPoles(
@@ -1059,7 +1058,8 @@ function finishLoftWithPoles(
   sides: number,
   activeMinY: number,
   activeMaxY: number,
-  capStyle: VectorCapStyle
+  capStyle: VectorCapStyle,
+  capColumns = Math.max(1, Math.floor(sides / 4))
 ): VectorMeshSnapshot {
   const vertices = ringVerts.map((v) => ({ ...v }));
   const faces: number[][] = [];
@@ -1079,47 +1079,43 @@ function finishLoftWithPoles(
     const center = ringCentroid(vertices, ringStart, sides);
 
     if (capStyle === 'game' && sides >= 4 && sides % 2 === 0) {
-      const heightRange = Math.max(activeMaxY - activeMinY, 1e-6);
-      const tipPush = heightRange * 0.018;
-      const insetStart = vertices.length;
-
-      // Soft dome: inset toward center in XZ and ease Y toward the tip.
-      for (let col = 0; col < sides; col++) {
-        const outer = vertices[ringStart + col];
-        const t = 0.52;
-        const dome = t * t;
-        vertices.push({
-          x: mix(outer.x, center.x, t),
-          y: mix(outer.y, winding === 'bottom' ? tipY - tipPush : tipY + tipPush, dome * 0.85),
-          z: mix(outer.z, center.z, t),
-        });
+      const nx = capColumns;
+      const nz = sides / 2 - nx;
+      const grid: number[][] = Array.from({ length: nz + 1 }, () => []);
+      const ring = (i: number) => ringStart + (i % sides);
+      for (let x = 0; x <= nx; x++) {
+        grid[0][x] = ring(x);
+        grid[nz][x] = ring(2 * nx + nz - x);
       }
-
-      // Outer → inset ring of quads (clean edge loop under the tip).
-      for (let col = 0; col < sides; col++) {
-        const next = (col + 1) % sides;
-        const o0 = ringStart + col;
-        const o1 = ringStart + next;
-        const i0 = insetStart + col;
-        const i1 = insetStart + next;
-        if (winding === 'bottom') {
-          faces.push([o0, o1, i1, i0]);
-        } else {
-          faces.push([o0, i0, i1, o1]);
+      for (let z = 0; z <= nz; z++) {
+        grid[z][nx] = ring(nx + z);
+        grid[z][0] = ring(sides - z);
+      }
+      // Transfinite interpolation follows all four boundary chains, including
+      // rounded sections, without introducing a tiny inset ring or pole.
+      for (let z = 1; z < nz; z++) {
+        for (let x = 1; x < nx; x++) {
+          const u = x / nx;
+          const v = z / nz;
+          const top = vertices[grid[0][x]];
+          const bottom = vertices[grid[nz][x]];
+          const left = vertices[grid[z][0]];
+          const right = vertices[grid[z][nx]];
+          const tl = vertices[grid[0][0]];
+          const tr = vertices[grid[0][nx]];
+          const bl = vertices[grid[nz][0]];
+          const br = vertices[grid[nz][nx]];
+          const coordinate = (axis: 'x' | 'z') =>
+            mix(top[axis], bottom[axis], v) + mix(left[axis], right[axis], u) -
+            mix(mix(tl[axis], tr[axis], u), mix(bl[axis], br[axis], u), v);
+          grid[z][x] = vertices.length;
+          vertices.push({ x: coordinate('x'), y: tipY, z: coordinate('z') });
         }
       }
-
-      // Diameter-strip fill — all quads, no pole tris (game / UV friendly).
-      const half = sides / 2;
-      for (let i = 0; i < half - 1; i++) {
-        const a = insetStart + i;
-        const b = insetStart + i + 1;
-        const c = insetStart + sides - i - 2;
-        const d = insetStart + sides - i - 1;
-        if (winding === 'bottom') {
-          faces.push([a, b, c, d]);
-        } else {
-          faces.push([a, d, c, b]);
+      for (let z = 0; z < nz; z++) {
+        for (let x = 0; x < nx; x++) {
+          const quad = [grid[z][x], grid[z][x + 1], grid[z + 1][x + 1], grid[z + 1][x]];
+          faces.push(winding === 'bottom' ? quad : quad.reverse());
         }
       }
       return;
@@ -1364,7 +1360,11 @@ export function vectorPathsToMesh(
     }
   }
 
-  return finishLoftWithPoles(vertices, rings, sides, activeMinY, activeMaxY, capStyle);
+  const nominalPerEdge = Math.max(2, Math.round(sides / 4));
+  const capColumns = !topPoints.length && crossSection === 'box'
+    ? nominalPerEdge + (nominalPerEdge % 2)
+    : Math.max(1, Math.floor(sides / 4));
+  return finishLoftWithPoles(vertices, rings, sides, activeMinY, activeMaxY, capStyle, capColumns);
 }
 
 export function combineVectorMeshes(meshes: VectorMeshSnapshot[]): VectorMeshSnapshot {

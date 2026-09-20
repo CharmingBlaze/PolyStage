@@ -1,3 +1,7 @@
+import {
+  paintPressure as pointerPaintPressure,
+} from './pointerInput';
+
 /**
  * Imperative 3D paint stroke controller.
  *
@@ -17,7 +21,7 @@
  * - Callers must not preventDefault(pointerdown); stopImmediatePropagation only.
  */
 
-export type PaintStrokeClient = { x: number; y: number };
+export type PaintStrokeClient = { x: number; y: number; pressure?: number };
 
 export type PaintStrokeCallbacks = {
   onSegment: (from: PaintStrokeClient | null, to: PaintStrokeClient) => void;
@@ -47,8 +51,12 @@ function defaultMoveRoots(): EventTarget[] {
   return roots;
 }
 
-function eventClient(ev: { clientX: number; clientY: number }): PaintStrokeClient {
-  return { x: ev.clientX, y: ev.clientY };
+function eventClient(ev: { clientX: number; clientY: number; pressure?: number; pointerType?: string }): PaintStrokeClient {
+  return {
+    x: ev.clientX,
+    y: ev.clientY,
+    pressure: pointerPaintPressure(ev),
+  };
 }
 
 function eventPointerId(ev: { pointerId?: number }): number | null {
@@ -154,6 +162,12 @@ export function createPaintStrokeController(
 
     onPointerMove = (ev: PointerEvent) => {
       if (!active || !samePointer(eventPointerId(ev))) return;
+      const samples =
+        typeof ev.getCoalescedEvents === 'function' ? ev.getCoalescedEvents() : null;
+      if (samples && samples.length > 0) {
+        for (const sample of samples) stampMove(eventClient(sample));
+        return;
+      }
       stampMove(eventClient(ev));
     };
 

@@ -128,6 +128,7 @@
   background: var(--ts-card);
   border: 1px solid var(--ts-border);
   border-radius: var(--ts-radius);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.025);
 }
 .ts-divider {
   height: 1px;
@@ -155,9 +156,8 @@
 
 .ts-right-panel {
   position: relative;
-  border-left: 1px dashed var(--ts-border-hi);
-  outline: 1px dashed var(--ts-border);
-  outline-offset: -1px;
+  border-left: 1px solid var(--ts-border-hi);
+  box-shadow: -8px 0 24px rgba(4, 7, 11, 0.12);
   transition: outline-color var(--ts-duration) var(--ts-ease),
               border-color var(--ts-duration) var(--ts-ease);
 }
@@ -264,11 +264,9 @@
 }
 .ts-tool:hover { background: var(--ts-hover); color: var(--ts-text-hi); }
 .ts-tool--active {
-  background: transparent;
+  background: var(--ts-active-bg);
   color: var(--ts-accent-hi);
-  box-shadow: none;
-  outline: var(--ts-active-dash);
-  outline-offset: -1px;
+  box-shadow: inset 2px 0 0 var(--ts-accent);
 }
 .ts-tool:disabled,
 .ts-tool[aria-disabled='true'] {
@@ -331,15 +329,15 @@
 .insp-tab.is-on {
   color: var(--ts-accent-hi);
   font-weight: 600;
-  background: transparent;
+  background: linear-gradient(to bottom, rgba(0,180,196,0.07), transparent);
   border: none;
 }
 .insp-tab.is-on::after {
   content: '';
   position: absolute;
   bottom: 0;
-  left: 6px;
-  right: 6px;
+  left: 10px;
+  right: 10px;
   height: 2px;
   background: var(--ts-accent);
   border-radius: 2px 2px 0 0;

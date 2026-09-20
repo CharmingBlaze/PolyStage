@@ -509,6 +509,66 @@ export function packUVIslandsGrid(mesh: CADMesh, faceIds?: string[], padding = 0
   };
 }
 
+/** True when every face has a per-corner UV that is not collapsed to a point. */
+export function meshHasPaintableUVs(mesh: CADMesh): boolean {
+  if (!mesh.faces.length) return false;
+  return mesh.faces.every((face) => {
+    if (!face.uvs || face.uvs.length !== face.vertexIds.length || face.vertexIds.length < 3) return false;
+    let minU = Infinity;
+    let maxU = -Infinity;
+    let minV = Infinity;
+    let maxV = -Infinity;
+    face.uvs.forEach((uv) => {
+      minU = Math.min(minU, uv.u);
+      maxU = Math.max(maxU, uv.u);
+      minV = Math.min(minV, uv.v);
+      maxV = Math.max(maxV, uv.v);
+    });
+    return maxU - minU > 1e-5 || maxV - minV > 1e-5;
+  });
+}
+
+/** Smart-unwrap + pack when the mesh cannot be 3D-painted or exported with a texture. */
+export function ensurePaintableUVs(mesh: CADMesh): CADMesh {
+  if (meshHasPaintableUVs(mesh)) return mesh;
+  return smartUnwrapFaces(mesh);
+}
+
+/**
+ * Mean world-units per UV unit, scaled by texture resolution → approximate texels per world unit.
+ * Higher is sharper. Returns 0 when UVs or area are degenerate.
+ */
+export function estimateTexelDensity(mesh: CADMesh, textureSize = 256): number {
+  const vertMap = new Map(mesh.vertices.map((v) => [v.id, v]));
+  let worldArea = 0;
+  let uvArea = 0;
+  mesh.faces.forEach((face) => {
+    if (face.vertexIds.length < 3 || !face.uvs || face.uvs.length < 3) return;
+    const a = vertMap.get(face.vertexIds[0]);
+    const b = vertMap.get(face.vertexIds[1]);
+    const c = vertMap.get(face.vertexIds[2]);
+    if (!a || !b || !c) return;
+    const abx = b.x - a.x;
+    const aby = b.y - a.y;
+    const abz = b.z - a.z;
+    const acx = c.x - a.x;
+    const acy = c.y - a.y;
+    const acz = c.z - a.z;
+    const nx = aby * acz - abz * acy;
+    const ny = abz * acx - abx * acz;
+    const nz = abx * acy - aby * acx;
+    worldArea += Math.hypot(nx, ny, nz) * 0.5;
+    const uv0 = face.uvs[0];
+    const uv1 = face.uvs[1];
+    const uv2 = face.uvs[2];
+    uvArea += Math.abs(
+      (uv1.u - uv0.u) * (uv2.v - uv0.v) - (uv2.u - uv0.u) * (uv1.v - uv0.v),
+    ) * 0.5;
+  });
+  if (worldArea < 1e-10 || uvArea < 1e-10) return 0;
+  return (Math.sqrt(uvArea / worldArea) * textureSize);
+}
+
 export function moveUVVertex(
   mesh: CADMesh,
   faceId: string,

@@ -569,3 +569,33 @@ export function insertTextureClipKey(
     }),
   };
 }
+
+function bakeChannel(keyframes: AnimKeyframe[], duration: number, fps: number, interpolation: AnimInterpolation): AnimKeyframe[] {
+  if (keyframes.length <= 1) return keyframes.map((kf) => ({ ...kf, value: cloneV(kf.value) }));
+  const steps = Math.max(2, Math.round(Math.max(duration, 0.0001) * Math.max(1, fps)) + 1);
+  const dt = duration / (steps - 1);
+  const baked: AnimKeyframe[] = [];
+  for (let i = 0; i < steps; i += 1) {
+    const time = i === steps - 1 ? duration : i * dt;
+    const value = sampleChannel(keyframes, time, interpolation);
+    if (!value) continue;
+    baked.push({ id: id('kf'), time, value });
+  }
+  return baked;
+}
+
+/** Sample every track at clip fps so engine interpolation matches the viewport. */
+export function bakeAnimationClip(clip: AnimationClip): AnimationClip {
+  const fps = Math.max(1, clip.fps || 24);
+  const duration = Math.max(clip.duration, 0);
+  const interpolation = clip.interpolation || 'linear';
+  return {
+    ...clip,
+    tracks: clip.tracks.map((track) => ({
+      ...track,
+      posKeyframes: bakeChannel(track.posKeyframes, duration, fps, interpolation),
+      rotKeyframes: bakeChannel(track.rotKeyframes, duration, fps, interpolation),
+      sclKeyframes: bakeChannel(track.sclKeyframes, duration, fps, interpolation),
+    })),
+  };
+}

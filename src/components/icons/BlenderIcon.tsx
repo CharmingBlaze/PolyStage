@@ -1,7 +1,8 @@
 /**
- * Toolbar glyphs. Object/Vertex/Edge/Face use cropped Blender 4.4 icons_svg
- * (GPL-2.0+). Modeling/gizmo icons are original 16x16 PolyStage SVGs
- * (public/icons/model, MIT). Colored with currentColor via CSS mask.
+ * Toolbar glyphs. Prefer Blender 4.4 icons_svg (GPL-2.0+) whenever Blender
+ * has an exact semantic match. PolyStage's 16x16 modeling set is reserved
+ * for application-specific operations that Blender does not expose as a
+ * standalone SVG. Every glyph is colored with currentColor via CSS mask.
  */
 import type { HTMLAttributes } from 'react';
 
@@ -69,7 +70,7 @@ export type BlenderIconName =
   | 'cursor';
 
 const FILES: Record<BlenderIconName, string> = {
-  object: '/blender-icons/mesh_cube.svg',
+  object: '/blender-icons/object_datamode.svg',
   vertex: '/blender-icons/vertexsel.svg',
   edge: '/blender-icons/edgesel.svg',
   face: '/blender-icons/facesel.svg',
@@ -80,7 +81,7 @@ const FILES: Record<BlenderIconName, string> = {
   move: '/icons/model/move.svg',
   rotate: '/icons/model/rotate.svg',
   scale: '/icons/model/scale.svg',
-  pivot: '/icons/model/pivot.svg',
+  pivot: '/blender-icons/object_origin.svg',
   orientationLocal: '/icons/model/orientation-local.svg',
   orientationGlobal: '/icons/model/orientation-global.svg',
   center: '/icons/model/center.svg',
@@ -98,10 +99,10 @@ const FILES: Record<BlenderIconName, string> = {
   loopCut: '/icons/model/loopcut.svg',
   knife: '/icons/model/knife.svg',
   cad: '/icons/model/cad.svg',
-  pen: '/blender-icons/greasepencil.svg',
+  pen: '/blender-icons/gp_draw_stroke.svg',
   weld: '/icons/model/weld.svg',
   mirror: '/icons/model/mirror.svg',
-  magnet: '/icons/model/snap.svg',
+  magnet: '/blender-icons/snap_vertex.svg',
   uv: '/blender-icons/uv.svg',
   outliner: '/icons/model/outliner.svg',
   mesh: '/blender-icons/mesh_data.svg',
@@ -120,9 +121,9 @@ const FILES: Record<BlenderIconName, string> = {
   blockout: '/blender-icons/greasepencil.svg',
   anim: '/blender-icons/file_refresh.svg',
   settings: '/blender-icons/overlay.svg',
-  add: '/icons/model/add.svg',
+  add: '/blender-icons/add.svg',
   rename: '/blender-icons/file_new.svg',
-  trash: '/icons/model/trash.svg',
+  trash: '/blender-icons/trash.svg',
   subsurf: '/blender-icons/mod_subsurf.svg',
   boolean: '/blender-icons/mod_boolean.svg',
   cursor: '/blender-icons/cursor.svg',

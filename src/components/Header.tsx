@@ -55,6 +55,10 @@ interface HeaderProps {
   onToggleSelectAll?: () => void;
   onDeselectAll?: () => void;
   onExportGLB?: () => void;
+  onSaveProject?: () => void;
+  documentDirty?: boolean;
+  onRecoverSession?: () => void;
+  recoverAvailable?: boolean;
   onEnterRigMode?: (mode: RigMode) => void;
   uvSplitOpen: boolean;
   isToolWindowOpen?: boolean;
@@ -67,6 +71,7 @@ interface HeaderProps {
   onToggleToolbar?: () => void;
   isToolbarFloating?: boolean;
   onToggleToolbarFloat?: () => void;
+  materialControls?: React.ReactNode;
 }
 
 function MenuDropdown({
@@ -105,6 +110,7 @@ function MenuDropdown({
 
   return (
     <div
+      data-menu-id={id}
       className="relative"
       onMouseEnter={() => {
         if (openMenu) setOpenMenu(id);
@@ -193,6 +199,10 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleSelectAll,
   onDeselectAll,
   onExportGLB,
+  onSaveProject,
+  documentDirty = false,
+  onRecoverSession,
+  recoverAvailable = false,
   onEnterRigMode,
   uvSplitOpen,
   isToolWindowOpen,
@@ -205,6 +215,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleToolbar,
   isToolbarFloating = false,
   onToggleToolbarFloat,
+  materialControls,
 }) => {
   const [isRenamingScene, setIsRenamingScene] = useState(false);
   const [sceneNameInput, setSceneNameInput] = useState('');
@@ -305,6 +316,10 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   const handleExportJSON = () => {
+    if (onSaveProject) {
+      onSaveProject();
+      return;
+    }
     const jsonStr = exportProjectJSON(mesh);
     downloadFile(`${mesh.name.toLowerCase().replace(/\s+/g, '_')}${PROJECT_EXT}`, jsonStr, 'application/json');
   };
@@ -369,7 +384,8 @@ export const Header: React.FC<HeaderProps> = ({
     { type: 'item', label: 'Open Project…', shortcut: 'Ctrl+O', onClick: handleOpenFile },
     { type: 'item', label: 'Import 3D Model (.obj, .stl, .ply, .gltf, .glb)…', shortcut: 'Ctrl+I', onClick: onOpenImportModal || handleOpenFile },
     { type: 'sep' },
-    { type: 'item', label: `Save Project (${PROJECT_EXT})`, shortcut: 'Ctrl+S', onClick: handleExportJSON },
+    { type: 'item', label: `Save Project (${PROJECT_EXT})${documentDirty ? ' •' : ''}`, shortcut: 'Ctrl+S', onClick: handleExportJSON },
+    { type: 'item', label: 'Restore Last Session', disabled: !recoverAvailable, onClick: onRecoverSession },
     { type: 'item', label: 'Export OBJ + MTL (Blender/Unity)…', onClick: handleExportOBJ },
     { type: 'item', label: 'Export GLB (rigged + animations)…', onClick: () => onExportGLB?.() },
     { type: 'item', label: 'Export glTF 2.0 (.gltf)…', onClick: handleExportGLTF },
@@ -547,9 +563,9 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         </div>
       ) : (
-        <div className="h-9 px-2 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 bg-[var(--ts-panel)]">
+        <div className="sp-header-main h-10 px-2 grid grid-cols-[minmax(0,1fr)_auto_auto_minmax(0,1fr)] items-center gap-2 bg-[var(--ts-panel)]">
           {/* Brand + menus */}
-          <div className="flex items-center gap-1.5 min-w-0">
+          <div className="sp-header-left flex items-center gap-1.5 min-w-0">
             <BrandMark size={24} className="shrink-0" />
             <span className="sp-wordmark hidden md:inline">
               <span className="sp-wordmark__poly">Poly</span>
@@ -579,7 +595,9 @@ export const Header: React.FC<HeaderProps> = ({
               aria-label="Model workspace"
               aria-pressed={activeWorkspaceMode === 'modeling' && !toolState.isPainting3D && !uvSplitOpen}
             >
-              Model
+              <BlenderIcon name="object" size={13} />
+              <span className="sp-workspace-label-full">Model</span>
+              <span className="sp-workspace-label-short">Model</span>
             </button>
             <button
               type="button"
@@ -588,7 +606,9 @@ export const Header: React.FC<HeaderProps> = ({
               title="Vector Blockout"
               aria-label="Blockout workspace"
             >
-              Blockout
+              <BlenderIcon name="blockout" size={13} />
+              <span className="sp-workspace-label-full">Blockout</span>
+              <span className="sp-workspace-label-short">Block</span>
             </button>
             <button
               type="button"
@@ -597,7 +617,9 @@ export const Header: React.FC<HeaderProps> = ({
               title="Paint"
               aria-label="Paint workspace"
             >
-              Paint
+              <BlenderIcon name="brush" size={13} />
+              <span className="sp-workspace-label-full">Paint</span>
+              <span className="sp-workspace-label-short">Paint</span>
             </button>
             <button
               type="button"
@@ -608,7 +630,9 @@ export const Header: React.FC<HeaderProps> = ({
               title="3D Brush (B)"
               aria-label="3D brush"
             >
-              Brush
+              <BlenderIcon name="settings" size={13} />
+              <span className="sp-workspace-label-full">Brush</span>
+              <span className="sp-workspace-label-short">Brush</span>
             </button>
             <button
               type="button"
@@ -617,7 +641,9 @@ export const Header: React.FC<HeaderProps> = ({
               title="Rig and Skin"
               aria-label="Rig workspace"
             >
-              Rig
+              <BlenderIcon name="bone" size={13} />
+              <span className="sp-workspace-label-full">Rig</span>
+              <span className="sp-workspace-label-short">Rig</span>
             </button>
             <button
               type="button"
@@ -626,7 +652,9 @@ export const Header: React.FC<HeaderProps> = ({
               title="Animation"
               aria-label="Animation workspace"
             >
-              Anim
+              <BlenderIcon name="anim" size={13} />
+              <span className="sp-workspace-label-full">Animate</span>
+              <span className="sp-workspace-label-short">Anim</span>
             </button>
             <button
               type="button"
@@ -635,11 +663,19 @@ export const Header: React.FC<HeaderProps> = ({
               title="UV Editor"
               aria-label="UV workspace"
             >
-              UV
+              <BlenderIcon name="uv" size={13} />
+              <span className="sp-workspace-label-full">UV</span>
+              <span className="sp-workspace-label-short">UV</span>
             </button>
           </nav>
 
-          <div className="flex items-center justify-end gap-1.5 min-w-0">
+          {materialControls && (
+            <div className="sp-header-material-inline" aria-label="Material topbar">
+              {materialControls}
+            </div>
+          )}
+
+          <div className="sp-header-right flex items-center justify-end gap-1.5 min-w-0">
           {/* Scene */}
           <div className="ts-chip shrink-0 min-w-0">
             <BlenderIcon name="scene" size={12} className="text-[var(--ts-accent)] shrink-0" />

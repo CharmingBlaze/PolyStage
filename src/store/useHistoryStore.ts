@@ -1,39 +1,81 @@
 import { create } from 'zustand';
 import { useVectorStore } from './useVectorStore';
-import { useSceneStore } from './useSceneStore';
-import type { CADMesh, CADBone } from '../types/cad';
 
 export type WorkspaceHistoryProvider = 'mesh' | 'vector' | 'paint';
 
-const MAX_HISTORY = 50;
+const MAX_HISTORY = 40;
 
-interface Snapshot {
-  meshes: CADMesh[];
-  bones: CADBone[];
+export interface HistoryAdapter {
+  undo: () => void;
+  redo: () => void;
+  canUndo: () => boolean;
+  canRedo: () => boolean;
 }
 
-const undoStack: Snapshot[] = [];
-const redoStack: Snapshot[] = [];
-
-function takeSnapshot(): Snapshot {
-  const { meshes, bones } = useSceneStore.getState();
-  return { meshes, bones };
+export interface MeshHistorySnapshot {
+  scenes: unknown;
+  activeSceneId: string;
+  activeMeshId: string;
+  selectedVertexIds: string[];
+  selectedEdgeIds: string[];
+  selectedFaceIds: string[];
+  selectedMeshIds: string[];
+  selectedBoneId: string;
 }
 
-function restoreSnapshot(snap: Snapshot): void {
-  useSceneStore.setState({ meshes: snap.meshes, bones: snap.bones });
+export interface MeshHistoryAdapter {
+  takeSnapshot: () => MeshHistorySnapshot;
+  restoreSnapshot: (snap: MeshHistorySnapshot) => void;
 }
+
+const undoStack: MeshHistorySnapshot[] = [];
+const redoStack: MeshHistorySnapshot[] = [];
+
+let meshAdapter: MeshHistoryAdapter | null = null;
+let paintAdapter: HistoryAdapter | null = null;
+
+function cloneSnapshot(snap: MeshHistorySnapshot): MeshHistorySnapshot {
+  if (typeof structuredClone === 'function') return structuredClone(snap);
+  return JSON.parse(JSON.stringify(snap)) as MeshHistorySnapshot;
+}
+
+export function bindMeshHistory(adapter: MeshHistoryAdapter | null) {
+  meshAdapter = adapter;
+}
+
+export function bindPaintHistory(adapter: HistoryAdapter | null) {
+  paintAdapter = adapter;
+}
+
+/** Drop stacks between tests or when loading a project. */
+export function resetMeshHistoryForTests() {
+  undoStack.length = 0;
+  redoStack.length = 0;
+}
+
+export const clearMeshHistory = resetMeshHistoryForTests;
 
 export interface HistoryStoreState {
   currentProvider: WorkspaceHistoryProvider;
   /** Incremented on every push/undo/redo to trigger React re-renders */
   version: number;
   setCurrentProvider: (provider: WorkspaceHistoryProvider) => void;
+  bumpVersion: () => void;
   pushUndo: () => void;
   undo: () => void;
   redo: () => void;
   canUndo: () => boolean;
   canRedo: () => boolean;
+  /** True after a mesh snapshot has been recorded. */
+  meshStackLength: () => number;
+}
+
+function vectorCanUndo() {
+  return useVectorStore.getState().history.length > 0;
+}
+
+function vectorCanRedo() {
+  return useVectorStore.getState().future.length > 0;
 }
 
 export const useHistoryStore = create<HistoryStoreState>((set, get) => ({
@@ -42,8 +84,11 @@ export const useHistoryStore = create<HistoryStoreState>((set, get) => ({
 
   setCurrentProvider: (provider) => set({ currentProvider: provider }),
 
+  bumpVersion: () => set({ version: get().version + 1 }),
+
   pushUndo: () => {
-    undoStack.push(takeSnapshot());
+    if (!meshAdapter) return;
+    undoStack.push(cloneSnapshot(meshAdapter.takeSnapshot()));
     if (undoStack.length > MAX_HISTORY) undoStack.shift();
     redoStack.length = 0;
     set({ version: get().version + 1 });
@@ -53,11 +98,17 @@ export const useHistoryStore = create<HistoryStoreState>((set, get) => ({
     const { currentProvider } = get();
     if (currentProvider === 'vector') {
       useVectorStore.getState().undo();
+      set({ version: get().version + 1 });
       return;
     }
-    if (undoStack.length === 0) return;
-    redoStack.push(takeSnapshot());
-    restoreSnapshot(undoStack.pop()!);
+    if (currentProvider === 'paint') {
+      paintAdapter?.undo();
+      set({ version: get().version + 1 });
+      return;
+    }
+    if (!meshAdapter || undoStack.length === 0) return;
+    redoStack.push(cloneSnapshot(meshAdapter.takeSnapshot()));
+    meshAdapter.restoreSnapshot(undoStack.pop()!);
     set({ version: get().version + 1 });
   },
 
@@ -65,14 +116,33 @@ export const useHistoryStore = create<HistoryStoreState>((set, get) => ({
     const { currentProvider } = get();
     if (currentProvider === 'vector') {
       useVectorStore.getState().redo();
+      set({ version: get().version + 1 });
       return;
     }
-    if (redoStack.length === 0) return;
-    undoStack.push(takeSnapshot());
-    restoreSnapshot(redoStack.pop()!);
+    if (currentProvider === 'paint') {
+      paintAdapter?.redo();
+      set({ version: get().version + 1 });
+      return;
+    }
+    if (!meshAdapter || redoStack.length === 0) return;
+    undoStack.push(cloneSnapshot(meshAdapter.takeSnapshot()));
+    meshAdapter.restoreSnapshot(redoStack.pop()!);
     set({ version: get().version + 1 });
   },
 
-  canUndo: () => undoStack.length > 0,
-  canRedo: () => redoStack.length > 0,
+  canUndo: () => {
+    const { currentProvider } = get();
+    if (currentProvider === 'vector') return vectorCanUndo();
+    if (currentProvider === 'paint') return paintAdapter?.canUndo() ?? false;
+    return undoStack.length > 0;
+  },
+
+  canRedo: () => {
+    const { currentProvider } = get();
+    if (currentProvider === 'vector') return vectorCanRedo();
+    if (currentProvider === 'paint') return paintAdapter?.canRedo() ?? false;
+    return redoStack.length > 0;
+  },
+
+  meshStackLength: () => undoStack.length,
 }));

@@ -15,8 +15,10 @@ interface ToolbarProps {
   onMergeVertices: () => void;
   onMirrorSymmetry: () => void;
   onMagnetSnap: () => void;
-  /** Modo-style Pen tool: create geometry vertex by vertex. */
+  /** Mesh Sketch: draw and edit topology directly in 3D. */
   onTogglePenTool?: () => void;
+  /** 3D Doodle: freehand outline to editable mesh. */
+  onToggleDoodleTool?: () => void;
   onSelectAll?: () => void;
   onDeselectAll?: () => void;
   /** When true, keep 3D painting armed (Paint workspace). */
@@ -66,6 +68,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onMirrorSymmetry,
   onMagnetSnap,
   onTogglePenTool,
+  onToggleDoodleTool,
   onSelectAll,
   onDeselectAll,
   onDeleteSelected,
@@ -412,7 +415,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             aria-label="Add primitive"
             aria-pressed={primitivesOpen}
           >
-            <BlenderIcon name="add" size={14} />
+            <BlenderIcon name="add" size={16} />
             <span className="ts-tip">Add Primitive</span>
           </button>
           <div className={sepClass} />
@@ -452,7 +455,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               title={label}
               aria-label={label}
             >
-              <BlenderIcon name={icon} size={14} />
+              <BlenderIcon name={icon} size={16} />
               <span className="ts-tip">{label}</span>
             </button>
           ))}
@@ -484,7 +487,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             aria-label={paintPanelCollapsed ? 'Brush settings' : 'Hide brush settings'}
             onClick={togglePaintPanel}
           >
-            <BlenderIcon name="settings" size={14} />
+            <BlenderIcon name="settings" size={16} />
             <span className="ts-tip">Brush settings</span>
           </button>
           {paintPropsPanel}
@@ -524,7 +527,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               title="Select All (A)"
               aria-label="Select All (A)"
             >
-              <BlenderIcon name="select" size={14} />
+              <BlenderIcon name="select" size={16} />
               <span className="ts-tip">Select All (A)</span>
             </button>
             <button
@@ -533,7 +536,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               title="Deselect All (Alt+A)"
               aria-label="Deselect All (Alt+A)"
             >
-              <BlenderIcon name="deselect" size={14} />
+              <BlenderIcon name="deselect" size={16} />
               <span className="ts-tip">Deselect All (Alt+A)</span>
             </button>
           </div>
@@ -590,7 +593,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               title="Weld / Merge Vertices"
               aria-label="Weld / Merge Vertices"
             >
-              <BlenderIcon name="weld" size={14} />
+              <BlenderIcon name="weld" size={16} />
               <span className="ts-tip">Weld Vertices</span>
             </button>
             <button
@@ -599,7 +602,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               title="Delete selected (X)"
               aria-label="Delete selected"
             >
-              <BlenderIcon name="trash" size={14} />
+              <BlenderIcon name="trash" size={16} />
               <span className="ts-tip">Delete selected (X)</span>
             </button>
           </div>
@@ -622,7 +625,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               title="Mirror Symmetry (X)"
               aria-label="Mirror Symmetry (X)"
             >
-              <BlenderIcon name="mirror" size={14} />
+              <BlenderIcon name="mirror" size={16} />
               <span className="ts-tip">Mirror Symmetry</span>
             </button>
             <button
@@ -647,12 +650,24 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               onClick={onTogglePenTool}
               disabled={!onTogglePenTool}
               className={`sp-tool-btn relative group ${toolState.isPenTool ? 'is-active' : ''}`}
-              title="Pen tool: create geometry vertex by vertex"
-              aria-label="Pen tool"
+              title="Mesh Sketch: draw and edit topology in 3D"
+              aria-label="Mesh Sketch tool"
               aria-pressed={!!toolState.isPenTool}
             >
               <BlenderIcon name="pen" size={16} />
-              <span className="ts-tip">Pen</span>
+              <span className="ts-tip">Mesh Sketch</span>
+            </button>
+            <button
+              type="button"
+              onClick={onToggleDoodleTool}
+              disabled={!onToggleDoodleTool}
+              className={`sp-tool-btn relative group ${toolState.isDoodleTool ? 'is-active' : ''}`}
+              title="3D Doodle: draw an outline and create editable geometry"
+              aria-label="3D Doodle tool"
+              aria-pressed={!!toolState.isDoodleTool}
+            >
+              <BlenderIcon name="blockout" size={16} />
+              <span className="ts-tip">3D Doodle</span>
             </button>
           </div>
         </>
@@ -671,7 +686,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             title="Weight paint"
             aria-label="Weight paint"
           >
-            <BlenderIcon name="brush" size={14} />
+            <BlenderIcon name="skin" size={16} />
             <span className="ts-tip">Weight Paint</span>
           </button>
           <button
@@ -681,7 +696,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             title="Mirror bones / symmetry"
             aria-label="Mirror bones symmetry"
           >
-            <BlenderIcon name="mirror" size={14} />
+            <BlenderIcon name="mirror" size={16} />
             <span className="ts-tip">Mirror Symmetry</span>
           </button>
         </div>
@@ -700,7 +715,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               setCols(2);
             }}
           >
-            <BlenderIcon name="tools" size={14} />
+            <BlenderIcon name="tools" size={16} />
             <span className="ts-tip">Float toolbar</span>
           </button>
         )}

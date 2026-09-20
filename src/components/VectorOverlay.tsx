@@ -7,6 +7,7 @@ import {
   getVectorViewport,
   type VectorViewportKind,
 } from '../utils/vectorViewportRegistry';
+import { isPrimaryAction, isSpaceHeld, shouldIgnorePointer } from '../utils/pointerInput';
 
 type DragTarget =
   | { type: 'anchor'; plane: VectorPlane; index: number }
@@ -326,8 +327,8 @@ export function VectorOverlay({ kind, active }: VectorOverlayProps) {
       el = (vp.container.querySelector('canvas') as HTMLElement | null) ?? vp.container;
 
       onDown = (e: PointerEvent) => {
-        if (e.button !== 0 || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
-        if (e.getModifierState?.('Space')) return;
+        if (shouldIgnorePointer(e) || isSpaceHeld(e)) return;
+        if (!isPrimaryAction(e) || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
 
         const hit = document.elementFromPoint(e.clientX, e.clientY);
         if (hit?.closest?.('.vector-anchor.close-target, .vector-panel')) return;
@@ -546,6 +547,11 @@ export function VectorOverlay({ kind, active }: VectorOverlayProps) {
     return { plane: kind, values: silhouetteKeyHeights(other) };
   }, [kind, paths]);
 
+  const silhouetteCentersByPlane = useMemo(
+    () => vectorSilhouetteCenters(paths.front, paths.side),
+    [paths.front, paths.side]
+  );
+
   if (!active) return null;
 
   const beginDrag = (
@@ -659,6 +665,26 @@ export function VectorOverlay({ kind, active }: VectorOverlayProps) {
         const isActive = selected?.plane === path.plane;
         const showHandles = mode === 'edit' && pathStyle === 'curve';
         const showIndices = mode === 'edit' || path.closed || path.anchors.length > 0;
+        const centerU =
+          path.plane === 'front'
+            ? silhouetteCentersByPlane.x
+            : path.plane === 'side'
+              ? silhouetteCentersByPlane.z
+              : 0;
+        const minV = path.anchors.length
+          ? Math.min(...path.anchors.map((anchor) => anchor.point.v))
+          : 0;
+        const maxV = path.anchors.length
+          ? Math.max(...path.anchors.map((anchor) => anchor.point.v))
+          : 0;
+        const centerStart =
+          path.closed && path.plane !== 'top'
+            ? projectPoint(kind, path.plane, { u: centerU, v: minV })
+            : null;
+        const centerEnd =
+          path.closed && path.plane !== 'top'
+            ? projectPoint(kind, path.plane, { u: centerU, v: maxV })
+            : null;
         return (
           <g key={path.id} className={`${isActive ? 'active' : ''}${path.closed ? ' is-closed' : ''}`}>
             {d ? (
@@ -687,6 +713,15 @@ export function VectorOverlay({ kind, active }: VectorOverlayProps) {
               <path
                 className={`vector-path plane-${path.plane}${path.closed ? ' is-closed' : ''}`}
                 d={d}
+              />
+            ) : null}
+            {centerStart?.visible && centerEnd?.visible ? (
+              <line
+                className={`vector-center-seam plane-${path.plane}`}
+                x1={centerStart.x}
+                y1={centerStart.y}
+                x2={centerEnd.x}
+                y2={centerEnd.y}
               />
             ) : null}
             {path.anchors.map((anchor, index) => {

@@ -59,6 +59,25 @@ function closedEggSide(): BezierPath {
 }
 
 describe('vectorPathsToMesh', () => {
+  it.each([8, 12, 16, 20, 24])('builds planar non-collapsed cap grids at %i sides', (sides) => {
+    for (const roundness of [0, 0.35, 1]) {
+      const mesh = vectorPathsToMesh(
+        closedRect('front', 0.7, 0, 2), closedRect('side', 0.3, 0, 2),
+        4, sides, null, { capStyle: 'game', roundness },
+      )!;
+      expect(analyzeVectorMesh(mesh).issues).toEqual([]);
+      for (const face of mesh.faces.slice(4 * sides)) {
+        const points = face.map((index) => mesh.vertices[index]);
+        expect(points.every((p) => p.y === points[0].y)).toBe(true);
+        for (const [a, b, c] of [[0, 1, 2], [0, 2, 3]]) {
+          const p = points[a], q = points[b], r = points[c];
+          const area = (q.x - p.x) * (r.z - p.z) - (q.z - p.z) * (r.x - p.x);
+          expect(Math.abs(area)).toBeGreaterThan(1e-8);
+          expect(Math.sign(area)).toBe(points[0].y === 0 ? 1 : -1);
+        }
+      }
+    }
+  });
   it('centers perspective construction planes on asymmetric silhouettes', () => {
     const front = closedRect('front', 0.5, 0, 2);
     const side = closedRect('side', 0.4, 0, 2);
@@ -79,18 +98,41 @@ describe('vectorPathsToMesh', () => {
     });
   });
 
-  it('lofts front + side with all-quad game caps (inset + diameter strip)', () => {
+  it.each([0, 0.35, 1])('caps tapered offset silhouettes without inverted triangles at roundness %s', (roundness) => {
+    const front = closedEggSide();
+    front.plane = 'front';
+    // Truncate the tips to give the cap an authored flat rim.
+    front.anchors = [
+      { u: -0.2, v: 0 }, { u: 0.2, v: 0 },
+      { u: 0.6, v: 0.5 }, { u: 0.7, v: 1.5 },
+      { u: 0.4, v: 2 }, { u: -0.1, v: 2 },
+      { u: -0.4, v: 1.5 }, { u: -0.5, v: 0.5 },
+    ].map((point) => ({ point, handleIn: { ...point }, handleOut: { ...point } }));
+    const mesh = vectorPathsToMesh(front, closedRect('side', 0.35, 0, 2), 8, 12, null,
+      { capStyle: 'game', roundness })!;
+    expect(analyzeVectorMesh(mesh).issues).toEqual([]);
+    for (const face of mesh.faces.slice(8 * 12)) {
+      const points = face.map((index) => mesh.vertices[index]);
+      expect(points.every((p) => p.y === points[0].y)).toBe(true);
+      for (const [a, b, c] of [[0, 1, 2], [0, 2, 3]]) {
+        const p = points[a], q = points[b], r = points[c];
+        const area = (q.x - p.x) * (r.z - p.z) - (q.z - p.z) * (r.x - p.x);
+        expect(Math.abs(area)).toBeGreaterThan(1e-8);
+        expect(Math.sign(area)).toBe(points[0].y === 0 ? 1 : -1);
+      }
+    }
+  });
+
+  it('lofts front + side with flat all-quad game caps and no inset pinch', () => {
     const front = closedRect('front', 0.5, 0, 2);
     const side = closedRect('side', 0.35, 0, 2);
     const rings = 4;
     const sides = 8;
     const snapshot = vectorPathsToMesh(front, side, rings, sides, null, { capStyle: 'game' });
     expect(snapshot).not.toBeNull();
-    // ring verts + 2 inset rings (no poles)
-    expect(snapshot!.vertices.length).toBe((rings + 1) * sides + 2 * sides);
-    // wall quads + 2*(inset ring quads + diameter-strip quads)
-    // diameter strip for sides=8 → half-1 = 3 quads per tip
-    const tipQuads = sides + (sides / 2 - 1);
+    // A 2×2 cap grid adds one interior vertex per cap.
+    expect(snapshot!.vertices.length).toBe((rings + 1) * sides + 2);
+    const tipQuads = 4;
     expect(snapshot!.faces.length).toBe(rings * sides + 2 * tipQuads);
     expect(snapshot!.faces.filter((f) => f.length === 4).length).toBe(snapshot!.faces.length);
     expect(snapshot!.faces.filter((f) => f.length === 3).length).toBe(0);
@@ -110,11 +152,10 @@ describe('vectorPathsToMesh', () => {
       }
     }
 
-    // Soft dome: inset tip verts ease past silhouette ends.
-    const insetBot = snapshot!.vertices.slice((rings + 1) * sides, (rings + 1) * sides + sides);
-    const insetTop = snapshot!.vertices.slice(-sides);
-    expect(Math.min(...insetBot.map((v) => v.y))).toBeLessThan(0.05);
-    expect(Math.max(...insetTop.map((v) => v.y))).toBeGreaterThan(1.95);
+    const bottom = snapshot!.vertices.slice(0, sides);
+    const top = snapshot!.vertices.slice(rings * sides, (rings + 1) * sides);
+    expect(bottom.every((v) => Math.abs(v.y) < 1e-8)).toBe(true);
+    expect(top.every((v) => Math.abs(v.y - 2) < 1e-8)).toBe(true);
   });
 
   it('pointed caps fan directly to silhouette tips', () => {
@@ -323,7 +364,7 @@ describe('vectorPathsToMesh', () => {
     });
     expect(mesh).not.toBeNull();
     const audit = analyzeVectorMesh(mesh!);
-    expect(audit.vertices).toBe(9 * 8 + 2 * 8);
+    expect(audit.vertices).toBe(9 * 8 + 2);
     expect(audit.issues).toEqual([]);
     expect(mesh!.faces.every((face) => face.length === 4)).toBe(true);
   });

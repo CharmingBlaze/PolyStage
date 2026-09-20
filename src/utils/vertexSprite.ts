@@ -3,6 +3,11 @@ import type { CADMesh } from '../types/cad';
 
 export type VertexHandleState = 'idle' | 'selected' | 'hovered';
 
+export function colorToCss(color: number | string): string {
+  if (typeof color === 'string') return color.startsWith('#') ? color : `#${color}`;
+  return `#${color.toString(16).padStart(6, '0')}`;
+}
+
 /**
  * Transform local coordinate of a CAD mesh to world space coordinates.
  */
@@ -14,9 +19,8 @@ export function localToWorld(mesh: CADMesh, x: number, y: number, z: number): TH
   return v;
 }
 
-// Global texture & material caches to avoid recreating objects on every frame
+// Texture cache only — materials are cloned per sprite so group dispose is safe.
 const textureCache = new Map<string, THREE.CanvasTexture>();
-const materialCache = new Map<string, THREE.SpriteMaterial>();
 
 /**
  * Generate a sharp, anti-aliased circular sprite texture with a crisp dark
@@ -115,20 +119,15 @@ export function getVertexSpriteMaterial(
     opacity = 0.92;
   }
 
-  const cacheKey = `${state}_${fillColor}_${borderColor}_${opacity}`;
-  const existing = materialCache.get(cacheKey);
-  if (existing) return existing;
-
   const texture = createVertexCircleTexture(fillColor, borderColor, highlight);
-  const material = new THREE.SpriteMaterial({
+  return new THREE.SpriteMaterial({
     map: texture,
     depthTest: false,
+    depthWrite: false,
+    sizeAttenuation: true,
     transparent: true,
     opacity,
   });
-
-  materialCache.set(cacheKey, material);
-  return material;
 }
 
 /**
@@ -268,12 +267,10 @@ export function pickClosestVertex(
   mesh.vertices.forEach((v) => {
     tempPos.copy(transform(mesh, v.x, v.y, v.z));
     tempPos.project(camera);
+    if (tempPos.z > 1 || tempPos.z < -1) return;
 
-    // If point is behind camera near-plane, skip
-    if (tempPos.z > 1) return;
-
-    const screenX = ((tempPos.z > 1 ? -tempPos.x : tempPos.x) + 1) * 0.5 * rect.width;
-    const screenY = (-(tempPos.z > 1 ? -tempPos.y : tempPos.y) + 1) * 0.5 * rect.height;
+    const screenX = (tempPos.x + 1) * 0.5 * rect.width;
+    const screenY = (-tempPos.y + 1) * 0.5 * rect.height;
 
     const d = Math.hypot(mx - screenX, my - screenY);
     if (d < bestDist || (Math.abs(d - bestDist) < 2 && tempPos.z < bestZ)) {

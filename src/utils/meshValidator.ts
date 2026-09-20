@@ -1,5 +1,6 @@
 import type { CADMesh } from '../types/cad';
 import { createEdgesFromFaces } from './meshUtils';
+import { mergeVerticesByDistance } from './blockbenchCore';
 
 export interface ValidationIssue {
   id: string;
@@ -61,16 +62,17 @@ export function validateMeshIntegrity(mesh: CADMesh): ValidationIssue[] {
 }
 
 export function autoFixMeshIntegrity(mesh: CADMesh): CADMesh {
+  const merged = mergeVerticesByDistance(mesh, 0.001);
   const referencedVertIds = new Set<string>();
-  mesh.faces.forEach((f) => f.vertexIds.forEach((id) => referencedVertIds.add(id)));
-  const cleanedVerts = mesh.vertices.filter((v) => referencedVertIds.has(v.id));
-
-  const cleanedFaces = mesh.faces.filter((f) => f.vertexIds.length >= 3);
+  merged.faces.forEach((f) => f.vertexIds.forEach((id) => referencedVertIds.add(id)));
+  const cleanedVerts = merged.vertices.filter((v) => referencedVertIds.has(v.id));
+  const cleanedFaces = merged.faces.filter((f) => f.vertexIds.length >= 3);
+  const faces = cleanedFaces.length > 0 ? cleanedFaces : merged.faces;
 
   return {
-    ...mesh,
-    vertices: cleanedVerts.length > 0 ? cleanedVerts : mesh.vertices,
-    faces: cleanedFaces.length > 0 ? cleanedFaces : mesh.faces,
-    edges: createEdgesFromFaces(cleanedFaces),
+    ...merged,
+    vertices: cleanedVerts.length > 0 ? cleanedVerts : merged.vertices,
+    faces,
+    edges: createEdgesFromFaces(faces),
   };
 }

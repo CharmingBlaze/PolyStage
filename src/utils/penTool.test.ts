@@ -82,6 +82,8 @@ describe('Pen options', () => {
 
   it('defaults match Modo (Polygons, wall off, Show Numbers on, Make UVs on)', () => {
     const d = DEFAULT_PEN_SETTINGS;
+    expect(d.drawMode).toBe('free3d');
+    expect(d.selectFaceOnCommit).toBe(false);
     expect(d.type).toBe('polygons');
     expect(d.makeQuads).toBe(false);
     expect(d.wallMode).toBe('off');
@@ -93,6 +95,18 @@ describe('Pen options', () => {
 });
 
 describe('Polygons (default type)', () => {
+  it('rejects a self-crossing face boundary instead of previewing a giant bow-tie face', () => {
+    let s = session();
+    s = click(s, 0, 0);
+    s = click(s, 2, 2);
+    s = click(s, 0, 2);
+    s = click(s, 2, 0);
+    const committed = penCommitActive(s);
+    expect(committed.patches).toHaveLength(0);
+    expect(committed.activeIds).toHaveLength(4);
+    expect(committed.warning).toContain('crosses itself');
+  });
+
   it('creates one vertex per click and grows the active polygon', () => {
     let s = session();
     s = click(s, 0, 0);

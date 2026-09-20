@@ -5,21 +5,21 @@
 
 :root {
   /* ── Surface hierarchy (deepest → nearest) ────────────────── */
-  --ts-app:       #16191e;
-  --ts-panel:     #1c1f26;
-  --ts-card:      #21242c;
-  --ts-elevated:  #282c35;
-  --ts-surface:   #2f3340;
+  --ts-app:       #15171c;
+  --ts-panel:     #1b1e24;
+  --ts-card:      #20242b;
+  --ts-elevated:  #282d35;
+  --ts-surface:   #313741;
 
   /* ── Borders ──────────────────────────────────────────────── */
-  --ts-border:        #1a1c22;
-  --ts-border-hi:     #3a3f4a;
+  --ts-border:        #292d35;
+  --ts-border-hi:     #3d444f;
   --ts-border-focus:  #00b4c4;
 
   /* ── Text ─────────────────────────────────────────────────── */
-  --ts-text:       #bcc4d0;
-  --ts-text-hi:    #e2e6ec;
-  --ts-text-muted: #6e7584;
+  --ts-text:       #c1c8d2;
+  --ts-text-hi:    #f0f3f7;
+  --ts-text-muted: #818a98;
 
   /* ── Accent: Teal (one accent, calming, precise) ──────────── */
   --ts-accent:        #00b4c4;
@@ -31,7 +31,7 @@
   /* ── Selection (semantic only — highlights, active) ─── */
   --ts-select:        #00b4c4;
   --ts-select-border: #2a555e;
-  --ts-select-bg:     rgba(0, 180, 196, 0.08);
+  --ts-select-bg:     rgba(0, 180, 196, 0.1);
   --ts-active-border: #00b4c4;
   --ts-active-bg:     rgba(0, 180, 196, 0.14);
 
@@ -47,25 +47,25 @@
   --ts-axis-z:    #4a90d9;
 
   /* ── Control states ───────────────────────────────────────── */
-  --ts-hover:         #2a2e38;
-  --ts-active-bg:     #2f3540;
+  --ts-hover:         #272c34;
+  --ts-active-bg:     #26343a;
   --ts-active-fill:   rgba(0, 180, 196, 0.16);
   --ts-active-border: #3a6a72;
-  --ts-active-dash:   1px dashed var(--ts-accent);
+  --ts-active-dash:   1px solid var(--ts-accent);
   --ts-disabled:      #4a5160;
 
   /* ── Viewport ─────────────────────────────────────────────── */
-  --ts-viewport:      #111318;
+  --ts-viewport:      #101217;
   --ts-grid-major:    #2a2e38;
   --ts-grid-minor:    #1d2028;
 
   /* ── Shape ────────────────────────────────────────────────── */
-  --ts-radius:    6px;
-  --ts-radius-lg: 8px;
+  --ts-radius:    4px;
+  --ts-radius-lg: 6px;
 
   /* ── Typography ───────────────────────────────────────────── */
-  --ts-font:  'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
-  --ts-mono:  'Source Code Pro', 'Consolas', ui-monospace, monospace;
+  --ts-font:  'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --ts-mono:  'Cascadia Code', 'Cascadia Mono', 'Consolas', ui-monospace, monospace;
   
   /* Typography scale */
   --ts-text-xs:   10px;

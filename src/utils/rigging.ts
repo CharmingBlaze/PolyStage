@@ -481,3 +481,45 @@ export function exportGameRig(bones: CADBone[], meshes: CADMesh[]): string {
   }, null, 2);
 }
 
+const cloneVec = (v: { x: number; y: number; z: number }) => ({ x: v.x, y: v.y, z: v.z });
+
+/** Fill missing rest/bind transforms from the current pose. */
+export function ensureBindPose(bones: CADBone[]): CADBone[] {
+  return bones.map((bone) => ({
+    ...bone,
+    restPosition: bone.restPosition ? cloneVec(bone.restPosition) : cloneVec(bone.position),
+    restRotation: bone.restRotation ? cloneVec(bone.restRotation) : cloneVec(bone.rotation),
+    restScale: bone.restScale ? cloneVec(bone.restScale) : cloneVec(bone.scale),
+  }));
+}
+
+/**
+ * Drop unknown bones, unused near-zero weights, and renormalize to 4 influences.
+ * Vertices with no weights inherit `mesh.boneId` when that bone exists.
+ */
+export function sanitizeMeshSkinWeights(mesh: CADMesh, bones: CADBone[], maxInfluences = 4): CADMesh {
+  const live = new Set(bones.map((bone) => bone.id));
+  const fallback = mesh.boneId && live.has(mesh.boneId) ? mesh.boneId : null;
+  const next: NonNullable<CADMesh['skinWeights']> = {};
+  let any = false;
+
+  mesh.vertices.forEach((vertex) => {
+    const cleaned = normalizeInfluences(
+      (mesh.skinWeights?.[vertex.id] || []).filter((inf) => live.has(inf.boneId)),
+      maxInfluences,
+    );
+    if (cleaned.length) {
+      next[vertex.id] = cleaned;
+      any = true;
+      return;
+    }
+    if (fallback) {
+      next[vertex.id] = [{ boneId: fallback, weight: 1 }];
+      any = true;
+    }
+  });
+
+  if (!any) return { ...mesh, skinWeights: mesh.skinWeights ? {} : mesh.skinWeights };
+  return { ...mesh, skinWeights: next };
+}
+

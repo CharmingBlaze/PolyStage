@@ -17,10 +17,11 @@ import {
   type UvVertexId,
 } from '../utils/uvTopology';
 import {
-  boxUnwrapFaces, cylindricalUnwrapFaces, fitUVsToUnitSquare, mirrorFaceUVs,
+  boxUnwrapFaces, cylindricalUnwrapFaces, estimateTexelDensity, fitUVsToUnitSquare, mirrorFaceUVs,
   packUVIslandsGrid, planarProjectFaces, rotateUVs, scaleUVs, smartUnwrapFaces,
   sphericalUnwrapFaces,
 } from '../utils/uvAdvanced';
+import { isPanGesture, isPrimaryAction, isSpaceHeld, shouldIgnorePointer } from '../utils/pointerInput';
 
 interface UVEditorProps {
   mesh: CADMesh;
@@ -460,14 +461,15 @@ export const UVEditor: React.FC<UVEditorProps> = ({
   };
 
   const beginPointer = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (shouldIgnorePointer(e)) return;
     const p = eventPoint(e);
-    // RMB / MMB pan · wheel zooms — LMB for UV tools
-    if (e.button === 1 || e.button === 2) {
+    // RMB / MMB / Space+LMB pan · wheel zooms — LMB for UV tools
+    if (isPanGesture(e) || isSpaceHeld(e)) {
       dragRef.current = {kind:'pan',start:p,viewStart:{...viewRef.current}};
       e.currentTarget.setPointerCapture(e.pointerId);
       return;
     }
-    if (e.button !== 0) return;
+    if (!isPrimaryAction(e)) return;
 
     if (editReferenceImage && referenceLayer && !referenceLayer.locked) {
       dragRef.current = {
@@ -1171,6 +1173,7 @@ export const UVEditor: React.FC<UVEditorProps> = ({
             onPointerUp={endPointer}
             onPointerCancel={endPointer}
             onPointerLeave={() => setCursorUv(null)}
+            style={{ touchAction: 'none' }}
             onWheel={(e) => {
               e.preventDefault();
               const p = eventPoint(e);
@@ -1332,6 +1335,7 @@ export const UVEditor: React.FC<UVEditorProps> = ({
           {snap === 'pixel' ? `Snap ${textureResolution.width}×${textureResolution.height}` : `Snap ${snap}`}
           {' · '}{textureResolution.width}×{textureResolution.height}
           {' · '}{zoomPercent}%
+          {' · '}{Math.round(density || estimateTexelDensity(mesh, textureResolution.width))} px/unit
           {overlaps.size ? ` · ${overlaps.size} overlap` : ''}
           {snap !== 'none' ? ' · rotate snaps 15°' : ''}
         </span>

@@ -1,5 +1,5 @@
 /**
- * Modo-style Pen tool.
+ * Mesh Sketch topology tool.
  *
  * Faithful implementation of Modo's Pen tool
  * (Model layout > Toolbox > Polygon > Pen):
@@ -52,8 +52,26 @@ export type PenType =
 
 export type PenWallMode = 'off' | 'inner' | 'outer' | 'both';
 export type PenProjectTo = 'actionAxis' | 'backdrop' | 'uvDirection';
+export type MeshSketchDrawMode = 'surface' | 'plane' | 'free3d';
+export type MeshSketchPlane = 'xy' | 'xz' | 'yz';
+export type MeshSketchFaceMode = 'quad' | 'ngon' | 'triangulate';
+export type MeshSketchState =
+  | 'Idle' | 'Hovering' | 'PlacingVertex' | 'SelectingVertex' | 'DrawingEdge'
+  | 'SelectingEdge' | 'PreviewingFace' | 'CreatingFace' | 'ExtrudingProfile'
+  | 'DrawingQuadStrip' | 'MovingVertex' | 'Snapping' | 'Confirming' | 'Cancelled';
 
 export interface PenToolSettings {
+  /** Placement behaviour. Surface is for retopology, Plane is constrained, Free 3D follows the view. */
+  drawMode: MeshSketchDrawMode;
+  activePlane: MeshSketchPlane;
+  faceMode: MeshSketchFaceMode;
+  autoWeld: boolean;
+  autoFace: boolean;
+  /** After committing the tool, select the newest face instead of its vertices. */
+  selectFaceOnCommit: boolean;
+  allowNonManifold: boolean;
+  /** World-space vertex welding radius. */
+  snapDistance: number;
   /** Modo "Pen Type". */
   type: PenType;
   /** Modo "Make Quads" (Polygons only). */
@@ -109,6 +127,14 @@ export const PROJECT_TO_OPTIONS: Array<PenOptionMeta<PenProjectTo>> = [
 ];
 
 export const DEFAULT_PEN_SETTINGS: PenToolSettings = {
+  drawMode: 'free3d',
+  activePlane: 'xz',
+  faceMode: 'ngon',
+  autoWeld: true,
+  autoFace: true,
+  selectFaceOnCommit: false,
+  allowNonManifold: false,
+  snapDistance: 0.05,
   type: 'polygons',
   makeQuads: false,
   wallMode: 'off',
@@ -171,6 +197,10 @@ export interface PenSession {
   hoverPointId: string | null;
   /** Vertex currently being dragged in 3D. */
   dragPointId: string | null;
+  /** Explicit interaction state for deterministic viewport/tool coordination. */
+  state: MeshSketchState;
+  /** Human-readable topology feedback for the contextual panel and viewport. */
+  warning: string | null;
 }
 
 export function createPenSession(settings: PenToolSettings, plane: ConstructionPlane): PenSession {
@@ -183,6 +213,8 @@ export function createPenSession(settings: PenToolSettings, plane: ConstructionP
     currentPointId: null,
     hoverPointId: null,
     dragPointId: null,
+    state: 'Idle',
+    warning: null,
   };
 }
 
@@ -272,7 +304,7 @@ export function penConnectExisting(
   if (options.newPolygon) {
     let next = session;
     if (next.activeIds.length >= min) next = penCommitActive(next);
-    return { ...next, activeIds: [pointId], currentPointId: pointId };
+    return { ...next, activeIds: [pointId], currentPointId: pointId, state: 'SelectingVertex', warning: null };
   }
   if (session.activeIds.length >= min && session.activeIds[0] === pointId) {
     return penCommitActive(session);
@@ -283,6 +315,8 @@ export function penConnectExisting(
     ...session,
     activeIds: [...session.activeIds, pointId],
     currentPointId: pointId,
+    state: session.activeIds.length >= 2 ? 'PreviewingFace' : 'DrawingEdge',
+    warning: null,
   };
 }
 
@@ -353,7 +387,15 @@ export function penAddPoint(
     }
   }
 
-  return { ...session, points, activeIds, patches, currentPointId: point.id };
+  return {
+    ...session,
+    points,
+    activeIds,
+    patches,
+    currentPointId: point.id,
+    state: settings.makeQuads ? 'DrawingQuadStrip' : activeIds.length >= 3 ? 'PreviewingFace' : 'DrawingEdge',
+    warning: null,
+  };
 }
 
 /** Move a vertex that this session created (viewport drag or numeric entry). */
@@ -361,6 +403,8 @@ export function penMovePoint(session: PenSession, id: string, position: Vec3): P
   return {
     ...session,
     points: session.points.map((p) => (p.id === id ? { ...p, position: vecClone(position) } : p)),
+    state: 'MovingVertex',
+    warning: null,
   };
 }
 
@@ -371,11 +415,13 @@ export function penSetPointByOrder(session: PenSession, order: number, position:
 }
 
 export function penSetHover(session: PenSession, id: string | null): PenSession {
-  return session.hoverPointId === id ? session : { ...session, hoverPointId: id };
+  return session.hoverPointId === id
+    ? session
+    : { ...session, hoverPointId: id, state: id ? 'Hovering' : session.activeIds.length ? 'DrawingEdge' : 'Idle' };
 }
 
 export function penSetDrag(session: PenSession, id: string | null): PenSession {
-  return session.dragPointId === id ? session : { ...session, dragPointId: id };
+  return session.dragPointId === id ? session : { ...session, dragPointId: id, state: id ? 'MovingVertex' : 'Idle' };
 }
 
 export function penSetCurrent(session: PenSession, id: string | null): PenSession {
@@ -494,22 +540,79 @@ export function penUndoLastPoint(session: PenSession): PenSession {
   return session;
 }
 
-/** Enter / double-click: turn the active chain into a patch. */
+export interface PenLoopValidation {
+  valid: boolean;
+  warnings: string[];
+}
+
+/** Lightweight, headless validation used by both previews and commits. */
+export function validatePenLoop(session: PenSession, pointIds = session.activeIds): PenLoopValidation {
+  const points = penPatchPoints(session, pointIds);
+  const warnings: string[] = [];
+  if (new Set(pointIds).size < penMinPatchPoints(session.settings)) warnings.push('A face needs at least three unique vertices.');
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    if (a && b && vecLen(vecSub(a, b)) < 1e-6) warnings.push('Zero-length edges are not allowed.');
+  }
+  if (points.length >= 4) {
+    const origin = points[0];
+    const normal = vecNorm(vecCross(vecSub(points[1], origin), vecSub(points[2], origin)));
+    if (vecLen(normal) > 0) {
+      const maxDistance = Math.max(...points.slice(3).map((p) => Math.abs(vecDot(vecSub(p, origin), normal))), 0);
+      if (maxDistance > 0.001) warnings.push('The loop is non-planar. Use Triangulate or adjust the vertices.');
+
+      // Project to the dominant 2D plane and reject bow-tie / crossing boundaries.
+      const axis = Math.abs(normal.x) >= Math.abs(normal.y) && Math.abs(normal.x) >= Math.abs(normal.z)
+        ? 'x'
+        : Math.abs(normal.y) >= Math.abs(normal.z) ? 'y' : 'z';
+      const project = (point: Vec3): [number, number] =>
+        axis === 'x' ? [point.y, point.z] : axis === 'y' ? [point.x, point.z] : [point.x, point.y];
+      const orient = (a: [number, number], b: [number, number], c: [number, number]) =>
+        (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+      const crosses = (a: Vec3, b: Vec3, c: Vec3, d: Vec3) => {
+        const pa = project(a); const pb = project(b); const pc = project(c); const pd = project(d);
+        const abC = orient(pa, pb, pc); const abD = orient(pa, pb, pd);
+        const cdA = orient(pc, pd, pa); const cdB = orient(pc, pd, pb);
+        return abC * abD < -1e-10 && cdA * cdB < -1e-10;
+      };
+      let intersects = false;
+      for (let i = 0; i < points.length && !intersects; i++) {
+        for (let j = i + 1; j < points.length; j++) {
+          if (j === i || j === i + 1 || (i === 0 && j === points.length - 1)) continue;
+          if (crosses(points[i], points[(i + 1) % points.length], points[j], points[(j + 1) % points.length])) {
+            intersects = true;
+            break;
+          }
+        }
+      }
+      if (intersects) warnings.push('The face boundary crosses itself. Adjust the vertex order.');
+    }
+  }
+  const onlyTriangulatable = warnings.length === 1 && warnings[0].startsWith('The loop is non-planar');
+  return { valid: warnings.length === 0 || (session.settings.faceMode === 'triangulate' && onlyTriangulatable), warnings };
+}
+
+/** Enter / double-click: turn the active chain into a validated patch. */
 export function penCommitActive(session: PenSession, closed = true): PenSession {
   if (session.activeIds.length < penMinPatchPoints(session.settings)) {
-    return { ...session, activeIds: [] };
+    return { ...session, state: 'Idle', warning: 'Place at least three vertices to create a face.' };
   }
+  const validation = validatePenLoop(session);
+  if (!validation.valid) return { ...session, state: 'PreviewingFace', warning: validation.warnings[0] };
   const kind: PenPatchKind = session.settings.type === 'polygons' ? 'polygon' : 'curve';
   return {
     ...session,
     patches: [...session.patches, patchFor(session.activeIds, kind, closed)],
     activeIds: [],
+    state: 'Confirming',
+    warning: validation.warnings[0] ?? null,
   };
 }
 
 /** Esc: abandon the in-progress chain but keep completed patches. */
 export function penDropActive(session: PenSession): PenSession {
-  return { ...session, activeIds: [], dragPointId: null, hoverPointId: null };
+  return { ...session, activeIds: [], dragPointId: null, hoverPointId: null, state: 'Cancelled', warning: null };
 }
 
 // ————————————————————————————————————————————————————————————
@@ -684,7 +787,7 @@ export function penSessionToMesh(baseMesh: CADMesh, session: PenSession): PenCom
   };
 
   const livePatches =
-    createsFaces && session.activeIds.length >= 3
+    createsFaces && settings.autoFace && session.activeIds.length >= 3 && validatePenLoop(session).valid
       ? [
           ...session.patches,
           { id: '__pen_preview__', pointIds: session.activeIds, kind: 'polygon' as const, closed: true },
@@ -736,12 +839,12 @@ export function penSessionToMesh(baseMesh: CADMesh, session: PenSession): PenCom
       const point = penFindPoint(session, pid);
       return addVertex(pid, point ? point.position : pts[0], point?.meshVertexId);
     });
-    addFace(
-      ids,
-      settings.makeUvs
-        ? pts.map((p) => penUVFor(p, session.plane))
-        : ids.map(() => ({ u: 0, v: 0 })),
-    );
+    const uvs = settings.makeUvs
+      ? pts.map((p) => penUVFor(p, session.plane))
+      : ids.map(() => ({ u: 0, v: 0 }));
+    if (settings.faceMode === 'triangulate' && ids.length > 3) {
+      for (let i = 1; i < ids.length - 1; i++) addFace([ids[0], ids[i], ids[i + 1]], [uvs[0], uvs[i], uvs[i + 1]]);
+    } else addFace(ids, uvs);
   });
 
   // Point / curve types still commit their vertices as a point cloud.

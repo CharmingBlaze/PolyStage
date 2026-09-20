@@ -1,5 +1,6 @@
 import React from 'react';
-import { Check, CornerDownLeft, Eraser, Pencil, Ruler, Trash2 } from 'lucide-react';
+import { Check, CornerDownLeft, Eraser, Ruler, Trash2 } from 'lucide-react';
+import { BlenderIcon } from './icons/BlenderIcon';
 import {
   PEN_TYPE_OPTIONS,
   PROJECT_TO_OPTIONS,
@@ -19,6 +20,7 @@ interface PenToolPanelProps {
   onCurrentOrderChange: (order: number) => void;
   onPointMove: (order: number, position: Vec3) => void;
   onFinish: () => void;
+  onCommit: () => void;
   onDrop: () => void;
   onUndo: () => void;
 }
@@ -66,7 +68,7 @@ function Toggle({
  * Position X/Y/Z, Make Quads, Wall Mode, Offset, Inset, Segments,
  * Show Angles / Handles / Numbers, Select New, Make UVs and Project To.
  */
-export const PenToolPanel: React.FC<PenToolPanelProps> = ({
+export const MeshSketchPanel: React.FC<PenToolPanelProps> = ({
   settings,
   onSettingsChange,
   session,
@@ -74,6 +76,7 @@ export const PenToolPanel: React.FC<PenToolPanelProps> = ({
   onCurrentOrderChange,
   onPointMove,
   onFinish,
+  onCommit,
   onDrop,
   onUndo,
 }) => {
@@ -95,15 +98,81 @@ export const PenToolPanel: React.FC<PenToolPanelProps> = ({
     <div className="h-full flex flex-col bg-[#1c1f26] text-[#bcc4d0] text-[11.5px] select-none overflow-hidden">
       <div className="h-10 shrink-0 px-3 bg-[#16191e] border-b border-[#1a1c22] flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Pencil className="w-3.5 h-3.5 text-[#00b4c4]" />
-          <span className="font-semibold text-[12px] text-[#e2e6ec] tracking-wide">PEN</span>
+          <BlenderIcon name="pen" size={15} className="text-[#00b4c4]" />
+          <span className="font-semibold text-[12px] text-[#e2e6ec] tracking-wide">MESH SKETCH</span>
         </div>
-        <span className="font-mono text-[10px] text-[#6e7584]">
-          {pointCount} pts · {activePatch} poly
+        <span className="font-mono text-[10px] text-[#87909f]">
+          {session?.state ?? 'Idle'} / {pointCount}v / {activePatch}f
         </span>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-2.5 space-y-2.5">
+        <section className="bg-[#21242c] border border-[#303540] rounded-[6px] p-2.5 space-y-2">
+          <div className="grid grid-cols-3 gap-1 bg-[#16191e] p-1 rounded-[6px] border border-[#303540]">
+            {(['surface', 'plane', 'free3d'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => onSettingsChange({ drawMode: mode })}
+                className={`h-7 rounded-[4px] text-[10px] font-semibold transition-colors ${settings.drawMode === mode ? 'bg-[#00b4c4] text-[#071316]' : 'text-[#87909f] hover:text-[#e2e6ec] hover:bg-[#282c35]'}`}
+              >
+                {mode === 'free3d' ? 'Free 3D' : mode[0].toUpperCase() + mode.slice(1)}
+              </button>
+            ))}
+          </div>
+          <p className="text-[10.5px] leading-snug text-[#87909f]">
+            {settings.drawMode === 'surface'
+              ? 'Retopology mode. New vertices conform to the mesh under the pointer.'
+              : settings.drawMode === 'plane'
+                ? `Constrained to the ${settings.activePlane.toUpperCase()} construction plane.`
+                : 'Each segment starts on a view-facing plane through the current vertex. Orbit or switch view to change depth.'}
+          </p>
+          {settings.drawMode === 'plane' && (
+            <div className="grid grid-cols-3 gap-1">
+              {(['xy', 'xz', 'yz'] as const).map((plane) => (
+                <button key={plane} type="button" onClick={() => onSettingsChange({ activePlane: plane })}
+                  className={`h-6 rounded-[4px] border text-[10px] font-mono ${settings.activePlane === plane ? 'border-[#00b4c4] bg-[#00b4c4]/10 text-[#5eead4]' : 'border-[#3a3f4a] text-[#87909f] hover:text-[#e2e6ec]'}`}>
+                  {plane.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="grid grid-cols-3 gap-1">
+            {(['quad', 'ngon', 'triangulate'] as const).map((mode) => (
+              <button key={mode} type="button" onClick={() => onSettingsChange({ faceMode: mode, makeQuads: mode === 'quad' })}
+                className={`h-6 rounded-[4px] text-[9.5px] ${settings.faceMode === mode ? 'bg-[#343a45] text-[#f4f7fa]' : 'text-[#87909f] hover:bg-[#282c35]'}`}>
+                {mode === 'ngon' ? 'N-gon' : mode[0].toUpperCase() + mode.slice(1)}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10.5px] text-[#bcc4d0]">Weld radius</span>
+            <input type="number" min={0} step={0.01} value={settings.snapDistance}
+              onChange={(e) => onSettingsChange({ snapDistance: Math.max(0, Number(e.target.value) || 0) })}
+              className="ml-auto w-20 h-6 px-2 rounded-[4px] bg-[#16191e] border border-[#3a3f4a] text-right font-mono text-[10px] text-[#e2e6ec] outline-none focus:border-[#00b4c4]" />
+          </div>
+          <Toggle label="Auto-weld" hint="Reuse a nearby existing vertex instead of creating a duplicate." checked={settings.autoWeld} onChange={(autoWeld) => onSettingsChange({ autoWeld })} />
+          <Toggle label="Live face preview" hint="Preview a valid closed face before confirming it." checked={settings.autoFace} onChange={(autoFace) => onSettingsChange({ autoFace })} />
+          <Toggle
+            label="Select face on commit"
+            hint="Switch to Face mode and select the newest face. Leave off to return to Vertex mode and keep building."
+            checked={settings.selectFaceOnCommit}
+            onChange={(selectFaceOnCommit) => onSettingsChange({ selectFaceOnCommit })}
+          />
+        </section>
+
+        {session?.warning && (
+          <div role="status" className="rounded-[6px] border border-[#c68a2d]/50 bg-[#c68a2d]/10 px-2.5 py-2 text-[10.5px] leading-snug text-[#f0bd63]">
+            {session.warning}
+          </div>
+        )}
+
+        <details className="group bg-[#1d2027] border border-[#303540] rounded-[6px]">
+          <summary className="h-8 px-2.5 flex items-center cursor-pointer text-[10px] font-semibold text-[#87909f] uppercase tracking-wider hover:text-[#e2e6ec] list-none">
+            Advanced topology options
+            <span className="ml-auto text-[#5eead4] group-open:rotate-90 transition-transform">›</span>
+          </summary>
+          <div className="px-2 pb-2 space-y-2">
         {/* Pen Type */}
         <section className="bg-[#21242c] border border-[#1a1c22] rounded-[6px] p-2.5 space-y-2">
           <span className="text-[10px] font-semibold text-[#6e7584] uppercase tracking-wider">Pen Type</span>
@@ -306,6 +375,8 @@ export const PenToolPanel: React.FC<PenToolPanelProps> = ({
             {PROJECT_TO_OPTIONS.find((option) => option.id === settings.projectTo)?.hint}
           </p>
         </section>
+          </div>
+        </details>
 
         {/* Actions */}
         <section className="space-y-1.5">
@@ -314,7 +385,7 @@ export const PenToolPanel: React.FC<PenToolPanelProps> = ({
             onClick={onFinish}
             className="w-full h-7 rounded-[6px] bg-[#00b4c4] hover:bg-[#00d4e2] text-[#0a1114] text-[11px] font-semibold flex items-center justify-center gap-1.5"
           >
-            <Check className="w-3.5 h-3.5" /> Finish Polygon (Enter)
+            <Check className="w-3.5 h-3.5" /> Create Face
           </button>
           <div className="grid grid-cols-2 gap-1.5">
             <button
@@ -329,9 +400,13 @@ export const PenToolPanel: React.FC<PenToolPanelProps> = ({
               onClick={onDrop}
               className="h-7 rounded-[6px] bg-[#282c35] hover:bg-[#e0556a]/20 border border-[#3a3f4a] hover:border-[#e0556a]/50 text-[11px] text-[#e0556a] flex items-center justify-center gap-1.5"
             >
-              <Trash2 className="w-3.5 h-3.5" /> Drop Tool
+              <Trash2 className="w-3.5 h-3.5" /> Cancel
             </button>
           </div>
+          <button type="button" onClick={onCommit}
+            className="w-full h-7 rounded-[6px] bg-[#343a45] hover:bg-[#3e4552] border border-[#4a5260] text-[11px] font-semibold text-[#f4f7fa]">
+            Commit Mesh Sketch (Enter)
+          </button>
           <p className="text-[10.5px] leading-snug text-[#6e7584] flex items-start gap-1.5">
             <CornerDownLeft className="w-3 h-3 mt-0.5 shrink-0" />
             Click to place · drag a vertex to move it · drop it on another to weld · Shift+click starts
@@ -343,3 +418,6 @@ export const PenToolPanel: React.FC<PenToolPanelProps> = ({
     </div>
   );
 };
+
+/** Backward-compatible export for saved layouts and downstream imports. */
+export const PenToolPanel = MeshSketchPanel;

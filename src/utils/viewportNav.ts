@@ -7,6 +7,10 @@ import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js
  *   RMB   — pan (drag)
  *   MMB   — dolly (zoom drag)
  *   Wheel — zoom
+ *   Space+LMB — pan (laptops / no middle mouse)
+ *   1-finger touch — orbit (persp) / pan (ortho)
+ *   2-finger touch — pan + pinch zoom
+ *   Stylus tip follows LMB; barrel / RMB pans
  */
 export const STANDARD_ORBIT_MOUSE_BUTTONS: OrbitControls['mouseButtons'] = {
   LEFT: THREE.MOUSE.ROTATE,
@@ -25,6 +29,7 @@ export function applyStandardOrbitMouseButtons(controls: OrbitControls | null | 
     RIGHT: THREE.MOUSE.PAN,
   };
   controls.enableZoom = true;
+  applyOrbitTouchBindings(controls, { ortho: !controls.enableRotate });
 }
 
 /** @deprecated alias */
@@ -61,6 +66,7 @@ export function applyPaintOrbitMouseButtons(controls: OrbitControls | null | und
   controls.enableZoom = true;
   controls.enablePan = true;
   controls.screenSpacePanning = true;
+  applyOrbitTouchBindings(controls, { drawTool: true });
 }
 
 /** Arm Alt+LMB orbit for a single gesture while staying in paint mode. */
@@ -126,6 +132,80 @@ export function applyDrawToolOrbitMouseButtons(
   controls.enableZoom = true;
   controls.enablePan = true;
   controls.screenSpacePanning = true;
+  applyOrbitTouchBindings(controls, { drawTool: true, ortho: opts?.ortho });
+}
+
+/**
+ * Touch / trackpad mapping.
+ * Pen tablets report as mouse buttons; fingers use `touches`.
+ * Draw tools keep one-finger from orbiting so a stylus/finger stroke can draw.
+ */
+export function applyOrbitTouchBindings(
+  controls: OrbitControls | null | undefined,
+  opts?: { ortho?: boolean; drawTool?: boolean },
+) {
+  if (!controls) return;
+  const none = -1 as unknown as THREE.TOUCH;
+  if (opts?.drawTool) {
+    controls.touches = { ONE: none, TWO: THREE.TOUCH.DOLLY_PAN };
+    return;
+  }
+  controls.touches = {
+    ONE: opts?.ortho ? THREE.TOUCH.PAN : THREE.TOUCH.ROTATE,
+    TWO: THREE.TOUCH.DOLLY_PAN,
+  };
+}
+
+/**
+ * Space+drag pans the view — laptops often have no middle mouse, and a stylus
+ * barrel button is awkward for orbit. Restores the current tool's LMB map on release.
+ */
+export function bindSpacePan(
+  getControls: () => OrbitControls | null | undefined,
+  opts: {
+    isOrtho: () => boolean;
+    restore: () => void;
+    isTyping?: () => boolean;
+  },
+): () => void {
+  const applySpace = (down: boolean) => {
+    const controls = getControls();
+    if (!controls) return;
+    if (down) {
+      controls.mouseButtons = {
+        LEFT: THREE.MOUSE.PAN,
+        MIDDLE: THREE.MOUSE.PAN,
+        RIGHT: THREE.MOUSE.PAN,
+      };
+      controls.enablePan = true;
+      controls.screenSpacePanning = true;
+      controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_PAN };
+    } else {
+      opts.restore();
+    }
+  };
+
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.code !== 'Space' || e.repeat) return;
+    if (opts.isTyping?.()) return;
+    e.preventDefault();
+    applySpace(true);
+  };
+  const onKeyUp = (e: KeyboardEvent) => {
+    if (e.code !== 'Space') return;
+    applySpace(false);
+  };
+  const onBlur = () => applySpace(false);
+
+  window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('keyup', onKeyUp);
+  window.addEventListener('blur', onBlur);
+  return () => {
+    window.removeEventListener('keydown', onKeyDown);
+    window.removeEventListener('keyup', onKeyUp);
+    window.removeEventListener('blur', onBlur);
+    applySpace(false);
+  };
 }
 
 /** Clear a stuck OrbitControls gesture (pointer list desync after conflicting capture). */
@@ -176,9 +256,9 @@ export function restorePaintOrbitControls(
 
 
 /** Short HUD / status hint shared by 3D views */
-export const STANDARD_NAV_HINT = 'LMB orbit · RMB pan · MMB/Wheel zoom';
+export const STANDARD_NAV_HINT = 'LMB orbit · RMB/Space pan · Wheel zoom · 2-finger pan';
 
-export const PAINT_NAV_HINT = 'LMB drag paint · Alt+LMB orbit · RMB pan · [ ] size';
+export const PAINT_NAV_HINT = 'LMB/stylus paint · Alt+LMB orbit · RMB/Space pan · [ ] size';
 
 /** @deprecated alias */
 export const BLOCKBENCH_NAV_HINT = STANDARD_NAV_HINT;

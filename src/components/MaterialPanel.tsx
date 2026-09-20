@@ -8,38 +8,14 @@ import {
   Check,
   Pencil,
 } from 'lucide-react';
-import type { CADMesh, ToolState } from '../types/cad';
+import type { CADMesh, MaterialAsset, ToolState } from '../types/cad';
 import type { GradientStop, GradientType } from '../utils/ditheringUtils';
 import {
   renderGradientToCanvas,
   applyBayerDitheringToCanvas,
   GAME_SYSTEM_PALETTES,
 } from '../utils/ditheringUtils';
-
-export interface MaterialSlot {
-  id: string;
-  name: string;
-  color: string;
-  shading: 'pbr' | 'unlit' | 'toon' | 'glass' | 'metallic' | 'emissive';
-  roughness: number;
-  metalness: number;
-  emissive: string;
-  emissiveIntensity: number;
-  pattern: 'solid' | 'checker' | 'checker4' | 'brick' | 'grid' | 'dots' | 'stripes';
-  tileScale: number;
-  doubleSided: boolean;
-}
-
-const DEFAULT_MATERIALS: MaterialSlot[] = [
-  { id: 'mat_default', name: 'White PBR', color: '#e2e8f0', shading: 'pbr', roughness: 0.4, metalness: 0.1, emissive: '#16191e', emissiveIntensity: 0, pattern: 'solid', tileScale: 1, doubleSided: true },
-  { id: 'mat_crimson', name: 'Ruby Red', color: '#f83800', shading: 'pbr', roughness: 0.25, metalness: 0.4, emissive: '#16191e', emissiveIntensity: 0, pattern: 'solid', tileScale: 1, doubleSided: true },
-  { id: 'mat_cyber', name: 'Neon Cyan', color: '#00f6ff', shading: 'emissive', roughness: 0.1, metalness: 0.0, emissive: '#00f6ff', emissiveIntensity: 3.0, pattern: 'solid', tileScale: 1, doubleSided: true },
-  { id: 'mat_gold', name: 'Gold Metal', color: '#ffd700', shading: 'metallic', roughness: 0.15, metalness: 0.95, emissive: '#16191e', emissiveIntensity: 0, pattern: 'solid', tileScale: 1, doubleSided: true },
-  { id: 'mat_emerald', name: 'Emerald', color: '#00e436', shading: 'glass', roughness: 0.05, metalness: 0.1, emissive: '#16191e', emissiveIntensity: 0, pattern: 'solid', tileScale: 1, doubleSided: true },
-  { id: 'mat_checker', name: 'Checker 2D', color: '#29adff', shading: 'unlit', roughness: 0.5, metalness: 0.0, emissive: '#16191e', emissiveIntensity: 0, pattern: 'checker', tileScale: 1, doubleSided: true },
-  { id: 'mat_obsidian', name: 'Obsidian', color: '#1d2b53', shading: 'pbr', roughness: 0.1, metalness: 0.85, emissive: '#16191e', emissiveIntensity: 0, pattern: 'solid', tileScale: 1, doubleSided: true },
-  { id: 'mat_toon', name: 'Toon Pink', color: '#ff77a8', shading: 'toon', roughness: 0.8, metalness: 0.0, emissive: '#16191e', emissiveIntensity: 0, pattern: 'solid', tileScale: 1, doubleSided: true },
-];
+import { createMaterial, materialTextureDataUrl } from '../utils/materials';
 
 const GRADIENT_PRESETS: { id: string; name: string; stops: GradientStop[] }[] = [
   {
@@ -97,6 +73,10 @@ interface MaterialPanelProps {
   textureCanvas?: HTMLCanvasElement | null;
   onApplyGradientToTexture?: (gradientCanvas: HTMLCanvasElement) => void;
   onOpenPaintWorkspace?: () => void;
+  materials: MaterialAsset[];
+  setMaterials: React.Dispatch<React.SetStateAction<MaterialAsset[]>>;
+  activeMaterialId: string;
+  setActiveMaterialId: (id: string) => void;
 }
 
 export const MaterialPanel: React.FC<MaterialPanelProps> = ({
@@ -109,13 +89,13 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
   setToolState,
   onApplyGradientToTexture,
   onOpenPaintWorkspace,
+  materials: materialSlots,
+  setMaterials: setMaterialSlots,
+  activeMaterialId,
+  setActiveMaterialId,
 }) => {
-  // Material Slots Library
-  const [materialSlots, setMaterialSlots] = useState<MaterialSlot[]>(DEFAULT_MATERIALS);
-  const [activeMaterialId, setActiveMaterialId] = useState<string>('mat_default');
-
   const activeMaterial =
-    materialSlots.find((m) => m.id === activeMaterialId) || materialSlots[0];
+    materialSlots.find((m) => m.id === activeMaterialId) || materialSlots[0]!;
 
   // Palette System (Default: 64-Color Pro Spectrum)
   const [activePaletteId, setActivePaletteId] = useState<string>('pro64');
@@ -145,34 +125,22 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
   }, [stops, gradientType, gradientAngle]);
 
   // Update active material property
-  const handleUpdateActiveMaterial = (field: keyof MaterialSlot, value: any) => {
+  const handleUpdateActiveMaterial = (field: keyof MaterialAsset, value: MaterialAsset[keyof MaterialAsset]) => {
     setMaterialSlots((prev) =>
       prev.map((m) => (m.id === activeMaterial.id ? { ...m, [field]: value } : m))
     );
   };
 
   const handleCreateNewMaterial = () => {
-    const newId = `mat_${Date.now()}`;
-    const newMat: MaterialSlot = {
-      id: newId,
-      name: `Mat ${materialSlots.length + 1}`,
-      color: activePalette.palette[0] || '#00d4e2',
-      shading: 'pbr',
-      roughness: 0.4,
-      metalness: 0.2,
-      emissive: '#000000',
-      emissiveIntensity: 0,
-      pattern: 'solid',
-      tileScale: 1,
-      doubleSided: true,
-    };
+    const newMat = createMaterial(`Material ${materialSlots.length + 1}`);
+    newMat.color = activePalette.palette[0] || '#00d4e2';
     setMaterialSlots((prev) => [...prev, newMat]);
-    setActiveMaterialId(newId);
+    setActiveMaterialId(newMat.id);
   };
 
   const handleDuplicateActiveMaterial = () => {
     const newId = `mat_${Date.now()}`;
-    const dupMat: MaterialSlot = {
+    const dupMat: MaterialAsset = {
       ...activeMaterial,
       id: newId,
       name: `${activeMaterial.name} Copy`,
@@ -187,7 +155,7 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
   };
 
   const applyTextureDataUrlToTargets = (
-    dataUrl: string,
+    dataUrl: string | undefined,
     colorHex?: string,
     doubleSided?: boolean,
   ) => {
@@ -222,6 +190,7 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
           const faceScoped = toolState.editMode === 'face' && m.id === mesh.id;
           return {
             ...m,
+            materialId: matId,
             textureCanvasDataUrl: dataUrl,
             ...(doubleSided != null ? { doubleSided } : {}),
             faces: patchFaces(m.faces, faceScoped),
@@ -233,6 +202,7 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
     } else if (ids.has(mesh.id)) {
       setMesh((prev) => ({
         ...prev,
+        materialId: matId,
         textureCanvasDataUrl: dataUrl,
         ...(doubleSided != null ? { doubleSided } : {}),
         faces: patchFaces(prev.faces, toolState.editMode === 'face'),
@@ -262,6 +232,15 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
 
   // Generate & apply procedural material texture to active mesh
   const handleApplyMaterialToMesh = () => {
+    if (!activeMaterial) return;
+    if (activeMaterial.source === 'color' && activeMaterial.pattern === 'solid') {
+      applyTextureDataUrlToTargets(undefined, activeMaterial.color, activeMaterial.doubleSided);
+      return;
+    }
+    if (activeMaterial.source === 'painted' && activeMaterial.textureDataUrl) {
+      applyTextureDataUrlToTargets(activeMaterial.textureDataUrl, activeMaterial.color, activeMaterial.doubleSided);
+      return;
+    }
     const canvas = document.createElement('canvas');
     canvas.width = 256;
     canvas.height = 256;
@@ -318,7 +297,7 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
     }
 
     applyTextureDataUrlToTargets(
-      canvas.toDataURL('image/png'),
+      activeMaterial.source === 'uv' ? materialTextureDataUrl(activeMaterial) : canvas.toDataURL('image/png'),
       activeMaterial.color,
       activeMaterial.doubleSided,
     );
@@ -406,9 +385,14 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
     }
 
     const dataUrl = canvas.toDataURL('image/png');
+    setMaterialSlots((prev) => prev.map((material) => material.id === activeMaterial.id
+      ? { ...material, source: 'painted', textureDataUrl: dataUrl }
+      : material));
     setMesh((prev) => ({
       ...prev,
+      materialId: activeMaterial.id,
       textureCanvasDataUrl: dataUrl,
+      faces: prev.faces.map((face) => ({ ...face, materialId: activeMaterial.id })),
       revision: (prev.revision || 0) + 1,
     }));
   };
@@ -426,9 +410,14 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
     }
 
     const dataUrl = canvas.toDataURL('image/png');
+    setMaterialSlots((prev) => prev.map((material) => material.id === activeMaterial.id
+      ? { ...material, source: 'painted', textureDataUrl: dataUrl }
+      : material));
     setMesh((prev) => ({
       ...prev,
+      materialId: activeMaterial.id,
       textureCanvasDataUrl: dataUrl,
+      faces: prev.faces.map((face) => ({ ...face, materialId: activeMaterial.id })),
       revision: (prev.revision || 0) + 1,
     }));
   };
@@ -500,6 +489,19 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
                 value={activeMaterial.name}
                 onChange={(e) => handleUpdateActiveMaterial('name', e.target.value)}
               />
+            </label>
+
+            <label className="sp-mat__row">
+              <span className="sp-mat__row-label">Source</span>
+              <select
+                className="sp-mat__select"
+                value={activeMaterial.source}
+                onChange={(e) => handleUpdateActiveMaterial('source', e.target.value as MaterialAsset['source'])}
+              >
+                <option value="color">Color only</option>
+                <option value="uv">UV checker</option>
+                <option value="painted">Painted texture</option>
+              </select>
             </label>
 
             <label className="sp-mat__row">
@@ -594,7 +596,7 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
           <div className="sp-mat__actions">
             <button type="button" className="sp-mat__primary" onClick={handleApplyMaterialToMesh}>
               <Check className="w-3.5 h-3.5" />
-              Apply to Mesh
+              Assign Material
             </button>
             <button type="button" className="sp-mat__secondary" onClick={handleEditMaterialInPixelPaint}>
               <Pencil className="w-3 h-3" />

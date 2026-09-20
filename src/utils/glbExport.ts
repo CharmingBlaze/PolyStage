@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
-import type { AnimationClip as CADAnimClip, CADBone, CADMesh, Vector3D } from '../types/cad';
+import type { AnimationClip as CADAnimClip, CADBone, CADMesh, MaterialAsset, Vector3D } from '../types/cad';
 import { getBoneWorldMatrices } from './rigging';
 import { sampleChannel } from './animation';
+import { albedoDataUrlForMesh, prepareMeshesForExport } from './exportPrepare';
 
 function downloadBlob(filename: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
@@ -15,33 +16,58 @@ function downloadBlob(filename: string, blob: Blob) {
   URL.revokeObjectURL(url);
 }
 
-function buildTriangulatedBuffers(mesh: CADMesh) {
-  const vertIndex = new Map(mesh.vertices.map((v, i) => [v.id, i]));
-  const positions: number[] = [];
-  mesh.vertices.forEach((v) => positions.push(v.x, v.y, v.z));
+function hexColor(color: string | undefined, fallback = 0xcccccc): number {
+  if (!color) return fallback;
+  const raw = color.startsWith('#') ? color.slice(1) : color;
+  const n = Number.parseInt(raw, 16);
+  return Number.isFinite(n) ? n : fallback;
+}
 
+/** Split-by-corner buffers so UV seams survive export and match 3D paint. */
+export function buildTriangulatedBuffers(mesh: CADMesh) {
+  const vertMap = new Map(mesh.vertices.map((v) => [v.id, v]));
+  const positions: number[] = [];
+  const uvs: number[] = [];
   const indices: number[] = [];
+  const sourceVertexIds: string[] = [];
+
+  const pushCorner = (vertexId: string, uv: { u: number; v: number }) => {
+    const v = vertMap.get(vertexId);
+    if (!v) return -1;
+    const index = sourceVertexIds.length;
+    positions.push(v.x, v.y, v.z);
+    uvs.push(uv.u, uv.v);
+    sourceVertexIds.push(vertexId);
+    return index;
+  };
+
   mesh.faces.forEach((face) => {
     if (face.vertexIds.length < 3) return;
-    const i0 = vertIndex.get(face.vertexIds[0]);
-    if (i0 == null) return;
-    for (let i = 1; i < face.vertexIds.length - 1; i += 1) {
-      const i1 = vertIndex.get(face.vertexIds[i]);
-      const i2 = vertIndex.get(face.vertexIds[i + 1]);
-      if (i1 == null || i2 == null) continue;
-      indices.push(i0, i1, i2);
+    const cornerIndex: number[] = [];
+    for (let i = 0; i < face.vertexIds.length; i += 1) {
+      const uv = face.uvs?.[i] || { u: 0, v: 0 };
+      const idx = pushCorner(face.vertexIds[i], uv);
+      if (idx < 0) return;
+      cornerIndex.push(idx);
+    }
+    for (let i = 1; i < cornerIndex.length - 1; i += 1) {
+      indices.push(cornerIndex[0], cornerIndex[i], cornerIndex[i + 1]);
     }
   });
 
-  return { positions, indices, vertIndex };
+  return { positions, uvs, indices, sourceVertexIds };
 }
 
-function buildSkinAttributes(mesh: CADMesh, boneIndexById: Map<string, number>, vertCount: number) {
-  const skinIndex = new Uint16Array(vertCount * 4);
-  const skinWeight = new Float32Array(vertCount * 4);
+function buildSkinAttributes(
+  mesh: CADMesh,
+  sourceVertexIds: string[],
+  boneIndexById: Map<string, number>,
+) {
+  const skinIndex = new Uint16Array(sourceVertexIds.length * 4);
+  const skinWeight = new Float32Array(sourceVertexIds.length * 4);
 
-  mesh.vertices.forEach((vertex, vi) => {
-    const influences = (mesh.skinWeights?.[vertex.id] || []).slice(0, 4);
+  sourceVertexIds.forEach((vertexId, vi) => {
+    const influences = (mesh.skinWeights?.[vertexId] || []).slice(0, 4);
     let total = influences.reduce((s, inf) => s + inf.weight, 0);
     if (total <= 0 && mesh.boneId && boneIndexById.has(mesh.boneId)) {
       skinIndex[vi * 4] = boneIndexById.get(mesh.boneId)!;
@@ -73,7 +99,6 @@ function toThreeBones(bones: CADBone[]): {
   const boneIndexById = new Map<string, number>();
   const threeBones: THREE.Bone[] = [];
 
-  // Create bones in any order first
   bones.forEach((bone, index) => {
     const tb = new THREE.Bone();
     tb.name = bone.name;
@@ -82,7 +107,6 @@ function toThreeBones(bones: CADBone[]): {
     threeBones.push(tb);
   });
 
-  // Parent using rest transforms as bind pose locals
   bones.forEach((bone) => {
     const tb = boneById.get(bone.id)!;
     const pos = bone.restPosition || bone.position;
@@ -156,6 +180,109 @@ function clipToThreeAnimation(
   return new THREE.AnimationClip(clip.name, clip.duration, tracks);
 }
 
+function applyMeshTransform(object: THREE.Object3D, mesh: CADMesh) {
+  object.position.set(mesh.position.x, mesh.position.y, mesh.position.z);
+  object.rotation.set(mesh.rotation.x, mesh.rotation.y, mesh.rotation.z);
+  object.scale.set(mesh.scale.x, mesh.scale.y, mesh.scale.z);
+}
+
+function makeMaterial(mesh: CADMesh, materials: MaterialAsset[], map?: THREE.Texture) {
+  const asset = materials.find((item) => item.id === mesh.materialId);
+  const color = map ? 0xffffff : hexColor(asset?.color);
+  return new THREE.MeshStandardMaterial({
+    color,
+    map: map || null,
+    roughness: asset?.roughness ?? 0.6,
+    metalness: asset?.metalness ?? 0.1,
+    emissive: new THREE.Color(hexColor(asset?.emissive, 0x000000)),
+    emissiveIntensity: asset?.emissiveIntensity ?? 0,
+    side: mesh.doubleSided === false && asset?.doubleSided === false ? THREE.FrontSide : THREE.DoubleSide,
+  });
+}
+
+async function textureFromDataUrl(dataUrl: string): Promise<THREE.Texture | null> {
+  if (typeof Image === 'undefined') return null;
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('texture decode failed'));
+      img.src = dataUrl;
+    });
+    const tex = new THREE.Texture(image);
+    tex.flipY = false;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.needsUpdate = true;
+    return tex;
+  } catch {
+    return null;
+  }
+}
+
+export interface BuildExportOptions {
+  materials?: MaterialAsset[];
+  textures?: Map<string, THREE.Texture>;
+  prepare?: boolean;
+}
+
+function populateExportScene(
+  meshes: CADMesh[],
+  bones: CADBone[],
+  clips: CADAnimClip[],
+  options: BuildExportOptions = {},
+): { scene: THREE.Scene; animations: THREE.AnimationClip[]; boneCount: number } {
+  const materials = options.materials || [];
+  const scene = new THREE.Scene();
+  scene.name = 'Scene';
+
+  const { root, threeBones, boneIndexById, boneById } = toThreeBones(bones);
+  scene.add(root);
+  root.updateMatrixWorld(true);
+  const skeleton = new THREE.Skeleton(threeBones);
+  const meshNodes = new Map<string, THREE.Object3D>();
+
+  meshes.forEach((mesh) => {
+    if (mesh.visible === false) return;
+    const { positions, uvs, indices, sourceVertexIds } = buildTriangulatedBuffers(mesh);
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+
+    const map = options.textures?.get(mesh.id);
+    const material = makeMaterial(mesh, materials, map);
+    const hasSkin = Boolean(mesh.skinWeights && Object.keys(mesh.skinWeights).length) || Boolean(mesh.boneId);
+    let object: THREE.Object3D;
+
+    if (hasSkin && threeBones.length) {
+      const { skinIndex, skinWeight } = buildSkinAttributes(mesh, sourceVertexIds, boneIndexById);
+      geometry.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(skinIndex, 4));
+      geometry.setAttribute('skinWeight', new THREE.Float32BufferAttribute(skinWeight, 4));
+      const skinned = new THREE.SkinnedMesh(geometry, material);
+      skinned.name = mesh.name;
+      skinned.bind(skeleton);
+      applyMeshTransform(skinned, mesh);
+      scene.add(skinned);
+      object = skinned;
+    } else {
+      const meshObj = new THREE.Mesh(geometry, material);
+      meshObj.name = mesh.name;
+      applyMeshTransform(meshObj, mesh);
+      scene.add(meshObj);
+      object = meshObj;
+    }
+
+    meshNodes.set(mesh.id, object);
+  });
+
+  const animations = clips
+    .filter((c) => c.tracks.length > 0)
+    .map((c) => clipToThreeAnimation(c, boneById, meshNodes));
+
+  return { scene, animations, boneCount: threeBones.length };
+}
+
 /**
  * Build a Three.js scene with skeleton + skinned meshes + animation clips, export as GLB.
  */
@@ -164,72 +291,23 @@ export async function exportSceneToGLB(
   bones: CADBone[],
   clips: CADAnimClip[] = [],
   filename = 'character.glb',
+  materials: MaterialAsset[] = [],
 ): Promise<void> {
-  const scene = new THREE.Scene();
-  scene.name = 'Scene';
+  const prepared = prepareMeshesForExport(meshes, bones, clips);
+  const textures = new Map<string, THREE.Texture>();
+  await Promise.all(
+    prepared.meshes.map(async (mesh) => {
+      const dataUrl = albedoDataUrlForMesh(mesh, materials);
+      if (!dataUrl) return;
+      const tex = await textureFromDataUrl(dataUrl);
+      if (tex) textures.set(mesh.id, tex);
+    }),
+  );
 
-  const { root, threeBones, boneIndexById, boneById } = toThreeBones(bones);
-  scene.add(root);
-
-  // Bind skeleton at rest pose
-  root.updateMatrixWorld(true);
-  const skeleton = new THREE.Skeleton(threeBones);
-
-  const meshNodes = new Map<string, THREE.Object3D>();
-
-  meshes.forEach((mesh) => {
-    if (mesh.visible === false) return;
-    const { positions, indices } = buildTriangulatedBuffers(mesh);
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geometry.setIndex(indices);
-    geometry.computeVertexNormals();
-
-    const hasSkin = Boolean(mesh.skinWeights) || Boolean(mesh.boneId);
-    let object: THREE.Object3D;
-
-    if (hasSkin && threeBones.length) {
-      const { skinIndex, skinWeight } = buildSkinAttributes(mesh, boneIndexById, mesh.vertices.length);
-      geometry.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(skinIndex, 4));
-      geometry.setAttribute('skinWeight', new THREE.Float32BufferAttribute(skinWeight, 4));
-
-      const material = new THREE.MeshStandardMaterial({
-        color: 0xcccccc,
-        roughness: 0.6,
-        metalness: 0.1,
-        side: THREE.DoubleSide,
-      });
-      const skinned = new THREE.SkinnedMesh(geometry, material);
-      skinned.name = mesh.name;
-      skinned.bind(skeleton);
-      skinned.position.set(0, 0, 0);
-      scene.add(skinned);
-      object = skinned;
-    } else {
-      const material = new THREE.MeshStandardMaterial({
-        color: 0xcccccc,
-        roughness: 0.6,
-        metalness: 0.1,
-        side: THREE.DoubleSide,
-      });
-      const meshObj = new THREE.Mesh(geometry, material);
-      meshObj.name = mesh.name;
-      meshObj.position.set(mesh.position.x, mesh.position.y, mesh.position.z);
-      meshObj.rotation.set(mesh.rotation.x, mesh.rotation.y, mesh.rotation.z);
-      meshObj.scale.set(mesh.scale.x, mesh.scale.y, mesh.scale.z);
-      scene.add(meshObj);
-      object = meshObj;
-    }
-
-    meshNodes.set(mesh.id, object);
+  const { scene, animations } = populateExportScene(prepared.meshes, prepared.bones, prepared.clips, {
+    materials,
+    textures,
   });
-
-  // Armature stays on scene root
-  if (!scene.children.includes(root)) scene.add(root);
-
-  const animations = clips
-    .filter((c) => c.tracks.length > 0)
-    .map((c) => clipToThreeAnimation(c, boneById, meshNodes));
 
   const exporter = new GLTFExporter();
   const result = await new Promise<ArrayBuffer>((resolve, reject) => {
@@ -256,41 +334,12 @@ export function buildExportSceneGraph(
   meshes: CADMesh[],
   bones: CADBone[],
   clips: CADAnimClip[] = [],
+  options: BuildExportOptions = {},
 ): { scene: THREE.Scene; animations: THREE.AnimationClip[]; boneCount: number } {
-  const scene = new THREE.Scene();
-  const { root, threeBones, boneIndexById, boneById } = toThreeBones(bones);
-  scene.add(root);
-  root.updateMatrixWorld(true);
-  const skeleton = new THREE.Skeleton(threeBones);
-  const meshNodes = new Map<string, THREE.Object3D>();
-
-  meshes.forEach((mesh) => {
-    const { positions, indices } = buildTriangulatedBuffers(mesh);
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geometry.setIndex(indices);
-    if (mesh.skinWeights && threeBones.length) {
-      const { skinIndex, skinWeight } = buildSkinAttributes(mesh, boneIndexById, mesh.vertices.length);
-      geometry.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(skinIndex, 4));
-      geometry.setAttribute('skinWeight', new THREE.Float32BufferAttribute(skinWeight, 4));
-      const skinned = new THREE.SkinnedMesh(geometry, new THREE.MeshBasicMaterial());
-      skinned.name = mesh.name;
-      skinned.bind(skeleton);
-      scene.add(skinned);
-      meshNodes.set(mesh.id, skinned);
-    } else {
-      const meshObj = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial());
-      meshObj.name = mesh.name;
-      scene.add(meshObj);
-      meshNodes.set(mesh.id, meshObj);
-    }
-  });
-
-  const animations = clips
-    .filter((c) => c.tracks.length > 0)
-    .map((c) => clipToThreeAnimation(c, boneById, meshNodes));
-
-  return { scene, animations, boneCount: threeBones.length };
+  const prepared = options.prepare === false
+    ? { meshes, bones, clips }
+    : prepareMeshesForExport(meshes, bones, clips);
+  return populateExportScene(prepared.meshes, prepared.bones, prepared.clips, options);
 }
 
 /** Sample helper used by tests — ensure animation module is wired. */

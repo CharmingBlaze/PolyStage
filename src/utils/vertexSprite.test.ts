@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
 import {
   calculateScreenStableScale,
+  colorToCss,
   createVertexSprite,
   updateVertexSpriteState,
   getTargetScreenPixels,
@@ -98,5 +99,10 @@ describe('vertexSprite', () => {
     // Clicking far away from any vertex returns null
     const pickedNone = pickClosestVertex(100, 100, testMesh, camera, mockContainer, 16);
     expect(pickedNone).toBeNull();
+  });
+
+  it('formats hex colors for sprite fills', () => {
+    expect(colorToCss(0xe6b422)).toBe('#e6b422');
+    expect(colorToCss('#00b4c4')).toBe('#00b4c4');
   });
 });

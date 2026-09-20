@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { extrusionMesh, type BlockoutExtrusion } from '../utils/blockoutExtrude';
 import type {
   BezierAnchor,
   BezierPath,
@@ -20,7 +21,7 @@ import {
   sharpAnchor,
 } from '../utils/vectorBlockout';
 
-type VectorMode = 'pen' | 'edit';
+type VectorMode = 'pen' | 'edit' | 'extrude';
 type VectorPathStyle = 'polygon' | 'curve';
 /** How Front/Side polygon points move while editing. */
 export type VectorPointEditMode = 'symmetric' | 'free';
@@ -31,7 +32,8 @@ export type VectorPart = {
   id: string;
   name: string;
   paths: Record<VectorPlane, BezierPath>;
-  kind?: 'silhouette' | 'primitive';
+  kind?: 'silhouette' | 'primitive' | 'extrusion';
+  extrusion?: BlockoutExtrusion;
   primitive?: VectorPrimitive;
   transform?: VectorPartTransform;
   sections?: VectorSectionEdit[];
@@ -118,6 +120,7 @@ type VectorStore = {
   /** Seed Front width or Side depth polygon from the other closed silhouette. */
   seedCompanionCage: (target: 'front' | 'side') => boolean;
   addPart: () => void;
+  addExtrusion: (extrusion: BlockoutExtrusion) => void;
   addPrimitivePart: (type: VectorPrimitiveType) => void;
   duplicatePart: () => void;
   mirrorPart: () => void;
@@ -208,6 +211,7 @@ const cloneParts = (parts: VectorPart[]): VectorPart[] =>
   parts.map((part) => ({
     ...part,
     paths: clonePaths(part.paths),
+    extrusion: part.extrusion ? { ...part.extrusion, outline: part.extrusion.outline.map((p) => ({ ...p })) } : undefined,
     primitive: part.primitive ? { ...part.primitive } : undefined,
     transform: part.transform
       ? {
@@ -403,6 +407,15 @@ export const useVectorStore = create<VectorStore>((set, get) => {
       return true;
     },
     markBuilt: () => set({ builtRevision: get().revision }),
+    addExtrusion: (extrusion) => {
+      extrusionMesh(extrusion);
+      checkpoint();
+      const part = makePart(`Extrusion ${get().parts.length + 1}`);
+      part.kind = 'extrusion';
+      part.extrusion = { ...extrusion, outline: extrusion.outline.map((p) => ({ ...p })) };
+      set({ parts: [...get().parts, part], activePartId: part.id, paths: clonePaths(part.paths),
+        ...clearSelection(), mode: 'edit', revision: get().revision + 1 });
+    },
     addPart: () => {
       checkpoint();
       const part = makePart(`Part ${get().parts.length + 1}`);
@@ -444,6 +457,7 @@ export const useVectorStore = create<VectorStore>((set, get) => {
       if (!source) return;
       checkpoint();
       const part = makePart(`${source.name} Copy`);
+      part.extrusion = source.extrusion ? { ...source.extrusion, outline: source.extrusion.outline.map((p) => ({ ...p })) } : undefined;
       part.paths = clonePaths(source.paths);
       part.kind = source.kind || 'silhouette';
       part.primitive = source.primitive ? { ...source.primitive } : undefined;
@@ -477,6 +491,7 @@ export const useVectorStore = create<VectorStore>((set, get) => {
       if (!source) return;
       checkpoint();
       const part = makePart(`${source.name} Mirrored`);
+      part.extrusion = source.extrusion ? { ...source.extrusion, outline: source.extrusion.outline.map((p) => ({ u: -p.u, v: p.v })).reverse() } : undefined;
       const mirrorPath = (path: BezierPath): BezierPath => ({
         ...clonePath(path),
         anchors: path.anchors
@@ -657,6 +672,10 @@ export const useVectorStore = create<VectorStore>((set, get) => {
     setRoundness: (roundness) =>
       set({
         roundness: Math.max(0, Math.min(1, Number(roundness) || 0)),
+        parts: get().mode === 'extrude' ? get().parts : get().parts.map((part) =>
+          part.id === get().activePartId && part.extrusion
+            ? { ...part, extrusion: { ...part.extrusion, roundness: Math.max(0, Math.min(1, Number(roundness) || 0)) } }
+            : part),
         revision: get().revision + 1,
       }),
     setRefImage: (plane, image) =>

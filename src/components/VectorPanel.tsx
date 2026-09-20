@@ -1,4 +1,5 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { extrusionMesh } from '../utils/blockoutExtrude';
 import type { CADMesh } from '../types/cad';
 import {
   analyzeVectorMesh,
@@ -116,6 +117,23 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
 
   const activePath = paths[activePlane];
   const activePart = parts.find((part) => part.id === activePartId) ?? parts[0];
+  const isRaising = mode === 'extrude';
+  const isSilhouette = !isRaising && activePart.kind !== 'primitive' && activePart.kind !== 'extrusion';
+  const shapeRoundness = !isRaising && activePart.extrusion ? activePart.extrusion.roundness : roundness;
+  const startSilhouette = () => {
+    if (!isSilhouette) useVectorStore.getState().addPart();
+    setMode('pen');
+    setTab('draw');
+  };
+  const roundnessControl = (
+    <label className="vector-dock-roundness">
+      Roundness
+      <select aria-label="Shape roundness" value={shapeRoundness < 0.05 ? 'square' : shapeRoundness < 0.7 ? 'soft' : 'round'}
+        onChange={(e) => setRoundness(e.target.value === 'square' ? 0 : e.target.value === 'soft' ? 0.35 : 1)}>
+        <option value="square">Square</option><option value="soft">Soft</option><option value="round">Round</option>
+      </select>
+    </label>
+  );
   const activeTransform = activePart.transform ?? {
     position: { x: 0, y: 0, z: 0 },
     rotationY: 0,
@@ -139,7 +157,7 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
     setSegments(next.vertical, next.radial);
   };
   const validPartCount = parts.filter(
-    (part) => part.kind === 'primitive' || part.paths.front.closed || part.paths.side.closed
+    (part) => part.kind === 'primitive' || part.kind === 'extrusion' || part.paths.front.closed || part.paths.side.closed
   ).length;
   const missingAxis =
     (paths.front.closed ? 0 : 1) + (paths.side.closed ? 0 : 1) === 1;
@@ -159,7 +177,7 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
   const frontReady = paths.front.closed;
   const sideReady = paths.side.closed;
   const validationIssues =
-    activePart.kind === 'primitive' ? [] : validateVectorPaths(paths);
+    activePart.kind === 'primitive' || activePart.kind === 'extrusion' ? [] : validateVectorPaths(paths);
   const selectedAnchor = selected ? paths[selected.plane]?.anchors[selected.index] : null;
 
   const patchTransform = (
@@ -235,7 +253,9 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
   }
 
   const meshForPart = (part: typeof activePart): VectorMeshSnapshot | null => {
-    const base = part.kind === 'primitive' && part.primitive
+    const base = part.kind === 'extrusion' && part.extrusion
+      ? extrusionMesh(part.extrusion)
+      : part.kind === 'primitive' && part.primitive
       ? vectorPrimitiveToMesh(part.primitive)
       : vectorPathsToMesh(
           part.paths.front.closed ? part.paths.front : null,
@@ -399,12 +419,15 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
         <div className="vector-dock-brand">
           <span>Blockout</span>
           <button type="button" onClick={() => setDocked(false)} title="Open the full floating panel">
-            Panel
+            Tools & Settings
           </button>
         </div>
 
         <div className="vector-dock-group" aria-label="Active silhouette">
-          {(['front', 'side', 'top'] as const).map((plane) => {
+          <button type="button" className={mode === 'extrude' ? 'active' : ''} onClick={() => setMode('extrude')} title="Draw on the 3D ground grid, Enter, then move up to raise">Draw &amp; Raise</button>
+          <button type="button" className={isSilhouette && mode === 'pen' ? 'active' : ''} onClick={startSilhouette}>Silhouette</button>
+          <button type="button" onClick={() => openFloatingTab('draw')}>+ Primitive</button>
+          {isSilhouette && (['front', 'side', 'top'] as const).map((plane) => {
             const ready = paths[plane].closed;
             const started = paths[plane].anchors.length > 0;
             return (
@@ -421,29 +444,29 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
                       : `Draw ${plane} silhouette`
                 }
               >
-                {plane === 'front' ? 'F' : plane === 'side' ? 'S' : 'T'}
+                {plane === 'front' ? 'Front' : plane === 'side' ? 'Side' : 'Top'}
                 {ready ? '✓' : ''}
               </button>
             );
           })}
         </div>
 
-        <div className="vector-dock-group">
+        {isSilhouette && <div className="vector-dock-group">
           <button type="button" className={mode === 'pen' ? 'active' : ''} onClick={() => setMode('pen')}>
-            Draw
+            Add Points
           </button>
           <button type="button" className={mode === 'edit' ? 'active' : ''} onClick={() => setMode('edit')}>
-            Edit
+            Move Points
           </button>
-        </div>
+        </div>}
 
-        <div className="vector-dock-group">
+        {isSilhouette && <div className="vector-dock-group">
           <button
             type="button"
             className={pathStyle === 'polygon' ? 'active' : ''}
             onClick={() => setPathStyle('polygon')}
           >
-            Poly
+            Straight
           </button>
           <button
             type="button"
@@ -452,9 +475,9 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
           >
             Curve
           </button>
-        </div>
+        </div>}
 
-        <div className="vector-dock-group">
+        {isSilhouette && <div className="vector-dock-group">
           <button
             type="button"
             className={pointEditMode === 'symmetric' ? 'active' : ''}
@@ -471,7 +494,7 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
           >
             Free
           </button>
-        </div>
+        </div>}
 
         <div className="vector-dock-group vector-dock-history">
           <button type="button" disabled={!historyCount} onClick={() => useVectorStore.getState().undo()}>
@@ -492,10 +515,12 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
           </select>
         </label>
 
+        {(isRaising || activePart.kind !== 'primitive') && roundnessControl}
+
         <div className="vector-dock-group vector-dock-open" aria-label="Open full panel tab">
           {(['parts', 'ref', 'mesh'] as const).map((nextTab) => (
             <button key={nextTab} type="button" onClick={() => openFloatingTab(nextTab)}>
-              {nextTab[0].toUpperCase() + nextTab.slice(1)}
+              {nextTab === 'ref' ? 'References' : nextTab === 'mesh' ? 'Shape Settings' : 'Parts'}
             </button>
           ))}
         </div>
@@ -503,24 +528,25 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
         <span
           className={`vector-dock-status ${hasBlockingIssue ? 'error' : 'ok'}`}
           title={
-            hasBlockingIssue
+            isRaising ? 'Finish drawing in the 3D view' : hasBlockingIssue
               ? activeValidationIssues[0]?.message
               : `${qualityLabel} topology · ${vertical}×${radial} · ~${estimatedFaces} faces`
           }
         >
-          {hasBlockingIssue ? '!' : '✓'}
+          {isRaising ? 'Drawing' : hasBlockingIssue ? '!' : '✓'}
         </span>
 
         <span className="vector-dock-poly" title="Estimated game mesh size">
-          {vertical}×{radial}
+          {previewStats.triangles.toLocaleString()} tris
         </span>
 
         <button
           type="button"
           className="primary vector-dock-build"
+          disabled={isRaising || !validPartCount}
           onClick={() => generateAll(!!onBuildAndEdit)}
         >
-          {onBuildAndEdit ? 'Update & Edit' : 'Update'}
+          {onBuildAndEdit ? 'Build & Edit' : 'Build Meshes'}
         </button>
 
         <button type="button" className="vector-dock-collapse" onClick={() => setCollapsed(true)}>
@@ -541,7 +567,7 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
         onPointerMove={onHeaderPointerMove}
         onPointerUp={onHeaderPointerUp}
       >
-        <span>Vector Blockout</span>
+        <span>Blockout</span>
         <div className="vector-title-actions">
           <span className="vector-badge">{activePart.name}</span>
           <button type="button" onClick={() => setDocked((value) => !value)}>
@@ -554,10 +580,10 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
       <div className="vector-tabs" role="tablist" aria-label="Blockout panel">
         {(
           [
-            ['draw', 'Draw'],
+            ['draw', 'Tools'],
             ['parts', 'Parts'],
-            ['ref', 'Ref'],
-            ['mesh', 'Mesh'],
+            ['ref', 'References'],
+            ['mesh', 'Shape'],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -576,6 +602,27 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
       <div className="vector-tab-body" role="tabpanel">
         {tab === 'draw' && (
           <>
+            <div className="vector-section-label">Create a part</div>
+            <div className="vector-tool-list">
+              <button type="button" className={isRaising ? 'active' : ''} onClick={() => setMode('extrude')}>
+                <strong>Draw &amp; Raise</strong><span>Draw on the ground, press Enter, then raise the height.</span>
+              </button>
+              <button type="button" className={isSilhouette ? 'active' : ''} onClick={startSilhouette}>
+                <strong>Silhouette</strong><span>Draw a Front or Side outline. Add the other view to shape the volume.</span>
+              </button>
+            </div>
+            <div className="vector-section-label">Or start with a primitive</div>
+            <div className="vector-quality-presets">
+              {(['box', 'cylinder', 'wedge', 'capsule'] as VectorPrimitiveType[]).map((type) => (
+                <button type="button" key={type} onClick={() => { setMode('edit'); addPrimitive(type); }}>
+                  {type[0].toUpperCase() + type.slice(1)}
+                </button>
+              ))}
+            </div>
+            {isRaising && <div className="vector-help">In the 3D view: click corners → Enter → move up → click or Enter. Backspace removes a corner; Esc cancels. {roundnessControl}</div>}
+            {!isRaising && !isSilhouette && <div className="vector-help">Edit this part’s dimensions and placement in Parts. Choose a tool above to create another part.</div>}
+            {isSilhouette && <>
+            <div className="vector-section-label">Edit silhouette · {activePart.name}</div>
             <div className="vector-plane-tabs" aria-label="Active silhouette">
               {(['front', 'side', 'top'] as const).map((plane) => (
                 <button
@@ -598,10 +645,10 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
 
             <div className="vector-mode-row">
               <button type="button" className={mode === 'pen' ? 'active' : ''} onClick={() => setMode('pen')}>
-                Draw
+                Add Points
               </button>
               <button type="button" className={mode === 'edit' ? 'active' : ''} onClick={() => setMode('edit')}>
-                Edit
+                Move Points
               </button>
             </div>
 
@@ -685,7 +732,7 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
                 onClick={() => useVectorStore.getState().toggleClosed(activePlane)}
                 disabled={!activePath.closed && activePath.anchors.length < 3}
               >
-                {activePath.closed ? 'Open' : 'Close'}
+                {activePath.closed ? 'Reopen Outline' : 'Close Outline'}
               </button>
               <button
                 type="button"
@@ -693,7 +740,7 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
                 disabled={!canInsert}
                 title="Insert a point on the selected edge"
               >
-                Insert
+                Insert Point
               </button>
               <button type="button" onClick={deleteSelected} disabled={!selected}>
                 Delete{selectedIndices.length > 1 ? ` (${selectedIndices.length})` : ''}
@@ -781,6 +828,7 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
                 </div>
               </>
             ) : null}
+            </>}
           </>
         )}
 
@@ -797,8 +845,8 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
                   <option key={part.id} value={part.id}>{part.name}</option>
                 ))}
               </select>
-              <button type="button" onClick={() => useVectorStore.getState().addPart()} title="Add part">
-                + Part
+              <button type="button" onClick={() => { useVectorStore.getState().addPart(); setMode('pen'); setTab('draw'); }} title="Create a new silhouette part">
+                + Silhouette
               </button>
             </div>
             <input
@@ -806,7 +854,7 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
               value={activePart.name}
               onChange={(e) => renamePart(e.target.value)}
               aria-label="Part name"
-              placeholder="Head, Torso, Arm…"
+              placeholder="Body, wheel, wing, handle…"
             />
             <div className="vector-actions">
               <button type="button" onClick={() => useVectorStore.getState().duplicatePart()}>
@@ -828,16 +876,7 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
                 Delete Part
               </button>
             </div>
-            <div className="vector-section-label">Quick primitives</div>
-            <div className="vector-quality-presets">
-              {(['box', 'cylinder', 'wedge', 'capsule'] as VectorPrimitiveType[]).map((type) => (
-                <button type="button" key={type} onClick={() => addPrimitive(type)}>
-                  {type[0].toUpperCase() + type.slice(1)}
-                </button>
-              ))}
-            </div>
-
-            <div className="vector-section-label">Assembly</div>
+            <div className="vector-section-label">Parent & visibility</div>
             <div className="vector-part-row">
               <select
                 value={activePart.parentId || ''}
@@ -857,6 +896,7 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
                 {activePart.hidden ? 'Show' : 'Hide'}
               </button>
             </div>
+            <div className="vector-section-label">Position, rotation & scale</div>
             <div className="vector-numeric-grid vector-numeric-grid-3">
               {(['x', 'y', 'z'] as const).map((axis) => (
                 <label key={`position-${axis}`}>
@@ -870,7 +910,7 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
                 </label>
               ))}
               <label>
-                Y°
+                Rotate Y°
                 <input
                   type="number"
                   step="5"
@@ -880,7 +920,7 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
               </label>
               {(['x', 'y', 'z'] as const).map((axis) => (
                 <label key={`scale-${axis}`}>
-                  S{axis.toUpperCase()}
+                  Scale {axis.toUpperCase()}
                   <input
                     type="number"
                     min="0.01"
@@ -892,13 +932,24 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
               ))}
             </div>
 
+            {activePart.kind === 'extrusion' && activePart.extrusion && (
+              <label className="vector-thickness-hint">Extrusion height
+                <input type="number" min="0.01" step="0.1" aria-label="Extrusion height"
+                  value={activePart.extrusion.height}
+                  onChange={(event) => {
+                    const height = Number(event.target.value);
+                    if (Number.isFinite(height) && height >= 0.01)
+                      patchActivePart({ extrusion: { ...activePart.extrusion!, height } });
+                  }} />
+              </label>
+            )}
             {activePart.kind === 'primitive' && activePart.primitive ? (
               <>
                 <div className="vector-section-label">Primitive dimensions</div>
                 <div className="vector-numeric-grid vector-numeric-grid-3">
                   {(['width', 'height', 'depth'] as const).map((key) => (
                     <label key={key}>
-                      {key[0].toUpperCase()}
+                      {key[0].toUpperCase() + key.slice(1)}
                       <input
                         type="number"
                         min="0.02"
@@ -921,7 +972,7 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
             <div className="vector-help">
               Parent, position, mirror, hide, and combine silhouette or primitive parts. Hidden parts are skipped when building.
             </div>
-            <div className="vector-view-status" aria-label="Part silhouette readiness">
+            {isSilhouette && <div className="vector-view-status" aria-label="Part silhouette readiness">
               {(['front', 'side', 'top'] as const).map((plane) => (
                 <span key={plane} className={paths[plane].closed ? 'done' : ''}>
                   {plane === 'front' ? 'F' : plane === 'side' ? 'S' : 'T'}
@@ -932,7 +983,7 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
                       : ' —'}
                 </span>
               ))}
-            </div>
+            </div>}
           </>
         )}
 
@@ -1055,11 +1106,20 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
 
         {tab === 'mesh' && (
           <>
+            <div className="vector-section-label">Shape · {isRaising ? 'New extrusion' : activePart.name}</div>
+            {(isRaising || activePart.kind !== 'primitive') && roundnessControl}
+            {!isSilhouette && <div className="vector-help">
+              {isRaising || activePart.kind === 'extrusion'
+                ? 'Drawn shapes have quad walls and flat triangulated caps. Roundness adds corner segments. Edit the finished height in Parts.'
+                : 'Edit this primitive’s width, height and depth in Parts. Silhouette settings do not apply to primitives.'}
+            </div>}
+            {isSilhouette && <>
+            <div className="vector-thickness-hint">These settings apply to silhouette parts.</div>
             <div className="vector-subtabs" role="tablist" aria-label="Mesh settings">
               {(
                 [
                   ['detail', 'Detail'],
-                  ['caps', 'Tips'],
+                  ['caps', 'End Caps'],
                   ['advanced', 'Advanced'],
                 ] as const
               ).map(([id, label]) => (
@@ -1154,17 +1214,17 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
             {meshSub === 'caps' && (
               <div className="vector-cap-row">
                 <div className="vector-quality-heading">
-                  <span>Tip Topology</span>
-                  <strong>{capStyle === 'game' ? 'Game' : 'Pointed'}</strong>
+                  <span>Top & bottom</span>
+                  <strong>{capStyle === 'game' ? 'Flat' : 'Pointed'}</strong>
                 </div>
                 <div className="vector-quality-presets">
                   <button
                     type="button"
                     className={capStyle === 'game' ? 'active' : ''}
                     onClick={() => setCapStyle('game')}
-                    title="Inset quads + tiny tip"
+                    title="Flat quad caps without a center pinch"
                   >
-                    Game Caps
+                    Flat Caps
                   </button>
                   <button
                     type="button"
@@ -1177,7 +1237,7 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
                 </div>
                 <div className="vector-thickness-hint">
                   {capStyle === 'game'
-                    ? 'All-quad tips (inset loop + diameter strip) — clean for UV, bevel, and game export.'
+                    ? 'Flat all-quad caps with no inset ring or center pinch.'
                     : 'Organic pointed tips with a pole fan (uses triangles).'}
                 </div>
               </div>
@@ -1323,30 +1383,31 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
                 </div>
               </div>
             )}
+            </>}
           </>
         )}
       </div>
 
       <div className="vector-panel-footer">
         <div className={`vector-validation ${activeValidationIssues.some((issue) => issue.severity === 'error') ? 'has-error' : ''}`}>
-          {activeValidationIssues.length ? (
+          {isRaising ? <span>Finish drawing in the 3D view before building.</span> : activeValidationIssues.length ? (
             activeValidationIssues.slice(0, 3).map((issue, index) => (
               <span key={`${issue.message}-${index}`} className={issue.severity}>
                 {issue.severity === 'error' ? '!' : '△'} {issue.message}
               </span>
             ))
           ) : (
-            <span className="ok">✓ Active part is build-ready</span>
+            <span className="ok">{isRaising ? 'Finish drawing in the 3D view before building.' : activePreviewMesh ? '✓ Active part is ready to build' : 'Choose a tool to create a part.'}</span>
           )}
         </div>
         <div className="vector-poly-estimate">
           <span>
-            {vertical}×{radial} · {capStyle}
+            {isSilhouette ? `${vertical} height × ${radial} around` : activePart.kind === 'primitive' ? 'Primitive' : 'Drawn extrusion'}
           </span>
           <span>
             {previewStats.vertices
               ? `${previewStats.vertices.toLocaleString()}v · ${previewStats.triangles.toLocaleString()}t`
-              : `≈ ${estimatedVertices.toLocaleString()}v · ${estimatedFaces.toLocaleString()}t`}
+              : 'No mesh yet'}
             {validPartCount > 1 ? ` · ${validPartCount} objects` : ''}
           </span>
         </div>
@@ -1356,20 +1417,21 @@ export function VectorPanel({ onBuildAll, onAddActive, onBuildAndEdit, onStatus 
               type="button"
               className="primary vector-generate"
               onClick={() => generateAll(true)}
-              title="Create or update linked meshes and open MODEL"
+              disabled={isRaising || !validPartCount}
+              title="Build all visible parts and switch to Model for mesh editing"
             >
-              Update & Edit in Model
+              Build & Edit in Model
             </button>
           ) : (
-            <button type="button" className="primary vector-generate" onClick={() => generateAll(false)}>
-              Update All Parts
+            <button type="button" disabled={isRaising || !validPartCount} className="primary vector-generate" onClick={() => generateAll(false)}>
+              Build All Parts
             </button>
           )}
-          <button type="button" onClick={() => generateAll(false)} title="Create or update linked scene meshes">
-            Update
-          </button>
-          <button type="button" onClick={addActiveToMesh} title="Add this part as its own object">
-            Add
+          {onBuildAndEdit && <button type="button" disabled={isRaising || !validPartCount} onClick={() => generateAll(false)} title="Build all visible parts and stay in Blockout">
+            Build & Stay
+          </button>}
+          <button type="button" disabled={isRaising || !activePreviewMesh} onClick={addActiveToMesh} title="Add an independent copy of the active part to the scene">
+            Add Mesh Copy
           </button>
         </div>
       </div>

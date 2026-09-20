@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { isInputFocused } from './hooks/useGlobalShortcuts';
 import { Header } from './components/Header';
+import { BlenderIcon } from './components/icons/BlenderIcon';
 import { Toolbar } from './components/Toolbar';
 import { Viewport3D } from './components/Viewport3D';
 import { QuadViewport } from './components/QuadViewport';
@@ -13,6 +14,7 @@ import { OutlinerPanel } from './components/OutlinerPanel';
 import { ParticleStudioModal } from './components/ParticleStudioModal';
 import { RiggingPanel } from './components/RiggingPanel';
 import { MaterialPanel } from './components/MaterialPanel';
+import { MaterialShelf } from './components/MaterialShelf';
 import { FloatingToolWindow, type ToolWindowTab } from './components/FloatingToolWindow';
 import { FloatingOutliner } from './components/FloatingOutliner';
 import { ShortcutsModal } from './components/ShortcutsModal';
@@ -20,11 +22,12 @@ import { AssetBrowserModal } from './components/AssetBrowserModal';
 import { ImportModelModal } from './components/ImportModelModal';
 import { SpriteSheetModal } from './components/SpriteSheetModal';
 import { paint3dBridge, type Paint3DTool as StudioPaintTool } from './utils/paint3dSurface';
+import { bindPalmRejection, pressureBrushSize, pressureOpacity } from './utils/pointerInput';
 import { PaintBridgeHost } from './components/PaintBridgeHost';
 import { notifyTexturePreview, setLiveTextureCanvas } from './utils/texturePreviewBus';
 import { VectorPanel } from './components/VectorPanel';
 import { useVectorStore } from './store/useVectorStore';
-import { useHistoryStore } from './store/useHistoryStore';
+import { useHistoryStore, bindMeshHistory, clearMeshHistory } from './store/useHistoryStore';
 import {
   applyVectorSectionEdits,
   resolveVectorPartTransform,
@@ -35,9 +38,9 @@ import {
 import type {
   CADMesh, SceneGroup, CADBone, ToolState, RenderSettings, PrimitiveType, CADScene, AnimationClip,
   CADCamera, CADLight, ParticleEmitter, EnvironmentSettings, SceneSelection,
-  WorkspaceMode, HeaderWorkspace, RigMode, EditMode,
+  WorkspaceMode, HeaderWorkspace, RigMode, EditMode, MaterialAsset,
 } from './types/cad';
-import { generateId, generatePrimitive, createEdgesFromFaces } from './utils/meshUtils';
+import { generateId, generatePrimitive } from './utils/meshUtils';
 import { separateSelectedFaces, separateLooseParts } from './utils/meshSeparate';
 import { import3DModelFromFile } from './utils/importers';
 import { finalizeEditableMesh } from './utils/topology/validate';
@@ -63,7 +66,8 @@ import {
 import { magnetSnapSelectedVertices } from './utils/vertexSnap';
 import { subdivideFaces } from './utils/advancedMeshTools';
 import { fillTargets, mirrorTargets, resolveOperatorTargets, subdivideTargets } from './utils/meshOperators';
-import { PenToolPanel } from './components/PenToolPanel';
+import { MeshSketchPanel } from './components/PenToolPanel';
+import { DoodleToolPanel } from './components/DoodleToolPanel';
 import {
   DEFAULT_PEN_SETTINGS,
   createPenSession,
@@ -76,6 +80,13 @@ import {
   type PenToolSettings,
 } from './utils/penTool';
 import { constructionPlaneForView } from './utils/primitiveDraw';
+import {
+  buildDoodleMesh,
+  createDoodleSession,
+  DEFAULT_DOODLE_SETTINGS,
+  type DoodleSession,
+  type DoodleSettings,
+} from './utils/doodle3d';
 import {
   convertSelection,
   EMPTY_SELECTION,
@@ -92,11 +103,23 @@ import { applyLoopCut, applyKnifeCut, type KnifeHit } from './utils/meshCutTools
 import type { MirrorAxis } from './types/cad';
 import { createDefaultClip, autoKeyTarget } from './utils/animation';
 import { exportSceneToGLB } from './utils/glbExport';
+import { downloadFile } from './utils/exporters';
+import {
+  applyVectorProjectState,
+  buildProjectDocument,
+  captureVectorProjectState,
+  parseProjectDocument,
+  serializeProject,
+  suggestedProjectFilename,
+} from './utils/projectDocument';
+import { clearAutosave, hasAutosave, readAutosave, writeAutosave } from './utils/projectAutosave';
+import { ensurePaintableUVs, meshHasPaintableUVs } from './utils/uvAdvanced';
 import { createCamera, createDefaultEnvironment } from './utils/cutsceneEnv';
 import { createCADLight, createDramaticThreePointLights } from './utils/cutsceneLights';
 import { createEmptySequence, createSequenceClip, addClipToTrack } from './utils/sequence';
 import type { CutsceneSequence } from './types/sequence';
 import { deleteBoneBranch } from './utils/rigging';
+import { cloneDefaultMaterials, createMaterial, materialTextureDataUrl } from './utils/materials';
 
 /**
  * The animation and paint studios are the two heaviest modules in the app and each
@@ -123,6 +146,8 @@ const WorkspaceLoading: React.FC<{ label: string }> = ({ label }) => (
 export const App: React.FC = () => {
   const [scenes, setScenes] = useState<CADScene[]>(() => {
     const mesh = generatePrimitive('cube');
+    mesh.materialId = 'mat_default';
+    mesh.faces = mesh.faces.map((face) => ({ ...face, materialId: 'mat_default' }));
     const bones: CADBone[] = [
       {
         id: 'bone_root',
@@ -166,11 +191,14 @@ export const App: React.FC = () => {
         lights: [keyLight, fillLight, rimLight],
         particles: [],
         environment: createDefaultEnvironment(),
+        materials: cloneDefaultMaterials(),
+        activeMaterialId: 'mat_default',
         sequence,
       },
     ];
   });
   const [activeSceneId, setActiveSceneId] = useState<string>('scene_main');
+  const vectorRevision = useVectorStore((s) => s.revision);
   const [activeWorkspaceMode, setActiveWorkspaceMode] = useState<WorkspaceMode>('modeling');
   const [blockoutStatus, setBlockoutStatus] = useState(
     'Trace Front, close it → Side cage seeds automatically. Drag width/depth, then Update for clean game quads.'
@@ -188,6 +216,8 @@ export const App: React.FC = () => {
   const lights = activeScene.lights || [];
   const particles = activeScene.particles || [];
   const environment = activeScene.environment || createDefaultEnvironment();
+  const materials = activeScene.materials?.length ? activeScene.materials : cloneDefaultMaterials();
+  const activeMaterialId = activeScene.activeMaterialId || materials[0]?.id || '';
   const sequence = activeScene.sequence || null;
 
   useEffect(() => {
@@ -311,7 +341,49 @@ export const App: React.FC = () => {
 
   const handleExportGLB = async () => {
     const name = (activeScene.name || 'character').toLowerCase().replace(/\s+/g, '_');
-    await exportSceneToGLB(meshes, bones, clips, `${name}.glb`);
+    await exportSceneToGLB(meshes, bones, clips, `${name}.glb`, materials);
+  };
+
+  const buildCurrentProject = () =>
+    buildProjectDocument({
+      scenes: scenesRef.current,
+      activeSceneId: activeSceneIdRef.current,
+      vector: captureVectorProjectState(),
+    });
+
+  const applyLoadedProject = (project: ReturnType<typeof parseProjectDocument>['project']) => {
+    hydratingRef.current = true;
+    clearMeshHistory();
+    setScenes(project.scenes);
+    setActiveSceneId(project.activeSceneId || project.scenes[0]?.id || 'scene_main');
+    const firstMesh = project.scenes.find((s) => s.id === project.activeSceneId)?.meshes[0]
+      || project.scenes[0]?.meshes[0];
+    if (firstMesh) {
+      setActiveMeshId(firstMesh.id);
+      setSelectedMeshIds(project.scenes.find((s) => s.id === (project.activeSceneId || project.scenes[0].id))?.meshes.map((m) => m.id) || [firstMesh.id]);
+    }
+    setSelectedVertexIds([]);
+    setSelectedEdgeIds([]);
+    setSelectedFaceIds([]);
+    applyVectorProjectState(project.vector);
+    setDocumentDirty(false);
+  };
+
+  const handleSaveProject = () => {
+    const project = buildCurrentProject();
+    downloadFile(suggestedProjectFilename(activeScene.name), serializeProject(project), 'application/json');
+    setDocumentDirty(false);
+    void writeAutosave(project);
+  };
+
+  const handleRecoverSession = async () => {
+    const project = await readAutosave();
+    if (!project) {
+      setRecoverAvailable(false);
+      return;
+    }
+    applyLoadedProject(project);
+    setRecoverAvailable(false);
   };
 
   const [selectedVertexIds, setSelectedVertexIds] = useState<string[]>([]);
@@ -326,6 +398,26 @@ export const App: React.FC = () => {
     }
   };
   const [selectedBoneId, setSelectedBoneId] = useState<string>('bone_root');
+  const [documentDirty, setDocumentDirty] = useState(false);
+  const [recoverAvailable, setRecoverAvailable] = useState(false);
+  const hydratingRef = useRef(false);
+  const skipDirtyRef = useRef(true);
+  const scenesRef = useRef(scenes);
+  const activeSceneIdRef = useRef(activeSceneId);
+  const activeMeshIdRef = useRef(activeMeshId);
+  const selectedVertexIdsRef = useRef(selectedVertexIds);
+  const selectedEdgeIdsRef = useRef(selectedEdgeIds);
+  const selectedFaceIdsRef = useRef(selectedFaceIds);
+  const selectedMeshIdsRef = useRef(selectedMeshIds);
+  const selectedBoneIdRefApp = useRef(selectedBoneId);
+  scenesRef.current = scenes;
+  activeSceneIdRef.current = activeSceneId;
+  activeMeshIdRef.current = activeMeshId;
+  selectedVertexIdsRef.current = selectedVertexIds;
+  selectedEdgeIdsRef.current = selectedEdgeIds;
+  selectedFaceIdsRef.current = selectedFaceIds;
+  selectedMeshIdsRef.current = selectedMeshIds;
+  selectedBoneIdRefApp.current = selectedBoneId;
 
   const activeMesh = meshes.find((m) => m.id === activeMeshId) || meshes[0] || generatePrimitive('cube');
 
@@ -333,6 +425,71 @@ export const App: React.FC = () => {
   const pushUndo = () => useHistoryStore.getState().pushUndo();
   const handleUndo = () => useHistoryStore.getState().undo();
   const handleRedo = () => useHistoryStore.getState().redo();
+
+  useEffect(() => bindPalmRejection(window), []);
+
+  useEffect(() => {
+    bindMeshHistory({
+      takeSnapshot: () => ({
+        scenes: scenesRef.current,
+        activeSceneId: activeSceneIdRef.current,
+        activeMeshId: activeMeshIdRef.current,
+        selectedVertexIds: selectedVertexIdsRef.current,
+        selectedEdgeIds: selectedEdgeIdsRef.current,
+        selectedFaceIds: selectedFaceIdsRef.current,
+        selectedMeshIds: selectedMeshIdsRef.current,
+        selectedBoneId: selectedBoneIdRefApp.current,
+      }),
+      restoreSnapshot: (snap) => {
+        hydratingRef.current = true;
+        setScenes(snap.scenes as typeof scenes);
+        setActiveSceneId(snap.activeSceneId);
+        setActiveMeshId(snap.activeMeshId);
+        setSelectedVertexIds(snap.selectedVertexIds);
+        setSelectedEdgeIds(snap.selectedEdgeIds);
+        setSelectedFaceIds(snap.selectedFaceIds);
+        setSelectedMeshIds(snap.selectedMeshIds);
+        setSelectedBoneId(snap.selectedBoneId);
+      },
+    });
+    return () => bindMeshHistory(null);
+  }, []);
+
+  useEffect(() => {
+    const provider =
+      activeWorkspaceMode === 'blockout' ? 'vector'
+        : activeWorkspaceMode === 'paint' ? 'paint'
+          : 'mesh';
+    useHistoryStore.getState().setCurrentProvider(provider);
+  }, [activeWorkspaceMode]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void hasAutosave().then((exists) => {
+      if (!cancelled && exists) setRecoverAvailable(true);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (skipDirtyRef.current) {
+      skipDirtyRef.current = false;
+      return;
+    }
+    if (hydratingRef.current) {
+      hydratingRef.current = false;
+      return;
+    }
+    setDocumentDirty(true);
+  }, [scenes, activeSceneId, vectorRevision]);
+
+  useEffect(() => {
+    if (!documentDirty) return;
+    const timer = window.setTimeout(() => {
+      void writeAutosave(buildCurrentProject());
+    }, 1600);
+    return () => window.clearTimeout(timer);
+  }, [documentDirty, scenes, activeSceneId, vectorRevision]);
 
   const updateActiveMesh = (
     updater: CADMesh | ((prev: CADMesh) => CADMesh),
@@ -424,6 +581,58 @@ export const App: React.FC = () => {
 
   const [activeRightTab, setActiveRightTab] = useState<'outliner' | 'properties' | 'material' | 'rig' | 'render'>('outliner');
 
+  const handleCreateMaterial = () => {
+    const material = createMaterial(`Material ${materials.length + 1}`);
+    setMaterials((prev) => [...prev, material]);
+    setActiveMaterialId(material.id);
+  };
+
+  const handleDuplicateMaterial = () => {
+    const current = materials.find((material) => material.id === activeMaterialId) || materials[0];
+    if (!current) return;
+    const copy: MaterialAsset = {
+      ...current,
+      id: `mat_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      name: `${current.name} Copy`,
+    };
+    setMaterials((prev) => [...prev, copy]);
+    setActiveMaterialId(copy.id);
+  };
+
+  const handleAssignActiveMaterial = (materialId: string = activeMaterialId) => {
+    const material = materials.find((item) => item.id === materialId);
+    if (!material) return;
+    const textureDataUrl = materialTextureDataUrl(material);
+    const targets = new Set(selectedMeshIds.length ? selectedMeshIds : [activeMesh.id]);
+    setMeshes((prev) => prev.map((mesh) => {
+      if (!targets.has(mesh.id)) return mesh;
+      const faceScoped = toolState.editMode === 'face' && mesh.id === activeMesh.id && selectedFaceIds.length > 0;
+      if (faceScoped) {
+        return {
+          ...mesh,
+          faces: mesh.faces.map((face) => selectedFaceIds.includes(face.id)
+            ? { ...face, materialId: material.id, color: material.color }
+            : face),
+          revision: (mesh.revision || 0) + 1,
+        };
+      }
+      return {
+        ...mesh,
+        materialId: material.id,
+        textureCanvasDataUrl: textureDataUrl,
+        doubleSided: material.doubleSided,
+        faces: mesh.faces.map((face) => ({ ...face, materialId: material.id, color: material.color })),
+        revision: (mesh.revision || 0) + 1,
+      };
+    }));
+    setToolState((state) => ({ ...state, viewMode: material.source === 'color' ? 'lit' : 'textured' }));
+  };
+
+  const materialTargetLabel = toolState.editMode === 'face' && selectedFaceIds.length
+    ? `${selectedFaceIds.length} face${selectedFaceIds.length === 1 ? '' : 's'}`
+    : selectedMeshIds.length > 1
+      ? `${selectedMeshIds.length} objects`
+      : activeMesh.name;
   const [isToolWindowOpen, setIsToolWindowOpen] = useState(false);
   const [isToolbarOpen, setIsToolbarOpen] = useState(true);
   const [isToolbarFloating, setIsToolbarFloating] = useState(false);
@@ -437,8 +646,22 @@ export const App: React.FC = () => {
   const [isParticleStudioOpen, setIsParticleStudioOpen] = useState(false);
   const [uvSplitOpen, setUvSplitOpen] = useState(false);
   const [uvPanelPercent, setUvPanelPercent] = useState(45);
+
+  useEffect(() => {
+    if (activeWorkspaceMode !== 'paint' && !uvSplitOpen) return;
+    const mesh = meshes.find((m) => m.id === activeMeshId);
+    if (!mesh || meshHasPaintableUVs(mesh)) return;
+    updateActiveMesh(ensurePaintableUVs(mesh), { recordHistory: true });
+  }, [activeWorkspaceMode, uvSplitOpen, activeMeshId]);
   const splitWorkspaceRef = useRef<HTMLElement | null>(null);
   const isResizingUvRef = useRef(false);
+  const materialWorkspaceLabel = uvSplitOpen
+    ? 'UV'
+    : toolState.isPainting3D && activeWorkspaceMode !== 'paint'
+      ? 'Brush'
+      : activeWorkspaceMode === 'modeling'
+        ? 'Model'
+        : activeWorkspaceMode.charAt(0).toUpperCase() + activeWorkspaceMode.slice(1);
 
   useEffect(() => {
     if (toolState.editMode === 'bone') {
@@ -473,6 +696,31 @@ export const App: React.FC = () => {
   const loadedTextureRef = useRef<{ meshId: string; dataUrl?: string }>({ meshId: '' });
   /** Always the module singleton — never nulled by React effect cleanup. */
   const paintBridgeRef = useRef(paint3dBridge);
+
+  useEffect(() => {
+    if (activeScene.materials?.length) return;
+    setScenes((prev) => prev.map((scene) => scene.id === activeScene.id
+      ? { ...scene, materials: cloneDefaultMaterials(), activeMaterialId: 'mat_default' }
+      : scene));
+  }, [activeScene.id, activeScene.materials]);
+
+  // Material edits are live links: every object using the asset receives its texture and base color.
+  useEffect(() => {
+    setMeshes((prev) => prev.map((mesh) => {
+      const material = materials.find((item) => item.id === mesh.materialId);
+      if (!material) return mesh;
+      const textureDataUrl = materialTextureDataUrl(material);
+      return {
+        ...mesh,
+        textureCanvasDataUrl: textureDataUrl,
+        doubleSided: material.doubleSided,
+        faces: mesh.faces.map((face) => face.materialId === material.id
+          ? { ...face, color: material.color }
+          : face),
+        revision: (mesh.revision || 0) + 1,
+      };
+    }));
+  }, [materials]);
 
   const flushLivePaintPreview = () => {
     // Viewport listens via texturePreviewBus — no App setState on every stamp.
@@ -543,6 +791,8 @@ export const App: React.FC = () => {
 
   const handleAddScene = () => {
     const mesh = generatePrimitive('cube');
+    mesh.materialId = 'mat_default';
+    mesh.faces = mesh.faces.map((face) => ({ ...face, materialId: 'mat_default' }));
     const clip = createDefaultClip([mesh], [], 'Idle');
     const camera = createCamera('Shot Cam A');
     const newScene: CADScene = {
@@ -558,6 +808,8 @@ export const App: React.FC = () => {
       lights: [createCADLight('directional', 'Key Light')],
       particles: [],
       environment: createDefaultEnvironment(),
+      materials: cloneDefaultMaterials(),
+      activeMaterialId: 'mat_default',
       sequence: createEmptySequence(`Cutscene ${scenes.length + 1}`, 8, 24),
     };
     setScenes((prev) => [...prev, newScene]);
@@ -832,6 +1084,24 @@ export const App: React.FC = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (isInputFocused()) return;
 
+      if (toolStateRef.current.isDoodleTool) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          cancelDoodleTool();
+          return;
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          confirmDoodleTool();
+          return;
+        }
+        if (e.key === 'Backspace' || e.key === 'Delete') {
+          e.preventDefault();
+          clearDoodleStroke();
+          return;
+        }
+      }
+
       // Pen tool owns Escape / Enter / Backspace while it is active.
       if (toolStateRef.current.isPenTool) {
         if (e.key === 'Escape') {
@@ -846,7 +1116,7 @@ export const App: React.FC = () => {
         }
         if (e.key === 'Enter') {
           e.preventDefault();
-          finishPenPolygon();
+          commitPenTool();
           return;
         }
         if (e.key === 'Backspace' || e.key === 'Delete') {
@@ -854,6 +1124,8 @@ export const App: React.FC = () => {
           undoPenPoint();
           return;
         }
+        // Do not let modeling shortcuts operate on the uncommitted preview.
+        return;
       }
 
       // Animation editor owns G/R/S/Esc modal transforms while active.
@@ -1086,6 +1358,19 @@ export const App: React.FC = () => {
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
         e.preventDefault();
         handleUndo();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        handleSaveProject();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.polystage,.picocad2,.json,.obj,.stl,.ply,.gltf,.glb,.bbmodel';
+        input.onchange = () => {
+          const file = input.files?.[0];
+          if (file) void handleOpenFile(file);
+        };
+        input.click();
       } else if (
         ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y')
         || ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'z')
@@ -1108,6 +1393,7 @@ export const App: React.FC = () => {
     toolState.editMode,
     toolState.isPainting3D,
     toolState.isPenTool,
+    toolState.isDoodleTool,
     toolState.mirrorAxis,
     toolState.mirrorClip,
     toolState.mirrorMergeThreshold,
@@ -1154,13 +1440,15 @@ export const App: React.FC = () => {
     editActiveMesh(applyMirrorSymmetry(activeMesh, axis, { clip, mergeThreshold: threshold }));
   };
 
-  // ── Modo-style Pen tool ────────────────────────────────────────────────
+  // ── Mesh Sketch topology tool ──────────────────────────────────────────
   const [penSession, setPenSession] = useState<PenSession | null>(null);
+  const penSessionRef = useRef<PenSession | null>(null);
+  penSessionRef.current = penSession;
   const [penCurrentOrder, setPenCurrentOrder] = useState(1);
   const penBaseMeshRef = useRef<CADMesh | null>(null);
   const penSettings = toolState.penSettings ?? DEFAULT_PEN_SETTINGS;
 
-  /** Activate the Pen tool: freeze the current mesh and open a fresh session. */
+  /** Activate Mesh Sketch: freeze the current mesh so the whole session is one undo step. */
   const activatePenTool = () => {
     if (!activeMesh) return;
     pushUndo();
@@ -1180,12 +1468,57 @@ export const App: React.FC = () => {
     setActiveRightTab('properties');
   };
 
-  /** Drop the Pen tool. Finished geometry stays on the mesh. */
+  /** Cancel Mesh Sketch and restore the frozen pre-tool mesh. */
   const dropPenTool = () => {
+    const base = penBaseMeshRef.current;
+    if (base) updateActiveMesh(base);
     penBaseMeshRef.current = null;
     setPenSession(null);
     setPenCurrentOrder(1);
     setToolState((s) => ({ ...s, isPenTool: false }));
+  };
+
+  /** Confirm every completed/previewed face and close the modal session. */
+  const commitPenTool = () => {
+    const session = penSessionRef.current;
+    const committed = session?.activeIds.length ? penCommitActive(session) : session;
+    const base = penBaseMeshRef.current;
+    if (!base || !committed) return;
+    // Invalid loops stay live so Enter never destroys work that still needs fixing.
+    if (committed.activeIds.length > 0 && committed.warning) {
+      setPenSession(committed);
+      return;
+    }
+    const output = penSessionToMesh(base, committed);
+    updateActiveMesh(output.mesh);
+    const newestFaceId = output.faceIds[output.faceIds.length - 1];
+    const newestFace = newestFaceId ? output.mesh.faces.find((face) => face.id === newestFaceId) : null;
+    const selectFace = Boolean(newestFaceId && committed.settings.selectFaceOnCommit);
+    setSelectedFaceIds(selectFace && newestFaceId ? [newestFaceId] : []);
+    setSelectedEdgeIds([]);
+    setSelectedVertexIds(!selectFace && newestFace ? [...newestFace.vertexIds] : []);
+    setPenSession(null);
+    penBaseMeshRef.current = null;
+    setPenCurrentOrder(1);
+    setToolState((s) => ({
+      ...s,
+      isPenTool: false,
+      editMode: newestFaceId ? (selectFace ? 'face' : 'vertex') : s.editMode,
+    }));
+  };
+
+  const setMaterials = (updater: MaterialAsset[] | ((prev: MaterialAsset[]) => MaterialAsset[])) => {
+    setScenes((prevScenes) => prevScenes.map((scene) => {
+      if (scene.id !== activeScene.id) return scene;
+      const current = scene.materials?.length ? scene.materials : cloneDefaultMaterials();
+      const next = typeof updater === 'function' ? updater(current) : updater;
+      return { ...scene, materials: next };
+    }));
+  };
+
+  const setActiveMaterialId = (materialId: string) => {
+    setScenes((prevScenes) => prevScenes.map((scene) =>
+      scene.id === activeScene.id ? { ...scene, activeMaterialId: materialId } : scene));
   };
 
   const updatePenSettings = (patch: Partial<PenToolSettings>) => {
@@ -1193,7 +1526,15 @@ export const App: React.FC = () => {
       ...s,
       penSettings: { ...(s.penSettings ?? DEFAULT_PEN_SETTINGS), ...patch },
     }));
-    setPenSession((s) => (s ? { ...s, settings: { ...s.settings, ...patch } } : s));
+    setPenSession((s) => {
+      if (!s) return s;
+      const next = { ...s, settings: { ...s.settings, ...patch } };
+      if (patch.activePlane) {
+        const view = patch.activePlane === 'xz' ? 'top' : patch.activePlane === 'xy' ? 'front' : 'side';
+        return { ...next, plane: constructionPlaneForView(view) };
+      }
+      return next;
+    });
   };
 
   const finishPenPolygon = () => setPenSession((s) => (s ? penCommitActive(s) : s));
@@ -1220,6 +1561,64 @@ export const App: React.FC = () => {
     updateActiveMesh(mesh);
     if (penSession.settings.selectNew && faceIds.length > 0) setSelectedFaceIds(faceIds);
   }, [penSession, toolState.isPenTool]);
+
+  // 3D Doodle is kept separate from Mesh Sketch because it samples a freehand
+  // stroke and generates a complete, editable object only when confirmed.
+  const [doodleSession, setDoodleSession] = useState<DoodleSession | null>(null);
+  const doodleSettings = toolState.doodleSettings ?? DEFAULT_DOODLE_SETTINGS;
+
+  const activateDoodleTool = () => {
+    const materialId = activeMesh?.faces.find((face) => face.materialId)?.materialId;
+    const settings = { ...doodleSettings, materialId };
+    setDoodleSession(createDoodleSession(settings));
+    setToolState((state) => ({
+      ...state,
+      isDoodleTool: true,
+      doodleSettings: settings,
+      isPenTool: false,
+      isCadDrawing: false,
+      placeOnClick: false,
+      isPainting3D: false,
+      modalTransform: null,
+      modalMeshOp: null,
+      viewportLayout: 'single',
+    }));
+    setActiveRightTab('properties');
+  };
+
+  const cancelDoodleTool = () => {
+    setDoodleSession(null);
+    setToolState((state) => ({ ...state, isDoodleTool: false }));
+  };
+
+  const clearDoodleStroke = () => setDoodleSession(createDoodleSession(doodleSettings));
+
+  const updateDoodleSettings = (patch: Partial<DoodleSettings>) => {
+    const nextSettings = { ...doodleSettings, ...patch };
+    setToolState((state) => ({ ...state, doodleSettings: { ...(state.doodleSettings ?? DEFAULT_DOODLE_SETTINGS), ...patch } }));
+    setDoodleSession((session) => session ? { ...session, settings: nextSettings, warning: null } : createDoodleSession(nextSettings));
+  };
+
+  const confirmDoodleTool = () => {
+    if (!doodleSession) return;
+    const result = buildDoodleMesh(doodleSession);
+    if (!result.mesh) {
+      setDoodleSession((session) => session ? { ...session, warning: result.warning } : session);
+      return;
+    }
+    let mesh = result.mesh;
+    if (doodleSession.settings.symmetry) {
+      mesh = applyMirrorSymmetry(mesh, doodleSession.settings.mirrorAxis, { clip: false, mergeThreshold: doodleSession.settings.weldDistance });
+    }
+    updateMeshesWithHistory([...meshes, mesh]);
+    setActiveMeshId(mesh.id);
+    setSelectedMeshIds([mesh.id]);
+    setSelectedVertexIds(result.outlineVertexIds);
+    setSelectedEdgeIds([]);
+    setSelectedFaceIds([]);
+    setToolState((state) => ({ ...state, isDoodleTool: false, editMode: 'vertex', transformMode: 'combined' }));
+    setDoodleSession(null);
+  };
 
   /** Sub-object mode the operators should resolve against. */
   const activeComponentMode: ComponentMode =
@@ -1951,8 +2350,19 @@ export const App: React.FC = () => {
         return;
       }
       loadedTextureRef.current = { meshId: activeMesh.id, dataUrl };
+      const paintedMaterialId = activeMesh.materialId || activeMaterialId;
+      const linkedMaterial = materials.find((material) => material.id === paintedMaterialId);
+      const isUnchangedUvChecker = linkedMaterial?.source === 'uv'
+        && materialTextureDataUrl(linkedMaterial) === dataUrl;
+      if (paintedMaterialId && !isUnchangedUvChecker) {
+        setMaterials((prev) => prev.map((material) => material.id === paintedMaterialId
+          ? { ...material, source: 'painted', textureDataUrl: dataUrl }
+          : material));
+        setActiveMaterialId(paintedMaterialId);
+      }
       updateActiveMesh((prev) => ({
         ...prev,
+        materialId: paintedMaterialId || prev.materialId,
         textureCanvasDataUrl: dataUrl,
         ...(opts?.clearAnimation ? { textureAnimation: undefined } : {}),
       }));
@@ -2025,9 +2435,15 @@ export const App: React.FC = () => {
     return () => { cancelled = true; };
   }, [activeMesh.id, activeMesh.textureCanvasDataUrl, activeWorkspaceMode]);
 
-  const handleDirect3DPaintPixel = (uvU: number, uvV: number, isFinal = false, faceId: string | null = null) => {
+  const handleDirect3DPaintPixel = (
+    uvU: number,
+    uvV: number,
+    isFinal = false,
+    faceId: string | null = null,
+    extras?: { pressure?: number; asEraser?: boolean },
+  ) => {
     const ts = toolStatePaintRef.current;
-    const drawTool = ts.drawTool || 'pencil';
+    const drawTool = extras?.asEraser ? 'eraser' : (ts.drawTool || 'pencil');
     // Select is for picking meshes — never stamp paint.
     if (drawTool === 'select') {
       if (isFinal) paint3dBridge.endStroke();
@@ -2040,63 +2456,23 @@ export const App: React.FC = () => {
       paint3dBridge.endStroke();
       return;
     }
-    // Module singleton — immune to React remounts / history / layers effect cleanup.
+    const pressure = extras?.pressure ?? 1;
     paint3dBridge.paintUv(
       uvU,
       uvV,
       ts.activeColor || '#00d4e2',
-      ts.brushSize || 1,
+      pressureBrushSize(ts.brushSize || 1, pressure),
       studioTool,
-      ts.paintOpacity ?? 1,
+      pressureOpacity(ts.paintOpacity ?? 1, pressure),
       faceId,
     );
-    // GitHub main always flushed after stamp so the Viewport CanvasTexture uploads
-    // even if the host refresh path is briefly unbound mid-workspace switch.
     flushLivePaintPreview();
   };
 
   const handleLoadJSON = (jsonStr: string) => {
     try {
-      const parsed = JSON.parse(jsonStr);
-      if (parsed.mesh && Array.isArray(parsed.mesh.vertices)) {
-        const mesh = finalizeEditableMesh({
-          ...parsed.mesh,
-          edges: parsed.mesh.edges?.length
-            ? parsed.mesh.edges
-            : createEdgesFromFaces(parsed.mesh.faces),
-        });
-        updateMeshesWithHistory([mesh]);
-        setActiveMeshId(mesh.id);
-        setSelectedMeshIds([mesh.id]);
-        return;
-      }
-      if (Array.isArray(parsed.meshes) && parsed.meshes.length) {
-        const next = parsed.meshes
-          .filter((m: CADMesh) => m && Array.isArray(m.vertices) && Array.isArray(m.faces))
-          .map((m: CADMesh) =>
-            finalizeEditableMesh({
-              ...m,
-              edges: m.edges?.length ? m.edges : createEdgesFromFaces(m.faces),
-            }),
-          );
-        if (!next.length) return;
-        updateMeshesWithHistory(next);
-        setActiveMeshId(next[0].id);
-        setSelectedMeshIds(next.map((m: CADMesh) => m.id));
-        return;
-      }
-      if (parsed.polystage_mesh && Array.isArray(parsed.polystage_mesh.vertices)) {
-        const mesh = finalizeEditableMesh({
-          ...parsed.polystage_mesh,
-          id: generateId(),
-          edges: parsed.polystage_mesh.edges?.length
-            ? parsed.polystage_mesh.edges
-            : createEdgesFromFaces(parsed.polystage_mesh.faces),
-        });
-        updateMeshesWithHistory([mesh]);
-        setActiveMeshId(mesh.id);
-        setSelectedMeshIds([mesh.id]);
-      }
+      const { project } = parseProjectDocument(jsonStr);
+      applyLoadedProject(project);
     } catch (err) {
       console.error('Failed to parse project JSON:', err);
     }
@@ -2110,7 +2486,7 @@ export const App: React.FC = () => {
       try {
         const text = await file.text();
         const parsed = JSON.parse(text);
-        if (parsed.mesh || parsed.meshes || parsed.polystage_mesh) {
+        if (parsed.mesh || parsed.meshes || parsed.polystage_mesh || parsed.format === 'polystage-project') {
           handleLoadJSON(text);
           return;
         }
@@ -2269,7 +2645,29 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-[var(--ts-app)] text-[var(--ts-text)] overflow-hidden font-sans select-none app-shell">
+    <div className="flex flex-col h-[100dvh] w-screen bg-[var(--ts-app)] text-[var(--ts-text)] overflow-hidden font-sans select-none app-shell">
+      {recoverAvailable && (
+        <div className="flex items-center gap-2 px-3 py-1 text-[11px] bg-[var(--ts-surface)] border-b border-[var(--ts-border)] text-[var(--ts-text)] shrink-0">
+          <span>Unsaved session found.</span>
+          <button
+            type="button"
+            className="px-2 py-0.5 rounded bg-[var(--ts-accent)] text-black font-semibold"
+            onClick={() => { void handleRecoverSession(); }}
+          >
+            Restore
+          </button>
+          <button
+            type="button"
+            className="px-2 py-0.5 rounded hover:bg-[var(--ts-hover)]"
+            onClick={() => {
+              setRecoverAvailable(false);
+              void clearAutosave();
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       <Header
         toolState={toolState}
         setToolState={setToolState}
@@ -2296,6 +2694,10 @@ export const App: React.FC = () => {
         onNewModel={() => handleSpawnPrimitive('cube')}
         onLoadJSON={handleLoadJSON}
         onOpenFile={handleOpenFile}
+        onSaveProject={handleSaveProject}
+        documentDirty={documentDirty}
+        recoverAvailable={recoverAvailable}
+        onRecoverSession={() => { void handleRecoverSession(); }}
         onToggleSelectAll={handleToggleSelectAll}
         onDeselectAll={handleUnselectAll}
         onExportGLB={handleExportGLB}
@@ -2326,6 +2728,19 @@ export const App: React.FC = () => {
           setIsToolbarOpen(true);
           setIsToolbarFloating((prev) => !prev);
         }}
+        materialControls={activeWorkspaceMode !== 'animation' && activeWorkspaceMode !== 'rigging' ? (
+          <MaterialShelf
+            materials={materials}
+            activeMaterialId={activeMaterialId}
+            workspace={materialWorkspaceLabel}
+            targetLabel={materialTargetLabel}
+            onSelect={setActiveMaterialId}
+            onApply={handleAssignActiveMaterial}
+            onCreate={handleCreateMaterial}
+            onDuplicate={handleDuplicateMaterial}
+            onOpenEditor={() => setActiveRightTab('material')}
+          />
+        ) : null}
       />
 
       <div className="flex-1 flex overflow-hidden relative">
@@ -2357,7 +2772,8 @@ export const App: React.FC = () => {
           }}
           paintWorkspace={activeWorkspaceMode === 'paint'}
           rigWorkspace={activeWorkspaceMode === 'rigging'}
-          onTogglePenTool={() => (toolState.isPenTool ? dropPenTool() : activatePenTool())}
+          onTogglePenTool={() => (toolState.isPenTool ? commitPenTool() : activatePenTool())}
+          onToggleDoodleTool={() => (toolState.isDoodleTool ? confirmDoodleTool() : activateDoodleTool())}
         />
         )}
 
@@ -2402,6 +2818,7 @@ export const App: React.FC = () => {
           ) : toolState.viewportLayout === 'single' && activeWorkspaceMode !== 'blockout' ? (
             <Viewport3D
               meshes={meshes}
+              materials={materials}
               bones={bones}
               setBones={setBones}
               selectedBoneId={selectedBoneId}
@@ -2446,10 +2863,13 @@ export const App: React.FC = () => {
               penSession={penSession}
               setPenSession={setPenSession}
               penBaseMesh={penBaseMeshRef.current}
+              doodleSession={doodleSession}
+              setDoodleSession={setDoodleSession}
             />
           ) : (
             <QuadViewport
               meshes={meshes}
+              materials={materials}
               activeMeshId={activeMeshId}
               setActiveMeshId={setActiveMeshId}
               setMesh={updateActiveMesh}
@@ -2631,7 +3051,7 @@ export const App: React.FC = () => {
           />
         )}
 
-        {!editorSplitOpen && activeWorkspaceMode !== 'animation' && activeWorkspaceMode !== 'blockout' && <aside className="ts-right-panel w-80 bg-[var(--ts-panel)] flex flex-col z-20 panel-surface">
+        {!editorSplitOpen && activeWorkspaceMode !== 'animation' && <aside className="ts-right-panel w-80 bg-[var(--ts-panel)] flex flex-col z-20 panel-surface">
           {activeWorkspaceMode === 'rigging' ? (
             <div className="flex-1 overflow-hidden bg-[var(--ts-panel)]">
               <RiggingPanel
@@ -2660,6 +3080,7 @@ export const App: React.FC = () => {
               className={`flex-1 min-w-0 insp-tab ${activeRightTab === 'outliner' ? 'is-on' : ''}`}
               title="Scene outliner"
             >
+              <BlenderIcon name="outliner" size={13} className="mr-1.5" />
               Tree
             </button>
             <button
@@ -2670,6 +3091,7 @@ export const App: React.FC = () => {
               className={`flex-1 min-w-0 insp-tab ${activeRightTab === 'properties' ? 'is-on' : ''}`}
               title="Properties"
             >
+              <BlenderIcon name="settings" size={13} className="mr-1.5" />
               Props
             </button>
             <button
@@ -2680,6 +3102,7 @@ export const App: React.FC = () => {
               className={`flex-1 min-w-0 insp-tab ${activeRightTab === 'material' ? 'is-on' : ''}`}
               title="Material"
             >
+              <BlenderIcon name="shading" size={13} className="mr-1.5" />
               Mat
             </button>
             <button
@@ -2699,6 +3122,7 @@ export const App: React.FC = () => {
               className={`flex-1 min-w-0 insp-tab ${activeRightTab === 'rig' ? 'is-on' : ''}`}
               title="Rig"
             >
+              <BlenderIcon name="bone" size={13} className="mr-1.5" />
               Rig
             </button>
             <button
@@ -2709,6 +3133,7 @@ export const App: React.FC = () => {
               className={`flex-1 min-w-0 insp-tab ${activeRightTab === 'render' ? 'is-on' : ''}`}
               title="Render and FX"
             >
+              <BlenderIcon name="light" size={13} className="mr-1.5" />
               FX
             </button>
           </div>
@@ -2748,8 +3173,17 @@ export const App: React.FC = () => {
             )}
 
             {activeRightTab === 'properties' && (
-              toolState.isPenTool ? (
-                <PenToolPanel
+              toolState.isDoodleTool ? (
+                <DoodleToolPanel
+                  settings={doodleSettings}
+                  session={doodleSession}
+                  onSettingsChange={updateDoodleSettings}
+                  onConfirm={confirmDoodleTool}
+                  onCancel={cancelDoodleTool}
+                  onClear={clearDoodleStroke}
+                />
+              ) : toolState.isPenTool ? (
+                <MeshSketchPanel
                   settings={penSettings}
                   onSettingsChange={updatePenSettings}
                   session={penSession}
@@ -2757,6 +3191,7 @@ export const App: React.FC = () => {
                   onCurrentOrderChange={setPenCurrentOrder}
                   onPointMove={movePenPoint}
                   onFinish={finishPenPolygon}
+                  onCommit={commitPenTool}
                   onDrop={dropPenTool}
                   onUndo={undoPenPoint}
                 />
@@ -2793,6 +3228,10 @@ export const App: React.FC = () => {
                 setToolState={setToolState}
                 textureCanvas={textureCanvasRef.current}
                 onOpenPaintWorkspace={() => selectWorkspace('paint')}
+                materials={materials}
+                setMaterials={setMaterials}
+                activeMaterialId={activeMaterialId}
+                setActiveMaterialId={setActiveMaterialId}
               />
             )}
 
@@ -2831,7 +3270,7 @@ export const App: React.FC = () => {
       </div>
 
       <footer className="adobe-statusbar select-none justify-between">
-        <div className="flex items-center gap-3 text-[var(--ts-text)]">
+        <div className="sp-status-primary flex items-center gap-3 text-[var(--ts-text)] overflow-hidden">
           <strong className="text-[var(--ts-text-hi)] font-semibold">{activeScene.name}</strong>
           <span className="font-mono text-[11px] text-[var(--ts-text-muted)]">
             {meshes.length} objects
@@ -2862,7 +3301,7 @@ export const App: React.FC = () => {
           </label>
         </div>
 
-        <div className="kbd-hint">
+        <div className="sp-status-context kbd-hint ml-4">
           {activeWorkspaceMode === 'rigging' ? (
             <span>Edit / Pose / Skin · Shift+T tools</span>
           ) : activeWorkspaceMode === 'blockout' ? (

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { isInputFocused } from '../hooks/useGlobalShortcuts';
+import { bindPaintHistory, useHistoryStore } from '../store/useHistoryStore';
 import {
   bindPaint3DHost,
   paint3dBridge,
@@ -88,6 +89,13 @@ import {
 } from '../utils/pixelPaint';
 import { islandUvBoundsForFace } from '../utils/paintStroke';
 import { isStandard2DPanButton } from '../utils/viewportNav';
+import {
+  isPenEraser,
+  isPrimaryAction,
+  paintPressure,
+  pressureBrushSize,
+  shouldIgnorePointer,
+} from '../utils/pointerInput';
 import {
   getPaintPalette,
   PAINT_PALETTES,
@@ -375,6 +383,8 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
   const stageRef = useRef<HTMLDivElement | null>(null);
   const compositeRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef(false);
+  const strokeSizeRef = useRef(1);
+  const forceEraserRef = useRef(false);
   const lastStrokePixelRef = useRef<{ x: number; y: number } | null>(null);
   /** Pixel-Perfect bookkeeping: last drawn pixel and the one still awaiting its successor. */
   const ppCommittedRef = useRef<PixelPoint | null>(null);
@@ -487,7 +497,10 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     redoStack.current = [];
     // Silent on 3D stroke begin — bumpUndoUi mid-down caused React churn that
     // felt like a frozen/looping stroke response.
-    if (!opts?.silent) bumpUndoUi((n) => n + 1);
+    if (!opts?.silent) {
+      bumpUndoUi((n) => n + 1);
+      useHistoryStore.getState().bumpVersion();
+    }
   }, [activeLayerId, layers, ensureLayerCanvas, canvasSize]);
 
   const beginLargeStrokeUndo = useCallback(() => {
@@ -555,6 +568,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     }
     restoreLayerFromImageData(prev);
     bumpUndoUi((n) => n + 1);
+    useHistoryStore.getState().bumpVersion();
   };
 
   const redo = () => {
@@ -576,7 +590,23 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     }
     restoreLayerFromImageData(next);
     bumpUndoUi((n) => n + 1);
+    useHistoryStore.getState().bumpVersion();
   };
+
+  const undoRef = useRef(undo);
+  const redoRef = useRef(redo);
+  undoRef.current = undo;
+  redoRef.current = redo;
+
+  useEffect(() => {
+    bindPaintHistory({
+      undo: () => undoRef.current(),
+      redo: () => redoRef.current(),
+      canUndo: () => undoStack.current.length > 0,
+      canRedo: () => redoStack.current.length > 0,
+    });
+    return () => bindPaintHistory(null);
+  }, []);
 
   const paint = useCallback((opts?: { persist?: boolean }) => {
     // Default: refresh display + live canvas ref only.
@@ -1023,12 +1053,10 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
         const drawTool = next === 'rect' ? 'rectangle' : next;
         setToolState((s) => ({ ...s, drawTool: drawTool as ToolState['drawTool'], brushSize }));
       };
-      if (e.ctrlKey && k === 'z') {
-        e.preventDefault();
-        undo();
-      } else if (e.ctrlKey && k === 'y') {
-        e.preventDefault();
-        redo();
+      if ((e.ctrlKey || e.metaKey) && k === 'z') {
+        return;
+      } else if ((e.ctrlKey || e.metaKey) && k === 'y') {
+        return;
       } else if (k === 'b') select('pencil');
       else if (k === 'e') select('eraser');
       else if (k === 'g') {
@@ -1114,7 +1142,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     return ensureLayerCanvas(layer.id);
   };
 
-  const toPixel = (e: React.PointerEvent): { x: number; y: number } | null => {
+  const toPixel = (e: { clientX: number; clientY: number }): { x: number; y: number } | null => {
     const display = displayRef.current;
     if (!display) return null;
     const rect = display.getBoundingClientRect();
@@ -1134,9 +1162,10 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     dither = false
   ) => {
     const color = toolState.activeColor || '#00b4c4';
-    const half = Math.floor(brushSize / 2);
-    for (let by = 0; by < brushSize; by++) {
-      for (let bx = 0; bx < brushSize; bx++) {
+    const size = Math.max(1, strokeSizeRef.current || brushSize);
+    const half = Math.floor(size / 2);
+    for (let by = 0; by < size; by++) {
+      for (let bx = 0; bx < size; bx++) {
         const x = px - half + bx;
         const y = py - half + by;
         if (x < 0 || y < 0 || x >= canvasSize || y >= canvasSize) continue;
@@ -1285,7 +1314,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       paint();
       return;
     }
-    if (tool === 'eraser') {
+    if (tool === 'eraser' || forceEraserRef.current) {
       plotBrush(ctx, px, py, true);
       paint();
       return;
@@ -1364,17 +1393,20 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
+    if (shouldIgnorePointer(e)) return;
     // Hand tool, Space-hold, RMB, MMB, or Alt+LMB — pan the 2D view
     const wantPan =
       tool === 'hand'
       || spacePanRef.current
       || isStandard2DPanButton(e.button)
-      || (e.button === 0 && e.altKey);
+      || (isPrimaryAction(e) && e.altKey);
     if (wantPan) {
       beginPan(e, e.currentTarget as HTMLElement);
       return;
     }
-    if (e.button !== 0) return;
+    if (!isPrimaryAction(e) && !isPenEraser(e)) return;
+    forceEraserRef.current = isPenEraser(e);
+    strokeSizeRef.current = pressureBrushSize(brushSize, paintPressure(e));
     const coords = toPixel(e);
     if (!coords) return;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -1444,6 +1476,10 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
+    if (shouldIgnorePointer(e) && !drawingRef.current && !panDragRef.current) return;
+    if (drawingRef.current) {
+      strokeSizeRef.current = pressureBrushSize(brushSize, paintPressure(e));
+    }
     if (panDragRef.current) {
       const d = panDragRef.current;
       setPan({
@@ -1626,6 +1662,8 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     const wasDrawing = drawingRef.current;
     if (wasDrawing) flushStrokePixels();
     drawingRef.current = false;
+    forceEraserRef.current = false;
+    strokeSizeRef.current = brushSize;
     lastStrokePixelRef.current = null;
     shapeStartRef.current = null;
     snapshotBeforeStrokeRef.current = null;
@@ -2404,7 +2442,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                 width={canvasSize}
                 height={canvasSize}
                 className="w-full h-full cursor-none"
-                style={{ imageRendering: 'pixelated' }}
+                style={{ imageRendering: 'pixelated', touchAction: 'none' }}
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
