@@ -47,6 +47,8 @@ export interface MeshTopologyIndex {
   facesByEdgeKey: Map<string, Face[]>;
 }
 
+const topologyIndexCache = new WeakMap<CADMesh, MeshTopologyIndex>();
+
 function pushTo<K, V>(map: Map<K, V[]>, key: K, value: V) {
   const list = map.get(key);
   if (list) list.push(value);
@@ -65,6 +67,9 @@ function forEachFaceEdge(face: Face, visit: (a: string, b: string) => void) {
 }
 
 export function buildTopologyIndex(mesh: CADMesh): MeshTopologyIndex {
+  const cached = topologyIndexCache.get(mesh);
+  if (cached) return cached;
+
   const edgeById = new Map<string, Edge>();
   const edgeByKey = new Map<string, Edge>();
   const edgesByVertex = new Map<string, Edge[]>();
@@ -86,7 +91,9 @@ export function buildTopologyIndex(mesh: CADMesh): MeshTopologyIndex {
     forEachFaceEdge(face, (a, b) => pushTo(facesByEdgeKey, edgeKey(a, b), face));
   });
 
-  return { edgeById, faceById, edgeByKey, edgesByVertex, facesByVertex, facesByEdgeKey };
+  const index = { edgeById, faceById, edgeByKey, edgesByVertex, facesByVertex, facesByEdgeKey };
+  topologyIndexCache.set(mesh, index);
+  return index;
 }
 
 /** Preserve mesh ordering while removing duplicates. */

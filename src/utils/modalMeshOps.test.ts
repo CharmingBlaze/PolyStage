@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { generatePrimitive } from './meshUtils';
-import { beginExtrude, beginInset, beginBevel, applyModalAmount } from './modalMeshOps';
+import { beginExtrude, beginInset, beginBevel, beginModalMeshOp, applyModalAmount, applyModalOffset } from './modalMeshOps';
 
 describe('modal mesh sessions (Blender-style)', () => {
   it('extrude builds once then only moves verts', () => {
@@ -39,6 +39,43 @@ describe('modal mesh sessions (Blender-style)', () => {
     expect(session).toBeTruthy();
     const a = applyModalAmount(session!, 0.1);
     expect(a.mesh.faces.length).toBeGreaterThan(cube.faces.length);
+  });
+
+  it('dispatches E by edit mode, not implied faces', () => {
+    const cube = generatePrimitive('cube');
+    const face = cube.faces[0];
+    const faceEdges = cube.edges.filter((e) => {
+      const n = face.vertexIds.length;
+      for (let i = 0; i < n; i++) {
+        const a = face.vertexIds[i];
+        const b = face.vertexIds[(i + 1) % n];
+        if ((e.v1Id === a && e.v2Id === b) || (e.v1Id === b && e.v2Id === a)) return true;
+      }
+      return false;
+    }).map((e) => e.id);
+
+    const region = beginModalMeshOp('extrude', cube, [face.id], [], 1, [], 'face');
+    expect(region?.grab).toBe('axis');
+    expect(region?.resultFaceIds.length).toBe(1);
+
+    const strip = beginModalMeshOp('extrude', cube, [face.id], faceEdges, 1, face.vertexIds, 'edge');
+    expect(strip?.grab).toBe('view');
+    expect(strip!.mesh.faces.length).toBe(cube.faces.length + faceEdges.length);
+
+    const verts = beginModalMeshOp('extrude', cube, [face.id], faceEdges, 1, face.vertexIds, 'vertex');
+    expect(verts?.grab).toBe('view');
+    expect(verts!.mesh.faces.length).toBe(cube.faces.length);
+    expect(verts!.resultVertexIds?.length).toBe(face.vertexIds.length);
+  });
+
+  it('view-plane offset moves extruded verts uniformly', () => {
+    const cube = generatePrimitive('cube');
+    const edgeId = cube.edges[0].id;
+    const session = beginModalMeshOp('extrude', cube, [], [edgeId], 1, [], 'edge');
+    expect(session).toBeTruthy();
+    const moved = applyModalOffset(session!, 0, 0.4, 0);
+    const tops = moved.movers.map((m) => moved.mesh.vertices.find((v) => v.id === m.id)!);
+    expect(tops.every((v) => Math.abs(v.y - (moved.movers[0].oy + 0.4)) < 1e-6)).toBe(true);
   });
 
   it('face bevel resolves to edge chamfer (not inset)', () => {

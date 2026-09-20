@@ -642,7 +642,7 @@ export function addSequenceMarker(
   seq: CutsceneSequence,
   time: number,
   name?: string,
-  color = '#e68619',
+  color = '#00b4c4',
 ): CutsceneSequence {
   const marker: SequenceMarker = {
     id: id('smark'),
@@ -700,9 +700,9 @@ export function snapSeqTime(t: number, fps: number, snap: boolean): number {
 }
 
 export const SEQ_CLIP_COLORS: Record<string, string> = {
-  animClip: '#ed7300',
+  animClip: '#00b4c4',
   audio: '#2d9d78',
-  particle: '#e68619',
+  particle: '#00b4c4',
   weather: '#6a9fd8',
   cameraShot: '#9b59b6',
   lightCue: '#f1c40f',

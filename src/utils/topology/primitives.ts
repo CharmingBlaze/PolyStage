@@ -707,6 +707,211 @@ export function createChestMesh(sx = 1, sy = 1, sz = 1): CADMesh {
   return { ...m, name: 'Default Box', position: { x: 0, y: (sy * 0.75) / 2, z: 0 } };
 }
 
+export function createWallMesh(sx = 1, sy = 1, sz = 1): CADMesh {
+  return { ...createBoxMesh(sx, sy, sz), name: 'Wall Primitive' };
+}
+
+export function createWindowMesh(sx = 1, sy = 1, sz = 1): CADMesh {
+  const hx = sx / 2;
+  const hy = sy / 2;
+  const hz = sz / 2;
+  const ix = hx * 0.55;
+  const iy = hy * 0.5;
+  const verts = [
+    v(-hx, -hy, -hz), v(hx, -hy, -hz), v(hx, hy, -hz), v(-hx, hy, -hz),
+    v(-ix, -iy, -hz), v(ix, -iy, -hz), v(ix, iy, -hz), v(-ix, iy, -hz),
+    v(-hx, -hy, hz), v(hx, -hy, hz), v(hx, hy, hz), v(-hx, hy, hz),
+    v(-ix, -iy, hz), v(ix, -iy, hz), v(ix, iy, hz), v(-ix, iy, hz),
+  ];
+  const id = verts.map((vert) => vert.id);
+  const faces = [
+    face([id[0], id[1], id[5], id[4]]),
+    face([id[1], id[2], id[6], id[5]]),
+    face([id[2], id[3], id[7], id[6]]),
+    face([id[3], id[0], id[4], id[7]]),
+    face([id[8], id[12], id[13], id[9]]),
+    face([id[9], id[13], id[14], id[10]]),
+    face([id[10], id[14], id[15], id[11]]),
+    face([id[11], id[15], id[12], id[8]]),
+    face([id[0], id[8], id[9], id[1]]),
+    face([id[1], id[9], id[10], id[2]]),
+    face([id[2], id[10], id[11], id[3]]),
+    face([id[3], id[11], id[8], id[0]]),
+    face([id[4], id[5], id[13], id[12]]),
+    face([id[5], id[6], id[14], id[13]]),
+    face([id[6], id[7], id[15], id[14]]),
+    face([id[7], id[4], id[12], id[15]]),
+  ];
+  return meshFrom('Window Primitive', verts, faces, { x: 0, y: hy, z: 0 });
+}
+
+export function createLadderMesh(sx = 1, sy = 1, sz = 1): CADMesh {
+  const hx = sx / 2;
+  const hy = sy / 2;
+  const hz = Math.max(sx * 0.06, sz / 2);
+  const rail = Math.max(sx * 0.06, 0.03);
+  const rungs = Math.max(3, Math.round(sy / Math.max(0.18, sy / 8)));
+  const verts: Vertex[] = [];
+  const faces: Face[] = [];
+  const box = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number) => {
+    const a = verts.length;
+    verts.push(
+      v(x0, y0, z0), v(x1, y0, z0), v(x1, y1, z0), v(x0, y1, z0),
+      v(x0, y0, z1), v(x1, y0, z1), v(x1, y1, z1), v(x0, y1, z1),
+    );
+    const i = (n: number) => verts[a + n].id;
+    faces.push(
+      face([i(0), i(1), i(2), i(3)]),
+      face([i(5), i(4), i(7), i(6)]),
+      face([i(4), i(0), i(3), i(7)]),
+      face([i(1), i(5), i(6), i(2)]),
+      face([i(3), i(2), i(6), i(7)]),
+      face([i(4), i(5), i(1), i(0)]),
+    );
+  };
+  box(-hx, -hy, -hz, -hx + rail, hy, hz);
+  box(hx - rail, -hy, -hz, hx, hy, hz);
+  for (let i = 0; i < rungs; i++) {
+    const t = (i + 0.5) / rungs;
+    const y = -hy + t * sy;
+    const rh = Math.min(rail * 0.7, sy * 0.04);
+    box(-hx + rail, y - rh, -hz * 0.7, hx - rail, y + rh, hz * 0.7);
+  }
+  return meshFrom('Ladder Primitive', verts, faces, { x: 0, y: hy, z: 0 });
+}
+
+export function createStairsMesh(sx = 1, sy = 1, sz = 1): CADMesh {
+  const steps = Math.max(2, Math.min(12, Math.round(Math.max(3, sy / 0.2))));
+  const hx = sx / 2;
+  const hy = sy / 2;
+  const hz = sz / 2;
+  const verts: Vertex[] = [];
+  const faces: Face[] = [];
+  const box = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number) => {
+    const a = verts.length;
+    verts.push(
+      v(x0, y0, z0), v(x1, y0, z0), v(x1, y1, z0), v(x0, y1, z0),
+      v(x0, y0, z1), v(x1, y0, z1), v(x1, y1, z1), v(x0, y1, z1),
+    );
+    const i = (n: number) => verts[a + n].id;
+    faces.push(
+      face([i(0), i(1), i(2), i(3)]),
+      face([i(5), i(4), i(7), i(6)]),
+      face([i(4), i(0), i(3), i(7)]),
+      face([i(1), i(5), i(6), i(2)]),
+      face([i(3), i(2), i(6), i(7)]),
+      face([i(4), i(5), i(1), i(0)]),
+    );
+  };
+  for (let i = 0; i < steps; i++) {
+    const y0 = -hy;
+    const y1 = -hy + ((i + 1) / steps) * sy;
+    const z0 = hz - (i / steps) * sz;
+    const z1 = hz - ((i + 1) / steps) * sz;
+    box(-hx, y0, z1, hx, y1, z0);
+  }
+  return meshFrom('Stairs Primitive', verts, faces, { x: 0, y: hy, z: 0 });
+}
+
+export function createRoofMesh(sx = 1, sy = 1, sz = 1): CADMesh {
+  const hx = sx / 2;
+  const hy = sy / 2;
+  const hz = sz / 2;
+  const ridge = v(0, hy, 0);
+  const e0 = v(-hx, -hy, -hz);
+  const e1 = v(hx, -hy, -hz);
+  const e2 = v(hx, -hy, hz);
+  const e3 = v(-hx, -hy, hz);
+  const faces = [
+    face([e0.id, e1.id, ridge.id]),
+    face([e2.id, e3.id, ridge.id]),
+    face([e1.id, e2.id, ridge.id]),
+    face([e3.id, e0.id, ridge.id]),
+    face([e0.id, e3.id, e2.id, e1.id]),
+  ];
+  return meshFrom('Roof Primitive', [ridge, e0, e1, e2, e3], faces, { x: 0, y: hy, z: 0 });
+}
+
+export function createArchMesh(sx = 1, sy = 1, sz = 1, segments = 8): CADMesh {
+  const n = Math.max(4, Math.floor(segments));
+  const hx = sx / 2;
+  const hy = sy / 2;
+  const hz = sz / 2;
+  const inner = hx * 0.55;
+  const spring = -hy + sy * 0.35;
+  const outer: Vertex[] = [];
+  const inn: Vertex[] = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const a = Math.PI * t;
+    outer.push(v(-hx * Math.cos(a), spring + (hy - spring) * Math.sin(a), 0));
+    inn.push(v(-inner * Math.cos(a), spring + (hy - spring) * Math.max(0, Math.sin(a) - 0.08), 0));
+  }
+  const feet = [v(-hx, -hy, 0), v(-inner, -hy, 0), v(inner, -hy, 0), v(hx, -hy, 0)];
+  const front: Vertex[] = [];
+  const back: Vertex[] = [];
+  const pushPair = (p: Vertex) => {
+    front.push(v(p.x, p.y, -hz));
+    back.push(v(p.x, p.y, hz));
+  };
+  pushPair(feet[0]);
+  outer.forEach(pushPair);
+  pushPair(feet[3]);
+  pushPair(feet[1]);
+  inn.forEach(pushPair);
+  pushPair(feet[2]);
+  const verts = [...front, ...back];
+  const faces: Face[] = [];
+  const f = (i: number) => front[i].id;
+  const b = (i: number) => back[i].id;
+  const half = front.length / 2;
+  for (let i = 0; i < half - 1; i++) {
+    const o0 = i;
+    const o1 = i + 1;
+    const i0 = i + half;
+    const i1 = i + 1 + half;
+    faces.push(face([f(o0), f(o1), f(i1), f(i0)]));
+    faces.push(face([b(o1), b(o0), b(i0), b(i1)]));
+    faces.push(face([f(o0), b(o0), b(o1), f(o1)]));
+    faces.push(face([f(i1), b(i1), b(i0), f(i0)]));
+  }
+  return meshFrom('Arch Primitive', verts, faces, { x: 0, y: hy, z: 0 });
+}
+
+export function createTorusFromBox(sx = 1, sy = 1, sz = 1): CADMesh {
+  const r = Math.max(0.02, Math.min(sy, Math.min(sx, sz)) * 0.25);
+  const R = Math.max(r * 1.05, Math.min(sx, sz) / 2 - r);
+  const tub = 8;
+  const rad = 6;
+  const grid: Vertex[][] = [];
+  for (let i = 0; i < tub; i++) {
+    const row: Vertex[] = [];
+    const u = (i / tub) * Math.PI * 2;
+    for (let j = 0; j < rad; j++) {
+      const vAng = (j / rad) * Math.PI * 2;
+      row.push(v(
+        (R + r * Math.cos(vAng)) * Math.cos(u),
+        r * Math.sin(vAng),
+        (R + r * Math.cos(vAng)) * Math.sin(u),
+      ));
+    }
+    grid.push(row);
+  }
+  const faces: Face[] = [];
+  for (let i = 0; i < tub; i++) {
+    const i2 = (i + 1) % tub;
+    for (let j = 0; j < rad; j++) {
+      const j2 = (j + 1) % rad;
+      const a = grid[i][j];
+      const b = grid[i2][j];
+      const c = grid[i2][j2];
+      const d = grid[i][j2];
+      faces.push(face([a.id, b.id, c.id, d.id]));
+    }
+  }
+  return meshFrom('Torus Primitive', grid.flat(), faces, { x: 0, y: r, z: 0 });
+}
+
 export function createPrimitiveMesh(type: PrimitiveType, customSize?: Vector3D): CADMesh {
   const sx = customSize?.x || 1;
   const sy = customSize?.y || 1;
@@ -729,7 +934,7 @@ export function createPrimitiveMesh(type: PrimitiveType, customSize?: Vector3D):
     case 'sphere':
       return createUVSphereMesh(sx, 8, 6);
     case 'torus':
-      return createTorusMesh(sx, 8, 6);
+      return createTorusFromBox(sx, sy, sz);
     case 'torusKnot':
       return createTorusKnotMesh(sx, 48, 6);
     case 'tetrahedron':
@@ -748,6 +953,18 @@ export function createPrimitiveMesh(type: PrimitiveType, customSize?: Vector3D):
       return createTubeMesh(sx, sy, 8);
     case 'lathe':
       return createCylinderMesh(sx * 0.6, sy, 12);
+    case 'wall':
+      return createWallMesh(sx, sy, sz);
+    case 'window':
+      return createWindowMesh(sx, sy, sz);
+    case 'ladder':
+      return createLadderMesh(sx, sy, sz);
+    case 'stairs':
+      return createStairsMesh(sx, sy, sz);
+    case 'arch':
+      return createArchMesh(sx, sy, sz);
+    case 'roof':
+      return createRoofMesh(sx, sy, sz);
     case 'tree':
     case 'car':
     default:

@@ -155,8 +155,8 @@ export const FloatingOutliner: React.FC<FloatingOutlinerProps> = ({
       >
         <span className="sp-outliner__accent" aria-hidden />
         <div className="min-w-0 flex-1 flex items-center gap-1.5 px-1">
-          <GripHorizontal className="w-3.5 h-3.5 text-[#8b909a] shrink-0" />
-          <Layers className="w-3.5 h-3.5 text-[#ed7300] shrink-0" />
+          <GripHorizontal className="w-3.5 h-3.5 text-[#6e7584] shrink-0" />
+          <Layers className="w-3.5 h-3.5 text-[#00b4c4] shrink-0" />
           <div className="min-w-0">
             <div className="sp-outliner__title">Outliner</div>
             <div className="sp-outliner__sub truncate">{activeName}</div>
@@ -188,7 +188,7 @@ export const FloatingOutliner: React.FC<FloatingOutlinerProps> = ({
             {meshes.length} mesh{meshes.length === 1 ? '' : 'es'} · {bones.length} bone
             {bones.length === 1 ? '' : 's'}
           </span>
-          <span className="text-[#ed7300] truncate max-w-[140px]">{activeName}</span>
+          <span className="text-[#00b4c4] truncate max-w-[140px]">{activeName}</span>
         </div>
       ) : (
         <div className="sp-outliner__body custom-scrollbar">

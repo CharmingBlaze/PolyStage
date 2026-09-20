@@ -1,0 +1,3 @@
+These SVG files are copied from Blender 4.4 (release/datafiles/icons_svg).
+Copyright Blender Foundation. Licensed under GNU GPL version 2 or later.
+https://projects.blender.org/blender/blender

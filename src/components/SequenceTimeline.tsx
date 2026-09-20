@@ -204,11 +204,11 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
       <div
         key={track.id}
         data-seq-track={track.id}
-        className={`h-9 relative border-b border-[#1a1f2a] ${track.muted ? 'bg-[#0a0c10] opacity-60' : 'bg-[#0c1018]'} ${selectedTrackId === track.id ? 'ring-1 ring-inset ring-[#ed7300]/30' : ''}`}
+        className={`h-9 relative border-b border-[#1a1f2a] ${track.muted ? 'bg-[#0a0c10] opacity-60' : 'bg-[#0c1018]'} ${selectedTrackId === track.id ? 'ring-1 ring-inset ring-[#00b4c4]/30' : ''}`}
         onClick={() => setSelectedTrackId(track.id)}
       >
         {track.clips.map((clip) => {
-          const color = clip.color || SEQ_CLIP_COLORS[clip.source.type] || '#ed7300';
+          const color = clip.color || SEQ_CLIP_COLORS[clip.source.type] || '#00b4c4';
           const selectedCls = selectedClipId === clip.id ? 'ring-1 ring-white z-20' : 'z-10';
           const hasXfade = clip.transition && clip.transition !== 'cut' && (clip.transitionDuration || 0) > 0;
           return (
@@ -246,14 +246,14 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
           onPointerDown={startScrub}
           style={{ zIndex: 0 }}
         />
-        {isSub && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-[#ed7300]/35 pointer-events-none" />}
+        {isSub && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-[#00b4c4]/35 pointer-events-none" />}
       </div>
     );
   };
 
   return (
     <div className="flex-1 min-h-0 flex flex-col bg-[#080a0f]">
-      <div className="h-8 shrink-0 px-2 border-b border-[#101114] flex items-center gap-1.5 text-[9px] font-mono overflow-x-auto">
+      <div className="h-8 shrink-0 px-2 border-b border-[#1a1c22] flex items-center gap-1.5 text-[9px] font-mono overflow-x-auto">
         <span className="text-[#6a9fd8] font-bold truncate max-w-[100px]">{sequence.name}</span>
 
         <LengthField
@@ -267,18 +267,18 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
         <div className="relative">
           <button
             type="button"
-            className="h-6 px-1.5 rounded border border-[#101114] text-[#b0b0b0] hover:text-white flex items-center gap-1"
+            className="h-6 px-1.5 rounded border border-[#1a1c22] text-[#b0b0b0] hover:text-white flex items-center gap-1"
             onClick={() => setAddMenuOpen((v) => !v)}
           >
             <Plus className="w-3 h-3" /> Track
           </button>
           {addMenuOpen && (
-            <div className="absolute left-0 top-full mt-1 z-50 min-w-[140px] py-1 rounded border border-[#3b3f46] bg-[#202226] shadow-xl">
+            <div className="absolute left-0 top-full mt-1 z-50 min-w-[140px] py-1 rounded border border-[#3a3f4a] bg-[#202226] shadow-xl">
               {KIND_OPTIONS.map((kind) => (
                 <button
                   key={kind}
                   type="button"
-                  className="w-full text-left px-3 py-1.5 hover:bg-[#3b3f46] text-[10px]"
+                  className="w-full text-left px-3 py-1.5 hover:bg-[#3a3f4a] text-[10px]"
                   onClick={() => {
                     onChangeSequence(addSequenceTrack(sequence, kind));
                     setAddMenuOpen(false);
@@ -294,7 +294,7 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
         {selectedTrackId && (
           <button
             type="button"
-            className="h-6 px-1.5 rounded border border-[#ed7300]/40 text-[#6a9fd8] flex items-center gap-1"
+            className="h-6 px-1.5 rounded border border-[#00b4c4]/40 text-[#6a9fd8] flex items-center gap-1"
             title="Add sub-track under selected"
             onClick={() => {
               const parent = sequence.tracks.find((t) => t.id === selectedTrackId);
@@ -311,7 +311,7 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
 
         <button
           type="button"
-          className="h-6 px-1.5 rounded border border-[#e68619]/50 text-[#e68619] flex items-center gap-1"
+          className="h-6 px-1.5 rounded border border-[#00b4c4]/50 text-[#00b4c4] flex items-center gap-1"
           title="Add marker at playhead"
           onClick={() => onChangeSequence(addSequenceMarker(sequence, currentTime))}
         >
@@ -320,7 +320,7 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
 
         <button
           type="button"
-          className={`h-6 px-1.5 rounded border text-[9px] ${showInspector ? 'border-[#ed7300] bg-[#ed7300]/15 text-white' : 'border-[#101114] text-[#7e838c]'}`}
+          className={`h-6 px-1.5 rounded border text-[9px] ${showInspector ? 'border-[#00b4c4] bg-[#00b4c4]/15 text-white' : 'border-[#1a1c22] text-[#7e838c]'}`}
           onClick={() => setShowInspector((v) => !v)}
         >
           Inspector
@@ -335,7 +335,7 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
                 type="number"
                 min={0.1}
                 step={0.1}
-                className="w-14 h-5 px-1 rounded bg-[#2e3136] border border-[#101114] text-right text-[10px] outline-none focus:border-[#ed7300]"
+                className="w-14 h-5 px-1 rounded bg-[#282c35] border border-[#1a1c22] text-right text-[10px] outline-none focus:border-[#00b4c4]"
                 value={Number(selected.duration.toFixed(2))}
                 onChange={(e) => setClipDuration(selected.id, Number(e.target.value))}
               />
@@ -343,7 +343,7 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
             </label>
             <button
               type="button"
-              className="h-6 px-1.5 rounded border border-[#101114] text-[#b0b0b0] hover:text-white flex items-center gap-1"
+              className="h-6 px-1.5 rounded border border-[#1a1c22] text-[#b0b0b0] hover:text-white flex items-center gap-1"
               title="Split at playhead"
               onClick={() => onChangeSequence(splitClip(sequence, selected.id, currentTime))}
             >
@@ -351,7 +351,7 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
             </button>
             <button
               type="button"
-              className="h-6 px-1.5 rounded border border-[#101114] text-[#b0b0b0] hover:text-white flex items-center gap-1"
+              className="h-6 px-1.5 rounded border border-[#1a1c22] text-[#b0b0b0] hover:text-white flex items-center gap-1"
               title="Duplicate after clip"
               onClick={() => onChangeSequence(duplicateClip(sequence, selected.id))}
             >
@@ -359,7 +359,7 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
             </button>
             <button
               type="button"
-              className="h-6 px-1.5 rounded border border-[#101114] text-[#b0b0b0] hover:text-white flex items-center gap-1"
+              className="h-6 px-1.5 rounded border border-[#1a1c22] text-[#b0b0b0] hover:text-white flex items-center gap-1"
               onClick={() => onChangeSequence(patchSequenceClip(sequence, selected.id, { muted: !selected.muted }))}
             >
               {selected.muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />} Mute
@@ -391,8 +391,8 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
       </div>
 
       <div className="flex-1 min-h-0 flex">
-        <div className="w-40 shrink-0 border-r border-[#101114] bg-[#2e3136] flex flex-col">
-          <div className="h-7 border-b border-[#101114] text-[8px] uppercase tracking-wider text-[#51565f] flex items-center justify-between px-2 shrink-0">
+        <div className="w-40 shrink-0 border-r border-[#1a1c22] bg-[#282c35] flex flex-col">
+          <div className="h-7 border-b border-[#1a1c22] text-[8px] uppercase tracking-wider text-[#51565f] flex items-center justify-between px-2 shrink-0">
             <span>Tracks</span>
             <span className="text-[#383c42] normal-case">{visibleTracks.length}</span>
           </div>
@@ -410,7 +410,7 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
               return (
                 <div
                   key={t.id}
-                  className={`h-9 px-1 border-b border-[#101114] flex items-center gap-0.5 group ${rowSelected ? 'bg-[#ed7300]/12' : 'hover:bg-[#101114]'}`}
+                  className={`h-9 px-1 border-b border-[#1a1c22] flex items-center gap-0.5 group ${rowSelected ? 'bg-[#00b4c4]/12' : 'hover:bg-[#1a1c22]'}`}
                   style={{ paddingLeft: isSub ? 10 : 4 }}
                   onClick={() => setSelectedTrackId(t.id)}
                 >
@@ -432,7 +432,7 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
                   {editingNameId === t.id ? (
                     <input
                       autoFocus
-                      className="flex-1 min-w-0 h-5 px-1 rounded bg-[#0a0a0a] border border-[#ed7300] text-[10px] outline-none"
+                      className="flex-1 min-w-0 h-5 px-1 rounded bg-[#0a0a0a] border border-[#00b4c4] text-[10px] outline-none"
                       defaultValue={t.name}
                       onBlur={(e) => {
                         onChangeSequence(patchSequenceTrack(sequence, t.id, { name: e.target.value || t.name }));
@@ -461,7 +461,7 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
                   <div className="flex items-center opacity-0 group-hover:opacity-100 focus-within:opacity-100">
                     <button
                       type="button"
-                      className={`px-0.5 text-[8px] font-bold ${t.solo ? 'text-[#e68619]' : 'text-[#464b53] hover:text-[#e68619]'}`}
+                      className={`px-0.5 text-[8px] font-bold ${t.solo ? 'text-[#00b4c4]' : 'text-[#464b53] hover:text-[#00b4c4]'}`}
                       title="Solo"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -505,7 +505,7 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
                     </button>
                     <button
                       type="button"
-                      className={`p-0.5 ${t.locked ? 'text-[#e68619]' : 'text-[#464b53] hover:text-white'}`}
+                      className={`p-0.5 ${t.locked ? 'text-[#00b4c4]' : 'text-[#464b53] hover:text-white'}`}
                       title="Lock track"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -543,12 +543,12 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
         >
           <div style={{ width }} className="min-h-full relative">
             <div
-              className="h-7 sticky top-0 z-20 bg-[#212327] border-b border-[#101114] relative cursor-ew-resize"
+              className="h-7 sticky top-0 z-20 bg-[#21242c] border-b border-[#1a1c22] relative cursor-ew-resize"
               onPointerDown={startScrub}
             >
               {Array.from({ length: Math.floor(viewDuration) + 1 }).map((_, i) => (
                 <div key={i} style={{ left: i * pxPerSec }} className="absolute top-0 bottom-0 flex flex-col items-center pointer-events-none">
-                  <div className={`w-px h-3 ${i === Math.round(sequence.duration) ? 'bg-[#e68619]' : 'bg-[#ed7300]'}`} />
+                  <div className={`w-px h-3 ${i === Math.round(sequence.duration) ? 'bg-[#00b4c4]' : 'bg-[#00b4c4]'}`} />
                   <span className="text-[8px] text-[#6a9fd8]">{i}s</span>
                 </div>
               ))}
@@ -557,7 +557,7 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
                 <button
                   key={m.id}
                   type="button"
-                  style={{ left: m.time * pxPerSec, borderColor: m.color || '#e68619' }}
+                  style={{ left: m.time * pxPerSec, borderColor: m.color || '#00b4c4' }}
                   className="absolute top-0 bottom-0 w-0 z-30 -translate-x-1/2 border-l border-dashed"
                   title={`${m.name} @ ${m.time.toFixed(2)}s — click jump · dbl-click rename · Alt+click delete`}
                   onPointerDown={(e) => {
@@ -576,7 +576,7 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
                 >
                   <span
                     className="absolute top-0 left-1/2 -translate-x-1/2 text-[7px] px-0.5 rounded whitespace-nowrap"
-                    style={{ background: m.color || '#e68619', color: '#111' }}
+                    style={{ background: m.color || '#00b4c4', color: '#111' }}
                   >
                     {m.name}
                   </span>
@@ -585,11 +585,11 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
 
               <div
                 style={{ left: sequence.duration * pxPerSec }}
-                className="absolute top-0 bottom-0 w-1 bg-[#e68619] z-40 cursor-ew-resize"
+                className="absolute top-0 bottom-0 w-1 bg-[#00b4c4] z-40 cursor-ew-resize"
                 title="Drag to change sequence length"
                 onPointerDown={startResizeDuration}
               >
-                <div className="absolute -top-0.5 left-1/2 -translate-x-1/2 w-3 h-3 rounded-sm bg-[#e68619] rotate-45" />
+                <div className="absolute -top-0.5 left-1/2 -translate-x-1/2 w-3 h-3 rounded-sm bg-[#00b4c4] rotate-45" />
               </div>
 
               <div
@@ -607,7 +607,7 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
               />
               <div
                 style={{ left: sequence.duration * pxPerSec }}
-                className="absolute top-0 bottom-0 w-px bg-[#e68619]/40 z-20 pointer-events-none"
+                className="absolute top-0 bottom-0 w-px bg-[#00b4c4]/40 z-20 pointer-events-none"
               />
               {visibleTracks.map(renderTrack)}
             </div>
@@ -615,8 +615,8 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
         </div>
 
         {showInspector && (
-          <div className="w-52 shrink-0 border-l border-[#101114] bg-[#0e1218] flex flex-col text-[9px] font-mono overflow-y-auto custom-scrollbar">
-            <div className="h-7 px-2 border-b border-[#101114] flex items-center text-[8px] uppercase tracking-wider text-[#51565f]">
+          <div className="w-52 shrink-0 border-l border-[#1a1c22] bg-[#0e1218] flex flex-col text-[9px] font-mono overflow-y-auto custom-scrollbar">
+            <div className="h-7 px-2 border-b border-[#1a1c22] flex items-center text-[8px] uppercase tracking-wider text-[#51565f]">
               Clip inspector
             </div>
             {!selected ? (
@@ -628,7 +628,7 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
                 <label className="block space-y-0.5">
                   <span className="text-[#51565f]">Name</span>
                   <input
-                    className="w-full h-6 px-1 rounded bg-[#2e3136] border border-[#101114] text-[#ddd] outline-none focus:border-[#ed7300]"
+                    className="w-full h-6 px-1 rounded bg-[#282c35] border border-[#1a1c22] text-[#ddd] outline-none focus:border-[#00b4c4]"
                     value={selected.name}
                     onChange={(e) => onChangeSequence(patchSequenceClip(sequence, selected.id, { name: e.target.value }))}
                   />
@@ -639,7 +639,7 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
                   <label className="block space-y-0.5">
                     <span className="text-[#51565f]">Text</span>
                     <textarea
-                      className="w-full h-16 px-1 py-0.5 rounded bg-[#2e3136] border border-[#101114] text-[#ddd] outline-none focus:border-[#ed7300] resize-none"
+                      className="w-full h-16 px-1 py-0.5 rounded bg-[#282c35] border border-[#1a1c22] text-[#ddd] outline-none focus:border-[#00b4c4] resize-none"
                       value={selected.source.refId}
                       onChange={(e) => onChangeSequence(patchSequenceClip(sequence, selected.id, {
                         source: { ...selected.source, refId: e.target.value },
@@ -654,7 +654,7 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
                     <label className="block space-y-0.5">
                       <span className="text-[#51565f]">Transition</span>
                       <select
-                        className="w-full h-6 px-1 rounded bg-[#2e3136] border border-[#101114] text-[#ddd]"
+                        className="w-full h-6 px-1 rounded bg-[#282c35] border border-[#1a1c22] text-[#ddd]"
                         value={selected.transition || 'cut'}
                         onChange={(e) => onChangeSequence(patchSequenceClip(sequence, selected.id, {
                           transition: e.target.value as SeqTransitionType,
@@ -673,7 +673,7 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
                           type="number"
                           min={0.05}
                           step={0.05}
-                          className="w-full h-6 px-1 rounded bg-[#2e3136] border border-[#101114] text-right text-[#ddd]"
+                          className="w-full h-6 px-1 rounded bg-[#282c35] border border-[#1a1c22] text-right text-[#ddd]"
                           value={Number((selected.transitionDuration ?? 0.5).toFixed(2))}
                           onChange={(e) => onChangeSequence(patchSequenceClip(sequence, selected.id, {
                             transitionDuration: Math.max(0.05, Number(e.target.value) || 0.5),
@@ -707,7 +707,7 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
                           type="number"
                           min={0}
                           step={0.05}
-                          className="w-full h-6 px-1 rounded bg-[#2e3136] border border-[#101114] text-right text-[#ddd]"
+                          className="w-full h-6 px-1 rounded bg-[#282c35] border border-[#1a1c22] text-right text-[#ddd]"
                           value={Number((selected.fadeIn ?? 0).toFixed(2))}
                           onChange={(e) => onChangeSequence(patchSequenceClip(sequence, selected.id, {
                             fadeIn: Math.max(0, Number(e.target.value) || 0),
@@ -720,7 +720,7 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
                           type="number"
                           min={0}
                           step={0.05}
-                          className="w-full h-6 px-1 rounded bg-[#2e3136] border border-[#101114] text-right text-[#ddd]"
+                          className="w-full h-6 px-1 rounded bg-[#282c35] border border-[#1a1c22] text-right text-[#ddd]"
                           value={Number((selected.fadeOut ?? 0).toFixed(2))}
                           onChange={(e) => onChangeSequence(patchSequenceClip(sequence, selected.id, {
                             fadeOut: Math.max(0, Number(e.target.value) || 0),
@@ -738,8 +738,8 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
             )}
 
             {markers.length > 0 && (
-              <div className="border-t border-[#101114] mt-auto">
-                <div className="h-7 px-2 border-b border-[#101114] flex items-center text-[8px] uppercase tracking-wider text-[#51565f]">
+              <div className="border-t border-[#1a1c22] mt-auto">
+                <div className="h-7 px-2 border-b border-[#1a1c22] flex items-center text-[8px] uppercase tracking-wider text-[#51565f]">
                   Markers · {markers.length}
                 </div>
                 <div className="max-h-32 overflow-y-auto">
@@ -747,10 +747,10 @@ export const SequenceTimeline: React.FC<SequenceTimelineProps> = ({
                     <button
                       key={m.id}
                       type="button"
-                      className="w-full flex items-center gap-1 px-2 py-1 text-left hover:bg-[#101114] text-[#c0c0c0]"
+                      className="w-full flex items-center gap-1 px-2 py-1 text-left hover:bg-[#1a1c22] text-[#c0c0c0]"
                       onClick={() => onScrub(m.time)}
                     >
-                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: m.color || '#e68619' }} />
+                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: m.color || '#00b4c4' }} />
                       <span className="truncate flex-1">{m.name}</span>
                       <span className="text-[#464b53]">{m.time.toFixed(1)}s</span>
                       <span

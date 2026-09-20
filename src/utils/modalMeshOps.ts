@@ -6,6 +6,8 @@ import type { CADMesh, Face } from '../types/cad';
 import { generateId } from './topology/ids';
 import { finalizeEditableMesh } from './topology/validate';
 import { chamferEdges } from './bevelOps';
+import type { ComponentMode } from './selection';
+import { beginEdgeExtrude, beginVertexBevel, beginVertexExtrude, resolveOperatorTargets } from './meshOperators';
 
 export type ModalMeshOpType = 'extrude' | 'inset' | 'bevel';
 
@@ -17,6 +19,20 @@ export interface VertMover {
   dx: number;
   dy: number;
   dz: number;
+  /** Inset depth unit (face/vertex normal). Ignored by extrude/bevel. */
+  nx?: number;
+  ny?: number;
+  nz?: number;
+}
+
+/** Blender Inset Faces (I) modal flags. */
+export interface InsetOptions {
+  /** Each selected face insets on its own (press I again). Default: region. */
+  individual?: boolean;
+  /** Build the border around the selection (press O). Ignored in individual. */
+  outset?: boolean;
+  /** Inset open mesh-boundary edges (press B). Default on. Region only. */
+  boundary?: boolean;
 }
 
 export interface ModalMeshSession {
@@ -26,10 +42,18 @@ export interface ModalMeshSession {
   movers: VertMover[];
   /** Faces to select after confirm (extruded caps / inset inners / bevel strips). */
   resultFaceIds: string[];
+  resultVertexIds?: string[];
+  resultEdgeIds?: string[];
+  /** Face region extrude: constrain grab to this local-space unit axis. */
+  axis?: { x: number; y: number; z: number };
+  grab?: 'axis' | 'view';
   /** Bevel only */
   segments?: number;
   edgeIds?: string[];
   amount: number;
+  /** Inset only: offset along averaged face normals (hold Ctrl). */
+  depth?: number;
+  inset?: Required<InsetOptions>;
 }
 
 function faceNormalNewell(faceVerts: { x: number; y: number; z: number }[]) {
@@ -92,7 +116,7 @@ function edgeKey(a: string, b: string) {
   return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 
-function applyMovers(mesh: CADMesh, movers: VertMover[], amount: number): CADMesh {
+function applyMovers(mesh: CADMesh, movers: VertMover[], amount: number, depth = 0): CADMesh {
   if (movers.length === 0) return mesh;
   const byId = new Map(movers.map((m) => [m.id, m]));
   const vertices = mesh.vertices.map((v) => {
@@ -100,12 +124,94 @@ function applyMovers(mesh: CADMesh, movers: VertMover[], amount: number): CADMes
     if (!m) return v;
     return {
       ...v,
-      x: m.ox + m.dx * amount,
-      y: m.oy + m.dy * amount,
-      z: m.oz + m.dz * amount,
+      x: m.ox + m.dx * amount + (m.nx ?? 0) * depth,
+      y: m.oy + m.dy * amount + (m.ny ?? 0) * depth,
+      z: m.oz + m.dz * amount + (m.nz ?? 0) * depth,
     };
   });
   return { ...mesh, vertices, revision: (mesh.revision ?? 0) + 1 };
+}
+
+const INSET_SMALL = 1e-8;
+
+type Vec3 = { x: number; y: number; z: number };
+
+function vAdd(a: Vec3, b: Vec3): Vec3 {
+  return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
+}
+function vSub(a: Vec3, b: Vec3): Vec3 {
+  return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+}
+function vScale(a: Vec3, s: number): Vec3 {
+  return { x: a.x * s, y: a.y * s, z: a.z * s };
+}
+function vDot(a: Vec3, b: Vec3): number {
+  return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+function vCross(a: Vec3, b: Vec3): Vec3 {
+  return {
+    x: a.y * b.z - a.z * b.y,
+    y: a.z * b.x - a.x * b.z,
+    z: a.x * b.y - a.y * b.x,
+  };
+}
+function vNorm(a: Vec3): Vec3 {
+  const len = Math.hypot(a.x, a.y, a.z);
+  if (len < INSET_SMALL) return { x: 0, y: 0, z: 0 };
+  return vScale(a, 1 / len);
+}
+
+/** Blender `shell_v3v3_mid_normalized_to_dist` — even border width at a corner. */
+function shellMidNormalizedToDist(a: Vec3, b: Vec3): number {
+  const ab = vNorm(vAdd(a, b));
+  const angleCos = ab.x === 0 && ab.y === 0 && ab.z === 0 ? 0 : Math.abs(vDot(a, ab));
+  return angleCos < INSET_SMALL ? 1 : 1 / angleCos;
+}
+
+export function evenInsetVector(enoPrev: Vec3, enoNext: Vec3): Vec3 {
+  return vScale(vNorm(vAdd(enoPrev, enoNext)), shellMidNormalizedToDist(enoPrev, enoNext));
+}
+
+/** Inward face-plane tangent of an edge (`BM_edge_calc_face_tangent`). */
+export function edgeFaceTangent(a: Vec3, b: Vec3, faceNormal: Vec3): Vec3 {
+  return vNorm(vCross(faceNormal, vSub(b, a)));
+}
+
+export function orderedEdgeOnFace(face: Face, a: string, b: string): [string, string] {
+  const n = face.vertexIds.length;
+  for (let i = 0; i < n; i++) {
+    const x = face.vertexIds[i];
+    const y = face.vertexIds[(i + 1) % n];
+    if (x === a && y === b) return [a, b];
+    if (x === b && y === a) return [b, a];
+  }
+  return [a, b];
+}
+
+export function makeRimQuad(b1: string, b2: string, t1: string, t2: string): Face {
+  return {
+    id: generateId(),
+    vertexIds: [b1, b2, t2, t1],
+    uvs: [
+      { u: 0, v: 0 },
+      { u: 1, v: 0 },
+      { u: 1, v: 1 },
+      { u: 0, v: 1 },
+    ],
+  };
+}
+
+export function averageNormal(normals: Vec3[]): Vec3 {
+  if (normals.length === 0) return { x: 0, y: 1, z: 0 };
+  let x = 0;
+  let y = 0;
+  let z = 0;
+  normals.forEach((n) => {
+    x += n.x;
+    y += n.y;
+    z += n.z;
+  });
+  return vNorm({ x, y, z });
 }
 
 /** Extrude like Blender E: region extrude at depth 0, then grab along average normal. */
@@ -222,6 +328,9 @@ export function beginExtrude(mesh: CADMesh, faceIds: string[]): ModalMeshSession
     mesh: built,
     movers,
     resultFaceIds: topFaces.map((f) => f.id),
+    resultVertexIds: [...newVertMap.values()],
+    axis: { x: nx, y: ny, z: nz },
+    grab: 'axis',
     amount: 0,
   };
 }
@@ -444,16 +553,103 @@ export function applyModalAmount(session: ModalMeshSession, amount: number): Mod
   return { ...session, mesh, amount: a };
 }
 
+/** Uniform local-space offset for view-plane extrude (edge / vertex E). */
+export function applyModalOffset(
+  session: ModalMeshSession,
+  lx: number,
+  ly: number,
+  lz: number,
+): ModalMeshSession {
+  if (session.movers.length === 0) return session;
+  const byId = new Map(session.movers.map((m) => [m.id, m]));
+  const vertices = session.mesh.vertices.map((v) => {
+    const m = byId.get(v.id);
+    if (!m) return v;
+    return { ...v, x: m.ox + lx, y: m.oy + ly, z: m.oz + lz };
+  });
+  return {
+    ...session,
+    mesh: { ...session.mesh, vertices, revision: (session.mesh.revision ?? 0) + 1 },
+    amount: Math.hypot(lx, ly, lz),
+  };
+}
+
+/**
+ * Resolve the selection for the active mode, then dispatch to the matching
+ * Blender-style operator.
+ *
+ * Extrude works in every mode (region cap in face mode, a bridged strip in
+ * edge/vertex mode), Inset needs faces, and Bevel falls back to a vertex bevel
+ * when only corners are selected.
+ */
 export function beginModalMeshOp(
   type: ModalMeshOpType,
   mesh: CADMesh,
   faceIds: string[],
   edgeIds: string[],
   segments = 1,
+  vertexIds: string[] = [],
+  mode?: ComponentMode,
 ): ModalMeshSession | null {
-  if (type === 'extrude') return beginExtrude(mesh, faceIds);
-  if (type === 'inset') return beginInset(mesh, faceIds);
-  return beginBevel(mesh, edgeIds, faceIds, segments);
+  const activeMode: ComponentMode =
+    mode ?? (faceIds.length > 0 ? 'face' : edgeIds.length > 0 ? 'edge' : 'vertex');
+  const targets = resolveOperatorTargets(mesh, activeMode, { vertexIds, edgeIds, faceIds });
+
+  if (type === 'extrude') {
+    // Blender E is mode-locked: faces = region, edges = strip, verts = verts.
+    // Implied faces from a closed vert/edge loop must not steal region extrude.
+    if (activeMode === 'face' && targets.faceIds.length > 0) return beginExtrude(mesh, targets.faceIds);
+    if (activeMode === 'edge' && targets.edgeIds.length > 0) {
+      const session = beginEdgeExtrude(mesh, targets.edgeIds);
+      if (!session) return null;
+      return {
+        type: 'extrude',
+        mesh: session.mesh,
+        movers: session.movers,
+        resultFaceIds: session.resultFaceIds,
+        resultVertexIds: session.resultVertexIds,
+        resultEdgeIds: session.resultEdgeIds,
+        grab: 'view',
+        amount: 0,
+      };
+    }
+    if (activeMode === 'vertex' && targets.vertexIds.length > 0) {
+      const session = beginVertexExtrude(mesh, targets.vertexIds);
+      if (!session) return null;
+      return {
+        type: 'extrude',
+        mesh: session.mesh,
+        movers: session.movers,
+        resultFaceIds: session.resultFaceIds,
+        resultVertexIds: session.resultVertexIds,
+        resultEdgeIds: session.resultEdgeIds,
+        grab: 'view',
+        amount: 0,
+      };
+    }
+    return null;
+  }
+
+  if (type === 'inset') {
+    return targets.faceIds.length > 0 ? beginInset(mesh, targets.faceIds) : null;
+  }
+
+  const segs = Math.max(1, Math.min(8, Math.round(segments)));
+  if (targets.edgeIds.length > 0) return beginBevel(mesh, targets.edgeIds, targets.faceIds, segs);
+  if (targets.vertexIds.length > 0) {
+    const session = beginVertexBevel(mesh, targets.vertexIds, segs);
+    if (!session) return null;
+    return {
+      type: 'bevel',
+      mesh: session.mesh,
+      movers: session.movers,
+      resultFaceIds: session.resultFaceIds,
+      segments: segs,
+      edgeIds: [],
+      amount: 0,
+    };
+  }
+  return null;
 }
 
 /** Convenience one-shot (tests / non-modal). */

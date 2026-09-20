@@ -42,7 +42,7 @@ export const PAINT_PALETTES: PaintPalette[] = [
     group: 'Studio',
     colors: [
       ...ASEPRITE_DEFAULT_PALETTE,
-      '#ffffff', '#94e2ff', '#ed7300', '#ed7300', '#e68619', '#ec5b62', '#2d9d78', '#6e6e6e',
+      '#ffffff', '#94e2ff', '#00b4c4', '#00b4c4', '#00b4c4', '#ec5b62', '#2d9d78', '#6e6e6e',
       '#4d4d4d', '#8c8c8c', '#b3b3b3', '#e8e8e8', '#7b2cbf', '#f4a261', '#2a9d8f', '#e9c46a',
       '#264653', '#2a9d8f', '#e9c46a', '#f4a261', '#e76f51', '#d62828', '#023e8a', '#0077b6',
       '#90e0ef', '#caf0f8', '#ffb703', '#fb8500', '#8338ec', '#3a86ff', '#ff006e', '#06d6a0',
@@ -63,7 +63,7 @@ export const PAINT_PALETTES: PaintPalette[] = [
     group: 'Studio',
     colors: [
       '#000000', '#2b2b2b', '#262626', '#4d4d4d', '#6e6e6e', '#8c8c8c', '#b3b3b3', '#e8e8e8',
-      '#ffffff', '#ed7300', '#ed7300', '#ff9a3c', '#94e2ff', '#e68619', '#ff9a2e', '#ec5b62',
+      '#ffffff', '#00b4c4', '#00b4c4', '#00d4e2', '#94e2ff', '#00b4c4', '#ff9a2e', '#ec5b62',
       '#2d9d78', '#00e436', '#ffec27', '#ffa300', '#ff004d', '#7b2cbf', '#ff77a8', '#ffccaa',
       '#1d2b53', '#008751', '#ab5236', '#5f574f', '#83769c', '#29adff', '#c2c3c7', '#fff1e8',
     ],
@@ -140,7 +140,7 @@ export const PAINT_PALETTES: PaintPalette[] = [
     group: 'Console',
     colors: [
       '#1b1b2f', '#162447', '#1f4068', '#e43f5a', '#f08a5d', '#f9ed69', '#3ec1d3', '#f5f5f5',
-      '#6a2c70', '#b83b5e', '#ff9a3c', '#ffd460', '#16c79a', '#0f4c75', '#3282b8', '#bbe1fa',
+      '#6a2c70', '#b83b5e', '#00d4e2', '#ffd460', '#16c79a', '#0f4c75', '#3282b8', '#bbe1fa',
       '#2d132c', '#801336', '#c72c41', '#ee4540', '#c06c84', '#6c5b7b', '#355c7d', '#f8b195',
       '#f67280', '#c06c84', '#355c7d', '#2a363b', '#e84a5f', '#ff847c', '#feceab', '#99b898',
     ],
@@ -198,7 +198,7 @@ export const PAINT_PALETTES: PaintPalette[] = [
     group: 'Console',
     colors: [
       '#0d0d0d', '#1a1a2e', '#16213e', '#0f3460', '#e94560', '#ff2e63', '#08d9d6', '#f9ed69',
-      '#f08a5d', '#b83b5e', '#6a2c70', '#3ec1d3', '#f5f5f5', '#ff9a3c', '#16c79a', '#0f4c75',
+      '#f08a5d', '#b83b5e', '#6a2c70', '#3ec1d3', '#f5f5f5', '#00d4e2', '#16c79a', '#0f4c75',
       '#3282b8', '#bbe1fa', '#ff006e', '#8338ec', '#3a86ff', '#fb5607', '#ffbe0b', '#06d6a0',
       '#118ab2', '#073b4c', '#ef476f', '#ffd166', '#06d6a0', '#118ab2', '#073b4c', '#ffffff',
     ],

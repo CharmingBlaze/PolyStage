@@ -1,12 +1,6 @@
 import React, { useRef, useState } from 'react';
-import {
-  Crosshair as TargetIcon,
-  Move as MoveIcon,
-  RefreshCw,
-  ZoomIn as ZoomIcon,
-  Maximize2 as MaxIcon,
-} from 'lucide-react';
 import type { ToolState } from '../types/cad';
+import { BlenderIcon } from './icons/BlenderIcon';
 
 export type LightwaveNavButton = 0 | 2; // LMB | RMB
 
@@ -33,6 +27,8 @@ interface LightwaveNavToolbarProps {
   maximizeTitle?: string;
   /** Blockout uses top-right so its bottom dock never covers navigation. */
   placement?: 'bottom-right' | 'top-right';
+  prefix?: React.ReactNode;
+  children?: React.ReactNode;
 }
 
 export const LightwaveNavToolbar: React.FC<LightwaveNavToolbarProps> = ({
@@ -47,7 +43,9 @@ export const LightwaveNavToolbar: React.FC<LightwaveNavToolbarProps> = ({
   isMaximized = false,
   compact = false,
   maximizeTitle,
-  placement = 'bottom-right',
+  placement = 'top-right',
+  prefix,
+  children,
 }) => {
   const [activeDragTool, setActiveDragTool] = useState<'pan' | 'orbit' | 'zoom' | null>(null);
   const buttonRef = useRef<LightwaveNavButton>(0);
@@ -120,29 +118,36 @@ export const LightwaveNavToolbar: React.FC<LightwaveNavToolbarProps> = ({
     placement === 'top-right'
       ? compact
         ? 'top-1.5 right-1.5'
-        : 'top-3 right-3'
+        : 'top-2 right-2'
       : compact
         ? 'bottom-1.5 right-1.5'
-        : 'bottom-3 right-3';
+        : 'bottom-2 right-2';
 
   return (
     <div
-      className={`lightwave-nav-toolbar absolute z-30 flex items-center gap-0.5 p-1 rounded-lg bg-[#131417]/85 backdrop-blur-md border border-white/[0.08] shadow-lg shadow-black/30 font-mono select-none transition-all ${placementClass}`}
+      className={`lightwave-nav-toolbar absolute z-30 flex items-center gap-0.5 p-1 rounded-[6px] bg-[var(--ts-app)]/90 backdrop-blur-md border border-[var(--ts-border-hi)] shadow-lg shadow-black/40 font-mono select-none transition-all ${placementClass}`}
       onPointerDown={(e) => e.stopPropagation()}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
       }}
     >
+      {prefix && (
+        <>
+          {prefix}
+          <span className="w-px h-3.5 bg-[var(--ts-border-hi)] mx-0.5" />
+        </>
+      )}
+
       <button
         type="button"
         onClick={onFocusCenter}
         className={`${
           compact ? 'w-5 h-5' : 'w-7 h-7'
-        } flex items-center justify-center rounded-[5px] hover:bg-[#33363c] transition-colors active:translate-y-px cursor-pointer`}
+        } flex items-center justify-center rounded-[4px] hover:bg-[var(--ts-hover)] text-[var(--ts-accent-hi)] transition-colors active:translate-y-px cursor-pointer`}
         title="Fit / Center (A = all · selection if any)"
       >
-        <TargetIcon className={`${compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} text-[#ff9a3c]`} />
+        <BlenderIcon name="center" size={compact ? 12 : 14} />
       </button>
 
       <button
@@ -153,16 +158,17 @@ export const LightwaveNavToolbar: React.FC<LightwaveNavToolbarProps> = ({
         onPointerCancel={handlePointerUp}
         className={`${
           compact ? 'w-5 h-5' : 'w-7 h-7'
-        } flex items-center justify-center rounded-[5px] transition-colors cursor-move ${
-          activeDragTool === 'pan' ? 'bg-[#ed7300]/25' : 'hover:bg-[#33363c]'
+        } flex items-center justify-center rounded-[4px] transition-colors cursor-move ${
+          activeDragTool === 'pan' ? 'outline outline-1 outline-[var(--ts-accent)] bg-[var(--ts-accent)]/15 text-[var(--ts-accent-hi)]' : 'hover:bg-[var(--ts-hover)] text-[var(--ts-text)]'
         }`}
         title={
           showOrbit
             ? 'Move — drag the camera view (Shift = fine)'
             : 'Move — drag to pan (Shift = fine)'
         }
+        aria-label="Pan view"
       >
-        <MoveIcon className={`${compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} text-amber-400`} />
+        <BlenderIcon name="move" size={compact ? 12 : 14} />
       </button>
 
       {showOrbit && (
@@ -174,12 +180,13 @@ export const LightwaveNavToolbar: React.FC<LightwaveNavToolbarProps> = ({
           onPointerCancel={handlePointerUp}
           className={`${
             compact ? 'w-5 h-5' : 'w-7 h-7'
-          } flex items-center justify-center rounded-[5px] transition-colors cursor-grab active:cursor-grabbing ${
-            activeDragTool === 'orbit' ? 'bg-[#ed7300]/25' : 'hover:bg-[#33363c]'
+          } flex items-center justify-center rounded-[4px] transition-colors cursor-grab active:cursor-grabbing ${
+            activeDragTool === 'orbit' ? 'outline outline-1 outline-[var(--ts-accent)] bg-[var(--ts-accent)]/15 text-[var(--ts-accent-hi)]' : 'hover:bg-[var(--ts-hover)] text-[var(--ts-text)]'
           }`}
           title="Rotate — LMB: heading + pitch · RMB: bank · Ctrl: 15° snap"
+          aria-label="Orbit view"
         >
-          <RefreshCw className={`${compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} text-emerald-400`} />
+          <BlenderIcon name="rotate" size={compact ? 12 : 14} />
         </button>
       )}
 
@@ -191,12 +198,12 @@ export const LightwaveNavToolbar: React.FC<LightwaveNavToolbarProps> = ({
         onPointerCancel={handlePointerUp}
         className={`${
           compact ? 'w-5 h-5' : 'w-7 h-7'
-        } flex items-center justify-center rounded-[5px] transition-colors cursor-zoom-in ${
-          activeDragTool === 'zoom' ? 'bg-[#ed7300]/25' : 'hover:bg-[#33363c]'
+        } flex items-center justify-center rounded-[4px] transition-colors cursor-zoom-in ${
+          activeDragTool === 'zoom' ? 'outline outline-1 outline-[var(--ts-accent)] bg-[var(--ts-accent)]/15 text-[var(--ts-accent-hi)]' : 'hover:bg-[var(--ts-hover)] text-[var(--ts-text)]'
         }`}
         title="Zoom — drag left/right (Shift = fine)"
       >
-        <ZoomIcon className={`${compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} text-cyan-300`} />
+        <BlenderIcon name="zoom" size={compact ? 12 : 14} />
       </button>
 
       <button
@@ -204,10 +211,10 @@ export const LightwaveNavToolbar: React.FC<LightwaveNavToolbarProps> = ({
         onClick={toggleQuadView}
         className={`${
           compact ? 'w-5 h-5' : 'w-7 h-7'
-        } flex items-center justify-center rounded-[5px] transition-colors active:translate-y-px ${
+        } flex items-center justify-center rounded-[4px] transition-colors active:translate-y-px ${
           maximizeActive || toolState?.viewportLayout === 'quad'
-            ? 'bg-[#ed7300]/25'
-            : 'hover:bg-[#33363c]'
+            ? 'outline outline-1 outline-[var(--ts-accent)] bg-[var(--ts-accent)]/15 text-[var(--ts-accent-hi)]'
+            : 'hover:bg-[var(--ts-hover)] text-[var(--ts-text)]'
         }`}
         title={
           maximizeTitle
@@ -220,8 +227,15 @@ export const LightwaveNavToolbar: React.FC<LightwaveNavToolbarProps> = ({
                 : 'Quad viewports (Ctrl+Alt+Q)')
         }
       >
-        <MaxIcon className={`${compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} text-[#e68619]`} />
+        <BlenderIcon name="maximize" size={compact ? 12 : 14} />
       </button>
+
+      {children && (
+        <>
+          <span className="w-px h-3.5 bg-[var(--ts-border-hi)] mx-0.5" />
+          {children}
+        </>
+      )}
     </div>
   );
 };

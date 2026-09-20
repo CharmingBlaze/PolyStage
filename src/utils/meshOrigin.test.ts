@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { generatePrimitive, recenterMeshOrigin } from './meshUtils';
+import {
+  originToBottom,
+  originToSelection,
+  originToWorldZero,
+  setMeshOriginWorld,
+} from './meshOrigin';
 import { vectorPathsToMesh, vectorSnapshotToCADMesh } from './vectorBlockout';
+
+function worldVerts(mesh: { vertices: Array<{ x: number; y: number; z: number }>; position: { x: number; y: number; z: number } }) {
+  return mesh.vertices.map((v) => ({
+    x: v.x + mesh.position.x,
+    y: v.y + mesh.position.y,
+    z: v.z + mesh.position.z,
+  }));
+}
 
 describe('recenterMeshOrigin', () => {
   it('moves the pivot to the bbox center without shifting world verts', () => {
@@ -67,3 +81,58 @@ describe('recenterMeshOrigin', () => {
     expect(Math.abs(minY + maxY)).toBeLessThan(0.05);
   });
 });
+
+describe('origin workflow', () => {
+  it('moves origin in world without shifting unrotated verts', () => {
+    const mesh = generatePrimitive('cube');
+    const before = worldVerts(mesh);
+    const next = setMeshOriginWorld(mesh, { x: 0.5, y: 0, z: 0 });
+    expect(next.position.x).toBeCloseTo(0.5, 5);
+    const after = worldVerts(next);
+    before.forEach((p, i) => {
+      expect(after[i].x).toBeCloseTo(p.x, 5);
+      expect(after[i].y).toBeCloseTo(p.y, 5);
+      expect(after[i].z).toBeCloseTo(p.z, 5);
+    });
+  });
+
+  it('keeps world verts when origin goes to world zero', () => {
+    const mesh = {
+      ...generatePrimitive('cube'),
+      position: { x: 2, y: 1, z: -1 },
+    };
+    const before = worldVerts(mesh);
+    const next = originToWorldZero(mesh);
+    expect(next.position.x).toBeCloseTo(0, 5);
+    expect(next.position.y).toBeCloseTo(0, 5);
+    expect(next.position.z).toBeCloseTo(0, 5);
+    const after = worldVerts(next);
+    before.forEach((p, i) => {
+      expect(after[i].x).toBeCloseTo(p.x, 5);
+      expect(after[i].y).toBeCloseTo(p.y, 5);
+      expect(after[i].z).toBeCloseTo(p.z, 5);
+    });
+  });
+
+  it('puts origin on the selected vertex', () => {
+    const mesh = generatePrimitive('cube');
+    const v = mesh.vertices[0];
+    const next = originToSelection(mesh, [v.id]);
+    expect(next.position.x).toBeCloseTo(v.x + mesh.position.x, 5);
+    expect(next.position.y).toBeCloseTo(v.y + mesh.position.y, 5);
+    expect(next.position.z).toBeCloseTo(v.z + mesh.position.z, 5);
+    const moved = next.vertices.find((vert) => vert.id === v.id)!;
+    expect(moved.x).toBeCloseTo(0, 5);
+    expect(moved.y).toBeCloseTo(0, 5);
+    expect(moved.z).toBeCloseTo(0, 5);
+  });
+
+  it('puts origin at the local bbox floor', () => {
+    const mesh = generatePrimitive('cube');
+    const next = originToBottom(mesh);
+    const ys = next.vertices.map((v) => v.y);
+    expect(Math.min(...ys)).toBeCloseTo(0, 5);
+    expect(next.position.y).toBeCloseTo(mesh.position.y + Math.min(...mesh.vertices.map((v) => v.y)), 5);
+  });
+});
+

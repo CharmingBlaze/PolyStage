@@ -1,6 +1,6 @@
 import React from 'react';
 
-/** Geometric mark — Substance-style orange facet on mid-gray tile. */
+/** Isometric octahedron — teal poly above, gold stage below. */
 export const BrandMark: React.FC<{ size?: number; className?: string; title?: string }> = ({
   size = 20,
   className = '',
@@ -9,15 +9,18 @@ export const BrandMark: React.FC<{ size?: number; className?: string; title?: st
   <svg
     width={size}
     height={size}
-    viewBox="0 0 24 24"
+    viewBox="0 0 32 32"
     className={className}
     role="img"
     aria-label={title}
   >
     <title>{title}</title>
-    <rect width="24" height="24" rx="2" fill="#212327" stroke="#3b3f46" strokeWidth="1" />
-    <path d="M12 4.2 L19.2 12 L12 15.4 L4.8 12 Z" fill="#ed7300" />
-    <path d="M12 15.4 L19.2 12 L19.2 15.6 L12 19.8 Z" fill="#ff9a3c" />
-    <path d="M12 15.4 L4.8 12 L4.8 15.6 L12 19.8 Z" fill="#c96a00" />
+    {/* Lower stage facets */}
+    <path d="M16 16.6 L5 17.8 L16 29.4 Z" fill="#8a7014" />
+    <path d="M16 16.6 L27 14.6 L16 29.4 Z" fill="#e6b422" />
+    {/* Upper poly facets */}
+    <path d="M16 2.2 L5 17.8 L16 16.6 Z" fill="#006e78" />
+    <path d="M16 2.2 L27 14.6 L16 16.6 Z" fill="#00b4c4" />
+    <path d="M16 2.2 L20.6 13.2 L16 16.6 Z" fill="#00d4e2" />
   </svg>
 );

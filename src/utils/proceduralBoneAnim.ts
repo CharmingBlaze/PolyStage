@@ -130,8 +130,12 @@ export function evaluateProceduralBoneAnim(
 }
 
 export function detectProcSpecies(bones: CADBone[]): 'fish' | 'bird' | 'other' {
-  const names = new Set(bones.map((b) => b.name));
-  if (names.has('WingL_Upper')) return 'bird';
-  if (names.has('Mid1') || names.has('TailFin')) return 'fish';
+  const names = bones.map((bone) => bone.name.trim().toLowerCase());
+  // Wings mark a bird; a fin or a Mid* chain marks a fish. Requiring both a
+  // Mid* chain and either a fin or 2+ mids keeps quadrupeds (Tail_1, Tail_2)
+  // out of the fish bucket.
+  if (names.some((name) => name.startsWith('wing'))) return 'bird';
+  const midCount = names.filter((name) => /^mid\d*$/.test(name)).length;
+  if (names.some((name) => name.includes('tailfin')) || midCount >= 2) return 'fish';
   return 'other';
 }

@@ -17,7 +17,7 @@ export function createBone(name: string, parentId: string | null, position = v()
     restScale: v(1, 1, 1),
     length,
     assignedMeshIds: [],
-    color: '#ed7300',
+    color: '#00b4c4',
     deform: true,
     inheritRotation: true,
     visible: true,
@@ -25,6 +25,22 @@ export function createBone(name: string, parentId: string | null, position = v()
     mirrorBoneId: null,
     constraints: [],
   };
+}
+
+/**
+ * Local-space offset from a bone's head to its tail.
+ *
+ * A child bone's `position` is relative to its parent's HEAD, so to snap a new
+ * child (or an IK effector) onto a rotated parent's tip you need this rotated,
+ * scaled length vector rather than a plain `{ y: length }`.
+ */
+export function boneTailOffset(bone: CADBone): Vector3D {
+  const length = Math.max(bone.length || 0.01, 1e-4);
+  const scaleY = Number.isFinite(bone.scale?.y) ? bone.scale.y : 1;
+  const tail = new THREE.Vector3(0, length * scaleY, 0).applyEuler(
+    new THREE.Euler(bone.rotation.x, bone.rotation.y, bone.rotation.z),
+  );
+  return { x: tail.x, y: tail.y, z: tail.z };
 }
 
 export function createsCycle(bones: CADBone[], boneId: string, parentId: string | null): boolean {
@@ -50,6 +66,28 @@ export function getBoneDepth(bones: CADBone[], boneId: string): number {
   return depth;
 }
 
+/**
+ * Depth of every bone in a single pass (root = 0). Use this when sorting a whole
+ * hierarchy: calling `getBoneDepth` per bone re-walks the tree each time.
+ */
+export function getBoneDepths(bones: CADBone[]): Map<string, number> {
+  const byId = new Map(bones.map((bone) => [bone.id, bone]));
+  const depths = new Map<string, number>();
+  const resolve = (bone: CADBone, visiting: Set<string>): number => {
+    const cached = depths.get(bone.id);
+    if (cached != null) return cached;
+    if (visiting.has(bone.id)) return 0; // cycle guard
+    visiting.add(bone.id);
+    const parent = bone.parentId ? byId.get(bone.parentId) : undefined;
+    const depth = parent ? resolve(parent, visiting) + 1 : 0;
+    visiting.delete(bone.id);
+    depths.set(bone.id, depth);
+    return depth;
+  };
+  bones.forEach((bone) => resolve(bone, new Set()));
+  return depths;
+}
+
 export function deleteBoneBranch(bones: CADBone[], boneId: string): CADBone[] {
   const removed = new Set([boneId]);
   let changed = true;
@@ -63,6 +101,33 @@ export function deleteBoneBranch(bones: CADBone[], boneId: string): CADBone[] {
     });
   }
   return bones.filter((bone) => !removed.has(bone.id));
+}
+
+/**
+ * Drop references that point at bones which no longer exist: mirror partners,
+ * constraint targets, and parent links.  Keeps the rig self-consistent after a
+ * branch is deleted so nothing silently aims at a ghost bone.
+ */
+export function pruneBoneReferences(bones: CADBone[]): CADBone[] {
+  const ids = new Set(bones.map((bone) => bone.id));
+  return bones.map((bone) => {
+    const parentId = bone.parentId && ids.has(bone.parentId) ? bone.parentId : null;
+    const mirrorBoneId = bone.mirrorBoneId && ids.has(bone.mirrorBoneId) ? bone.mirrorBoneId : null;
+    const constraints = bone.constraints?.filter(
+      (constraint) => !constraint.targetBoneId || ids.has(constraint.targetBoneId),
+    );
+    const constraintsChanged =
+      (bone.constraints?.length ?? 0) !== (constraints?.length ?? 0);
+    if (parentId === bone.parentId && mirrorBoneId === (bone.mirrorBoneId ?? null) && !constraintsChanged) {
+      return bone;
+    }
+    return {
+      ...bone,
+      parentId,
+      mirrorBoneId,
+      ...(constraintsChanged ? { constraints } : {}),
+    };
+  });
 }
 
 export function normalizeInfluences(influences: Array<{ boneId: string; weight: number }>, maxInfluences = 4) {
@@ -136,6 +201,8 @@ export function clearSkin(mesh: CADMesh): CADMesh {
 
 export function getBoneWorldMatrices(bones: CADBone[], rest: boolean) {
   const matrices = new Map<string, THREE.Matrix4>();
+  // Id lookup once: the recursive resolver runs per bone and must not be O(n^2).
+  const boneById = new Map(bones.map((bone) => [bone.id, bone]));
   const resolve = (bone: CADBone, visiting = new Set<string>()): THREE.Matrix4 => {
     const cached = matrices.get(bone.id);
     if (cached) return cached;
@@ -149,7 +216,7 @@ export function getBoneWorldMatrices(bones: CADBone[], rest: boolean) {
       new THREE.Quaternion().setFromEuler(new THREE.Euler(rotation.x, rotation.y, rotation.z)),
       new THREE.Vector3(scale.x, scale.y, scale.z),
     );
-    const parent = bone.parentId ? bones.find((candidate) => candidate.id === bone.parentId) : null;
+    const parent = bone.parentId ? boneById.get(bone.parentId) || null : null;
     let world = local;
     if (parent) {
       const parentWorld = resolve(parent, visiting);
@@ -196,13 +263,20 @@ export function deformMeshWithBones(mesh: CADMesh, bones: CADBone[]): CADMesh {
         (mesh.skinWeights?.[vertex.id] || []).filter((inf) => deltas.has(inf.boneId)),
       );
       if (!influences.length) return vertex;
-      const source = new THREE.Vector3(vertex.x, vertex.y, vertex.z);
-      const output = new THREE.Vector3();
-      influences.forEach((influence) => {
+      // Linear blend skinning without per-influence allocations: raw matrix math.
+      let outX = 0;
+      let outY = 0;
+      let outZ = 0;
+      for (const influence of influences) {
         const delta = deltas.get(influence.boneId);
-        if (delta) output.add(source.clone().applyMatrix4(delta).multiplyScalar(influence.weight));
-      });
-      return { ...vertex, x: output.x, y: output.y, z: output.z };
+        if (!delta) continue;
+        const e = delta.elements;
+        const { x: sx, y: sy, z: sz } = vertex;
+        outX += (e[0] * sx + e[4] * sy + e[8] * sz + e[12]) * influence.weight;
+        outY += (e[1] * sx + e[5] * sy + e[9] * sz + e[13]) * influence.weight;
+        outZ += (e[2] * sx + e[6] * sy + e[10] * sz + e[14]) * influence.weight;
+      }
+      return { ...vertex, x: outX, y: outY, z: outZ };
     }),
   };
 }
@@ -261,7 +335,6 @@ export function createHumanoidRig(height = 3.2): CADBone[] {
     upperLeg.restRotation = { ...upperLeg.rotation };
     const lowerLeg = createBone(`LowerLeg.${side}`, upperLeg.id, v(0, unit * 1.5, 0), unit * 1.5);
     const foot = createBone(`Foot.${side}`, lowerLeg.id, v(0, unit * 1.5, 0), unit * 0.75);
-    upperArm.mirrorBoneId = side === 'L' ? undefined : null;
     return [upperArm, lowerArm, hand, upperLeg, lowerLeg, foot];
   };
   const left = makeLimb('L', -1);
@@ -329,14 +402,54 @@ export function setRestToCurrentPose(bones: CADBone[]): CADBone[] {
   }));
 }
 
-export function validateRig(bones: CADBone[], meshes: CADMesh[]) {
+export interface RigValidationReport {
+  missingParents: number;
+  cycles: number;
+  unweightedVertices: number;
+  roots: number;
+  /** Bones sharing a name (breaks name-based lookups like procedural anims). */
+  duplicateNames: number;
+  /** Mirror links / constraint targets pointing at bones that do not exist. */
+  danglingReferences: number;
+  emptyRig: boolean;
+  valid: boolean;
+}
+
+export function validateRig(bones: CADBone[], meshes: CADMesh[]): RigValidationReport {
   const ids = new Set(bones.map((bone) => bone.id));
   const missingParents = bones.filter((bone) => bone.parentId && !ids.has(bone.parentId)).length;
   const cycles = bones.filter((bone) => createsCycle(bones, bone.id, bone.parentId)).length;
   const unweightedVertices = meshes.reduce((count, mesh) =>
     count + mesh.vertices.filter((vertex) => !(mesh.skinWeights?.[vertex.id]?.length || mesh.boneId)).length, 0);
   const roots = bones.filter((bone) => !bone.parentId).length;
-  return { missingParents, cycles, unweightedVertices, roots, valid: missingParents === 0 && cycles === 0 };
+
+  const seenNames = new Set<string>();
+  let duplicateNames = 0;
+  bones.forEach((bone) => {
+    const key = bone.name.trim().toLowerCase();
+    if (seenNames.has(key)) duplicateNames += 1;
+    else seenNames.add(key);
+  });
+
+  const danglingReferences = bones.reduce((count, bone) => {
+    let found = 0;
+    if (bone.mirrorBoneId && !ids.has(bone.mirrorBoneId)) found += 1;
+    (bone.constraints || []).forEach((constraint) => {
+      if (constraint.targetBoneId && !ids.has(constraint.targetBoneId)) found += 1;
+    });
+    return count + found;
+  }, 0);
+
+  return {
+    missingParents,
+    cycles,
+    unweightedVertices,
+    roots,
+    duplicateNames,
+    danglingReferences,
+    emptyRig: bones.length === 0,
+    valid: missingParents === 0 && cycles === 0 && duplicateNames === 0 && danglingReferences === 0,
+  };
 }
 
 export function exportGameRig(bones: CADBone[], meshes: CADMesh[]): string {

@@ -1,5 +1,5 @@
 export type EditMode = 'object' | 'vertex' | 'edge' | 'face' | 'bone';
-export type TransformMode = 'move' | 'rotate' | 'scale' | 'pivot';
+export type TransformMode = 'combined' | 'move' | 'rotate' | 'scale' | 'pivot';
 export type ViewMode = 'textured' | 'flat' | 'wireframe' | 'lit' | 'polygon-wire';
 /** Top-level app workspaces (Header chips). Brush/UV are overlays on modeling. */
 export type WorkspaceMode = 'modeling' | 'animation' | 'paint' | 'rigging' | 'blockout';
@@ -26,7 +26,13 @@ export type PrimitiveType =
   | 'lathe'
   | 'chest'
   | 'tree'
-  | 'car';
+  | 'car'
+  | 'wall'
+  | 'window'
+  | 'ladder'
+  | 'stairs'
+  | 'arch'
+  | 'roof';
 
 export interface Vector3D {
   x: number;
@@ -458,6 +464,10 @@ export interface ToolState {
   mirrorMergeThreshold?: number;
   /** When mirroring / live mirror, also affect bones. */
   mirrorBones?: boolean;
+  /** Modo-style Pen tool: click in the viewport to build geometry vertex by vertex. */
+  isPenTool?: boolean;
+  /** Pen tool Properties panel state (Pen Type, Make Quads, Wall Mode, UVs, ...). */
+  penSettings?: import('../utils/penTool').PenToolSettings;
 }
 
 export interface RenderSettings {
@@ -476,6 +486,12 @@ export interface RenderSettings {
   fogColor?: string;
   sunElevation?: number;
   sunAzimuth?: number;
+  shadowMapType?: 'pcf-soft' | 'pcf' | 'basic' | 'vsm' | 'off';
+  shadowQuality?: 'draft' | 'standard' | 'high';
+  shadowAutoFit?: boolean;
+  showShadowHelper?: boolean;
+  shadowBias?: number;
+  shadowNormalBias?: number;
 }
 
 export interface Palette {

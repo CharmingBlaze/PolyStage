@@ -32,7 +32,7 @@ export class ErrorBoundary extends Component<Props, State> {
   public render() {
     if (this.state.hasError) {
       return (
-        <div className="w-full h-full min-h-[300px] flex flex-col items-center justify-center p-6 bg-[#1a1b1e] text-[#d1d5db] border border-[#3b3f46] rounded-md gap-4">
+        <div className="w-full h-full min-h-[300px] flex flex-col items-center justify-center p-6 bg-[#1a1b1e] text-[#d1d5db] border border-[#3a3f4a] rounded-md gap-4">
           <div className="p-3 bg-[#e5484d]/10 border border-[#e5484d]/30 rounded-full text-[#e5484d]">
             <AlertTriangle size={32} />
           </div>
@@ -47,7 +47,7 @@ export class ErrorBoundary extends Component<Props, State> {
           <button
             type="button"
             onClick={this.handleReset}
-            className="flex items-center gap-2 px-4 py-2 bg-[#ed7300] hover:bg-[#ff8412] text-white font-medium text-xs rounded shadow transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-[#00b4c4] hover:bg-[#ff8412] text-white font-medium text-xs rounded shadow transition-colors"
           >
             <RefreshCw size={14} />
             Recover Workspace

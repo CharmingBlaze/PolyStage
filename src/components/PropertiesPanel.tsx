@@ -1,9 +1,7 @@
 import React from 'react';
 import {
-  Box,
   Palette,
   Sliders,
-  Sparkles,
 } from 'lucide-react';
 import type {
   CADMesh,
@@ -17,7 +15,14 @@ import type {
 } from '../types/cad';
 import { createDefaultEnvironment } from '../utils/cutsceneEnv';
 import { lightDistanceFromScale } from '../utils/sceneHelpers';
-import { recenterMeshOrigin } from '../utils/meshUtils';
+import {
+  originToBottom,
+  originToGeometry,
+  originToSelection,
+  originToWorldZero,
+  setMeshOriginWorld,
+} from '../utils/meshOrigin';
+import { ModifierStackPanel } from './ModifierStackPanel';
 
 interface PropertiesPanelProps {
   mesh: CADMesh;
@@ -26,6 +31,7 @@ interface PropertiesPanelProps {
   setToolState: React.Dispatch<React.SetStateAction<ToolState>>;
   selectedVertexIds: string[];
   selectedFaceIds: string[];
+  selectedEdgeIds?: string[];
   sceneSelection?: SceneSelection | null;
   cameras?: CADCamera[];
   lights?: CADLight[];
@@ -42,6 +48,9 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   setMesh,
   toolState,
   setToolState,
+  selectedVertexIds = [],
+  selectedFaceIds = [],
+  selectedEdgeIds = [],
   sceneSelection = null,
   cameras = [],
   lights = [],
@@ -173,20 +182,42 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     patchTransform({ scale: { ...scale, [axis]: Math.max(0.01, val) } });
   };
 
-  const handleRecenterOrigin = () => {
-    if (!sceneTarget) {
-      setMesh(recenterMeshOrigin(mesh));
-    }
+  const handleOriginChange = (axis: keyof Vector3D, val: number) => {
+    setMesh(setMeshOriginWorld(mesh, { ...mesh.position, [axis]: val }));
   };
 
+  const selectionVertIds = (): string[] => {
+    if (selectedVertexIds.length) return selectedVertexIds;
+    const ids = new Set<string>();
+    if (selectedFaceIds.length) {
+      for (const f of mesh.faces) {
+        if (selectedFaceIds.includes(f.id)) f.vertexIds.forEach((id) => ids.add(id));
+      }
+    }
+    if (selectedEdgeIds.length) {
+      for (const e of mesh.edges) {
+        if (selectedEdgeIds.includes(e.id)) {
+          ids.add(e.v1Id);
+          ids.add(e.v2Id);
+        }
+      }
+    }
+    return [...ids];
+  };
+
+  const handleOriginToGeometry = () => setMesh(originToGeometry(mesh));
+  const handleOriginToSelection = () => setMesh(originToSelection(mesh, selectionVertIds()));
+  const handleOriginToWorld = () => setMesh(originToWorldZero(mesh));
+  const handleOriginToBottom = () => setMesh(originToBottom(mesh));
+
   const adobeSwatches = [
-    '#ed7300', '#ff9a3c', '#ff0055', '#f59e0b', '#10b981', '#8b5cf6',
+    '#00b4c4', '#00d4e2', '#ff0055', '#f59e0b', '#10b981', '#8b5cf6',
     '#ec4899', '#6366f1', '#3b82f6', '#06b6d4', '#14b8a6', '#22c55e',
-    '#eab308', '#f97316', '#ef4444', '#64748b', '#ffffff', '#000000',
+    '#eab308', '#f97316', '#ef4444', '#64748b', '#e2e6ec', '#16191e',
   ];
 
   const applyMaterialPreset = (preset: 'gold' | 'chrome' | 'ruby' | 'emerald' | 'neon' | 'plastic') => {
-    let color = '#ff9a3c';
+    let color = '#00d4e2';
     if (preset === 'gold') color = '#f59e0b';
     else if (preset === 'chrome') color = '#e2e8f0';
     else if (preset === 'ruby') color = '#ef4444';
@@ -197,41 +228,68 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#26282d] text-[#c6cad1] font-sans text-xs select-none">
+    <div className="flex flex-col h-full bg-[#1c1f26] text-[#bcc4d0] font-sans text-xs select-none">
       <div className="panel-header justify-between">
         <span className="flex items-center gap-1.5">
-          <Sliders className="w-3.5 h-3.5 text-[#ed7300]" />
+          <Sliders className="w-3.5 h-3.5 text-[#00b4c4]" />
           Properties
         </span>
-        <span className="text-[#8b909a] truncate max-w-[40%] normal-case tracking-normal font-medium">{displayName}</span>
+        <span className="text-[#6e7584] truncate max-w-[40%] normal-case tracking-normal font-medium">{displayName}</span>
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-4 custom-scrollbar">
         {sceneTarget && (
-          <div className="text-[9px] font-mono text-[#e68619] uppercase tracking-wider">
-            Editing {sceneTarget.kind} · use gizmo or G/R/S
+          <div className="ts-section-header px-0">
+            Editing {sceneTarget.kind} · gizmo or G / R / S
           </div>
         )}
 
-        <div className="cad-card p-2.5 space-y-3 border border-[#3b3f46] bg-[#191b1e]">
-          <span className="text-[9px] font-mono font-bold text-[#ff9a3c] uppercase tracking-wider block flex items-center gap-1">
-            <Box className="w-3 h-3 text-[#ff9a3c]" />
-            TRANSFORM NUMERICS
+        <div className="ts-card p-3 space-y-3">
+          <span className="ts-section-header px-0">
+            Transform
           </span>
 
-          <div className="space-y-2 font-mono text-[10px]">
+          <div className="space-y-2 font-mono text-[11px]">
+            {!sceneTarget && (
+              <div>
+                <span className="text-[var(--ts-text-muted)] block mb-1 text-[11.5px]">Origin <span className="font-sans font-normal opacity-80">pivot · mesh stays</span></span>
+                <div className="grid grid-cols-3 gap-1">
+                  {(['x', 'y', 'z'] as (keyof Vector3D)[]).map((axis) => (
+                    <div key={axis} className="flex items-center bg-[var(--ts-app)] px-2 py-0.5 rounded-[6px] border border-[var(--ts-border-hi)]">
+                      <span className="text-[var(--ts-axis-x)] font-medium mr-1" style={{ color: axis === 'x' ? 'var(--ts-axis-x)' : axis === 'y' ? 'var(--ts-axis-y)' : 'var(--ts-axis-z)' }}>{axis}</span>
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={Math.round(position[axis] * 100) / 100}
+                        onChange={(e) => handleOriginChange(axis, parseFloat(e.target.value) || 0)}
+                        className="bg-transparent text-[var(--ts-text-hi)] outline-none w-full text-[11px] font-mono"
+                        aria-label={`Origin ${axis}`}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-1 mt-1.5">
+                  <button type="button" onClick={handleOriginToGeometry} className="h-6 bg-[var(--ts-elevated)] text-[var(--ts-text)] border border-[var(--ts-border-hi)] hover:bg-[var(--ts-hover)] rounded-[6px] text-[10.5px]" title="Origin to geometry center">Center</button>
+                  <button type="button" onClick={handleOriginToSelection} className="h-6 bg-[var(--ts-elevated)] text-[var(--ts-text)] border border-[var(--ts-border-hi)] hover:bg-[var(--ts-hover)] rounded-[6px] text-[10.5px]" title="Origin to selection">Selection</button>
+                  <button type="button" onClick={handleOriginToWorld} className="h-6 bg-[var(--ts-elevated)] text-[var(--ts-text)] border border-[var(--ts-border-hi)] hover:bg-[var(--ts-hover)] rounded-[6px] text-[10.5px]" title="Origin to world 0,0,0">World 0</button>
+                  <button type="button" onClick={handleOriginToBottom} className="h-6 bg-[var(--ts-elevated)] text-[var(--ts-text)] border border-[var(--ts-border-hi)] hover:bg-[var(--ts-hover)] rounded-[6px] text-[10.5px]" title="Origin to bottom center">Bottom</button>
+                </div>
+              </div>
+            )}
+
             <div>
-              <span className="text-[#7e838c] block mb-1">POSITION (X, Y, Z):</span>
+              <span className="text-[var(--ts-text-muted)] block mb-1 text-[11.5px]">Location <span className="font-sans font-normal opacity-80">moves object</span></span>
               <div className="grid grid-cols-3 gap-1">
                 {(['x', 'y', 'z'] as (keyof Vector3D)[]).map((axis) => (
-                  <div key={axis} className="flex items-center bg-[#191b1e] px-2 py-0.5 rounded border border-[#3b3f46]">
-                    <span className="text-rose-400 font-bold uppercase mr-1">{axis}:</span>
+                  <div key={axis} className="flex items-center bg-[#16191e] px-2 py-0.5 rounded-[6px] border border-[#3a3f4a]">
+                    <span className="text-[#e0556a] font-medium mr-1">{axis}</span>
                     <input
                       type="number"
                       step="0.1"
                       value={Math.round(position[axis] * 100) / 100}
                       onChange={(e) => handlePositionChange(axis, parseFloat(e.target.value) || 0)}
-                      className="bg-transparent text-white outline-none w-full text-[10px]"
+                      className="bg-transparent text-[#e2e6ec] outline-none w-full text-[11px] font-mono"
+                      aria-label={`Position ${axis}`}
                     />
                   </div>
                 ))}
@@ -239,17 +297,18 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             </div>
 
             <div>
-              <span className="text-[#7e838c] block mb-1">ROTATION (DEG):</span>
+              <span className="text-[#6e7584] block mb-1 text-[11.5px]">Rotation (deg)</span>
               <div className="grid grid-cols-3 gap-1">
                 {(['x', 'y', 'z'] as (keyof Vector3D)[]).map((axis) => (
-                  <div key={axis} className="flex items-center bg-[#191b1e] px-2 py-0.5 rounded border border-[#3b3f46]">
-                    <span className="text-amber-400 font-bold uppercase mr-1">{axis}:</span>
+                  <div key={axis} className="flex items-center bg-[#16191e] px-2 py-0.5 rounded-[6px] border border-[#3a3f4a]">
+                    <span className="text-[#e6b422] font-medium mr-1">{axis}</span>
                     <input
                       type="number"
                       step="5"
                       value={Math.round(((rotation[axis] * 180) / Math.PI) * 10) / 10}
                       onChange={(e) => handleRotationChange(axis, parseFloat(e.target.value) || 0)}
-                      className="bg-transparent text-white outline-none w-full text-[10px]"
+                      className="bg-transparent text-[#e2e6ec] outline-none w-full text-[11px] font-mono"
+                      aria-label={`Rotation ${axis}`}
                     />
                   </div>
                 ))}
@@ -257,17 +316,18 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             </div>
 
             <div>
-              <span className="text-[#7e838c] block mb-1">SCALE (X, Y, Z):</span>
+              <span className="text-[#6e7584] block mb-1 text-[11.5px]">Scale</span>
               <div className="grid grid-cols-3 gap-1">
                 {(['x', 'y', 'z'] as (keyof Vector3D)[]).map((axis) => (
-                  <div key={axis} className="flex items-center bg-[#191b1e] px-2 py-0.5 rounded border border-[#3b3f46]">
-                    <span className="text-emerald-400 font-bold uppercase mr-1">{axis}:</span>
+                  <div key={axis} className="flex items-center bg-[#16191e] px-2 py-0.5 rounded-[6px] border border-[#3a3f4a]">
+                    <span className="text-[#34a87a] font-medium mr-1">{axis}</span>
                     <input
                       type="number"
                       step="0.1"
                       value={Math.round(scale[axis] * 100) / 100}
                       onChange={(e) => handleScaleChange(axis, parseFloat(e.target.value) || 1)}
-                      className="bg-transparent text-white outline-none w-full text-[10px]"
+                      className="bg-transparent text-[#e2e6ec] outline-none w-full text-[11px] font-mono"
+                      aria-label={`Scale ${axis}`}
                     />
                   </div>
                 ))}
@@ -277,37 +337,42 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             {!sceneTarget && (
               <button
                 type="button"
-                onClick={handleRecenterOrigin}
-                className="w-full mt-2 h-7 bg-[#2e3136] text-[#ed7300] border border-[#3b3f46] hover:bg-[#34383f] hover:text-[#ff9a3c] rounded flex items-center justify-center font-mono text-[9px] font-bold tracking-wider gap-1.5 transition"
-                title="Recenter the object's pivot point to its geometric center without shifting its world position"
+                onClick={() => setToolState((s) => ({ ...s, transformMode: 'pivot', isPainting3D: false }))}
+                className={`w-full mt-2 h-7 border rounded-[6px] flex items-center justify-center text-[11.5px] font-medium gap-1.5 transition ${
+                  toolState.transformMode === 'pivot'
+                    ? 'bg-[rgba(0,180,196,0.12)] text-[var(--ts-accent-hi)] border-[var(--ts-accent)] shadow-sm'
+                    : 'bg-[var(--ts-elevated)] text-[var(--ts-text)] border-[var(--ts-border-hi)] hover:bg-[var(--ts-hover)]'
+                }`}
+                title="Move origin without moving the mesh (.)"
+                aria-label="Pivot origin tool"
               >
-                <Sparkles className="w-3.5 h-3.5" />
-                RECENTER OBJECT PIVOT
+                Move origin
               </button>
             )}
           </div>
         </div>
 
         {!sceneTarget && (
-          <div className="cad-card p-2.5 space-y-3 border border-[#3b3f46] bg-[#191b1e]">
-            <span className="text-[9px] font-mono font-bold text-amber-400 uppercase tracking-wider block flex items-center gap-1">
-              <Sparkles className="w-3 h-3 text-amber-400" />
-              PBR MATERIAL PRESETS
+          <>
+          <div className="ts-card p-3 space-y-3">
+            <span className="ts-section-header px-0">
+              Material presets
             </span>
 
             <div className="grid grid-cols-3 gap-1">
               {([
-                ['gold', 'GOLD', 'amber'],
-                ['chrome', 'CHROME', 'slate'],
-                ['ruby', 'RUBY', 'rose'],
-                ['emerald', 'EMERALD', 'emerald'],
-                ['neon', 'NEON', 'fuchsia'],
-                ['plastic', 'PLASTIC', 'blue'],
+                ['gold', 'Gold'],
+                ['chrome', 'Chrome'],
+                ['ruby', 'Ruby'],
+                ['emerald', 'Emerald'],
+                ['neon', 'Neon'],
+                ['plastic', 'Plastic'],
               ] as const).map(([id, label]) => (
                 <button
                   key={id}
                   onClick={() => applyMaterialPreset(id)}
-                  className="py-1 bg-[#34383f] border border-[#383c42] text-[#ddd] font-mono text-[9px] font-bold rounded hover:border-[#ed7300] transition"
+                  className="py-1 bg-[#16191e] border border-[#3a3f4a] text-[#bcc4d0] text-[11.5px] font-medium rounded-[6px] hover:border-[#00b4c4] hover:text-[#e2e6ec]"
+                  aria-label={`${label} material preset`}
                 >
                   {label}
                 </button>
@@ -320,19 +385,22 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                   key={swatch}
                   type="button"
                   title={swatch}
+                  aria-label={`Color swatch ${swatch}`}
                   onClick={() => setToolState((s) => ({ ...s, activeColor: swatch }))}
-                  className={`w-5 h-5 rounded border ${
-                    toolState.activeColor === swatch ? 'border-white scale-110' : 'border-[#383c42]'
+                  className={`w-5 h-5 rounded-[6px] border ${
+                    toolState.activeColor === swatch ? 'border-[#00b4c4] ring-1 ring-[#00b4c4] scale-110' : 'border-[#3a3f4a]'
                   }`}
                   style={{ backgroundColor: swatch }}
                 />
               ))}
-              <span className="flex items-center gap-1 text-[#7e838c] ml-1">
+              <span className="flex items-center gap-1 text-[#6e7584] ml-1 font-mono text-[11px]">
                 <Palette className="w-3 h-3" />
                 {toolState.activeColor}
               </span>
             </div>
           </div>
+          <ModifierStackPanel mesh={mesh} setMesh={setMesh} />
+          </>
         )}
       </div>
     </div>

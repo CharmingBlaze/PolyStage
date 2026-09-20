@@ -54,14 +54,14 @@ export function LengthField({
 
   return (
     <div
-      className="flex items-center gap-1 h-6 px-1.5 rounded bg-[#2e3136] border border-[#e68619]/40 shrink-0 cursor-ew-resize select-none"
+      className="flex items-center gap-1 h-6 px-1.5 rounded bg-[#282c35] border border-[#00b4c4]/40 shrink-0 cursor-ew-resize select-none"
       title={title || 'Drag left/right to change length · click number to type · Shift = fine'}
       onPointerDown={beginDrag}
       onPointerMove={onDragMove}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
     >
-      <span className="text-[#e68619] font-bold pointer-events-none">{label}</span>
+      <span className="text-[#00b4c4] font-bold pointer-events-none">{label}</span>
       <input
         type="text"
         inputMode="decimal"
@@ -89,7 +89,7 @@ export function LengthField({
           }
         }}
         onPointerDown={(e) => e.stopPropagation()}
-        className="w-12 bg-transparent outline-none text-right text-[#e0e0e0] cursor-text caret-[#e68619]"
+        className="w-12 bg-transparent outline-none text-right text-[#e0e0e0] cursor-text caret-[#00b4c4]"
       />
       <span className="text-[#464b53] pointer-events-none">s</span>
     </div>

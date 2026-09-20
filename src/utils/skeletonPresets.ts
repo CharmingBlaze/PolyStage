@@ -18,11 +18,22 @@ export interface SkeletonPresetMeta {
   boneCount: number;
 }
 
+/**
+ * Bone counts are derived from the actual builders so the UI can never advertise
+ * a skeleton that does not match what gets created.
+ */
+const presetBoneCounts: Record<SkeletonPresetId, number> = {
+  human: createHumanoidRig().length,
+  bird: createBirdRig().length,
+  dog: createDogRig().length,
+  fish: createFishRig().length,
+};
+
 export const SKELETON_PRESETS: SkeletonPresetMeta[] = [
-  { id: 'human', label: 'Human', description: 'Biped: hips, spine, arms, legs, head.', boneCount: 20 },
-  { id: 'bird', label: 'Bird', description: 'Body + wings + 2 legs + head + tail.', boneCount: 13 },
-  { id: 'dog', label: 'Dog / Quadruped', description: 'Spine, four legs, neck, head, tail.', boneCount: 22 },
-  { id: 'fish', label: 'Fish', description: 'Head-to-tail chain for swimming deformation.', boneCount: 8 },
+  { id: 'human', label: 'Human', description: 'Biped: hips, spine, arms, legs, head.', boneCount: presetBoneCounts.human },
+  { id: 'bird', label: 'Bird', description: 'Body + wings + 2 legs + head + tail.', boneCount: presetBoneCounts.bird },
+  { id: 'dog', label: 'Dog / Quadruped', description: 'Spine, four legs, neck, head, tail.', boneCount: presetBoneCounts.dog },
+  { id: 'fish', label: 'Fish', description: 'Head-to-tail chain for swimming deformation.', boneCount: presetBoneCounts.fish },
 ];
 
 /** Bird skeleton matching GLB Animator-style hierarchy (~13 bones). */
@@ -121,14 +132,21 @@ export function createPresetSkeleton(id: SkeletonPresetId, sizeHint = 2): CADBon
 }
 
 export function meshBounds(mesh: CADMesh): { min: THREE.Vector3; max: THREE.Vector3; center: THREE.Vector3; size: THREE.Vector3 } {
+  // Full TRS: bounds must follow the mesh rotation too, not just scale + translate.
+  const matrix = new THREE.Matrix4().compose(
+    new THREE.Vector3(mesh.position.x, mesh.position.y, mesh.position.z),
+    new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(mesh.rotation.x, mesh.rotation.y, mesh.rotation.z),
+    ),
+    new THREE.Vector3(mesh.scale.x, mesh.scale.y, mesh.scale.z),
+  );
   const min = new THREE.Vector3(Infinity, Infinity, Infinity);
   const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+  const scratch = new THREE.Vector3();
   mesh.vertices.forEach((vertex) => {
-    const wx = vertex.x * mesh.scale.x + mesh.position.x;
-    const wy = vertex.y * mesh.scale.y + mesh.position.y;
-    const wz = vertex.z * mesh.scale.z + mesh.position.z;
-    min.min(new THREE.Vector3(wx, wy, wz));
-    max.max(new THREE.Vector3(wx, wy, wz));
+    scratch.set(vertex.x, vertex.y, vertex.z).applyMatrix4(matrix);
+    min.min(scratch);
+    max.max(scratch);
   });
   if (!Number.isFinite(min.x)) {
     min.set(-0.5, 0, -0.5);

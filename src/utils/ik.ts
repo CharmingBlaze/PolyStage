@@ -9,25 +9,58 @@ function eulerFromQuat(q: THREE.Quaternion): Vector3D {
   return { x: e.x, y: e.y, z: e.z };
 }
 
-function getWorldPosition(bones: CADBone[], boneId: string): THREE.Vector3 {
-  const matrices = getBoneWorldMatrices(bones, false);
-  const m = matrices.get(boneId);
-  return m ? new THREE.Vector3().setFromMatrixPosition(m) : new THREE.Vector3();
+/** World-space head (joint) of a bone, falling back to its local pose when unknown. */
+export function worldPositionOf(
+  bones: CADBone[],
+  matrices: Map<string, THREE.Matrix4>,
+  boneId: string,
+): THREE.Vector3 {
+  const matrix = matrices.get(boneId);
+  if (matrix) return new THREE.Vector3().setFromMatrixPosition(matrix);
+  const bone = bones.find((b) => b.id === boneId);
+  const p = bone?.position ?? { x: 0, y: 0, z: 0 };
+  return new THREE.Vector3(p.x, p.y, p.z);
 }
 
-function getChain(bones: CADBone[], tipId: string, chainLength: number): CADBone[] {
-  const chain: CADBone[] = [];
-  let cursor: CADBone | undefined = bones.find((b) => b.id === tipId);
-  while (cursor && chain.length < chainLength) {
-    chain.push(cursor);
-    cursor = cursor.parentId ? bones.find((b) => b.id === cursor!.parentId) : undefined;
+export function getWorldPosition(
+  bones: CADBone[],
+  boneId: string,
+): THREE.Vector3 {
+  const matrices = getBoneWorldMatrices(bones, false);
+  return worldPositionOf(bones, matrices, boneId);
+}
+
+/** World-space tail of a bone (head + its local +Y length), Blender's IK effector. */
+function worldTailOf(
+  matrices: Map<string, THREE.Matrix4>,
+  bone: CADBone | undefined,
+): THREE.Vector3 {
+  if (!bone) return new THREE.Vector3();
+  const matrix = matrices.get(bone.id);
+  if (!matrix) return new THREE.Vector3();
+  return new THREE.Vector3(0, Math.max(bone.length || 0.01, 1e-4), 0).applyMatrix4(matrix);
+}
+
+/** Walk from the tip up the hierarchy; `[tip, ..., rootOfChain]`. */
+function getChainIds(bones: CADBone[], tipId: string, chainLength: number): string[] {
+  const byId = new Map(bones.map((bone) => [bone.id, bone]));
+  const chain: string[] = [];
+  let cursor = byId.get(tipId);
+  const guard = new Set<string>();
+  while (cursor && chain.length < chainLength && !guard.has(cursor.id)) {
+    guard.add(cursor.id);
+    chain.push(cursor.id);
+    cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined;
   }
-  return chain; // [tip, ..., rootOfChain]
+  return chain;
 }
 
 /**
- * CCD IK: rotate bones in the chain so the tip approaches the world-space target.
- * Returns updated bones array (pose only).
+ * CCD IK: rotate the chain so the tip bone's TAIL reaches the world-space target.
+ *
+ * Matches Blender's IK constraint: the constrained bone is the tip, its tail is
+ * the effector, and `chainLength` counts bones from the tip upward (so
+ * `chainLength = 2` rotates the tip plus its parent).
  */
 export function solveCcdIk(
   bones: CADBone[],
@@ -37,53 +70,60 @@ export function solveCcdIk(
   iterations = 12,
   threshold = 0.001,
 ): CADBone[] {
-  let result = bones.map((b) => ({
+  const result = bones.map((b) => ({
     ...b,
     position: cloneV(b.position),
     rotation: cloneV(b.rotation),
     scale: cloneV(b.scale),
   }));
 
-  const chain = getChain(result, tipBoneId, Math.max(1, chainLength));
-  if (chain.length < 2) return result;
-
   const target = new THREE.Vector3(targetWorld.x, targetWorld.y, targetWorld.z);
+  if (![target.x, target.y, target.z].every(Number.isFinite)) return result;
 
-  for (let iter = 0; iter < iterations; iter += 1) {
-    const tipPos = getWorldPosition(result, tipBoneId);
-    if (tipPos.distanceTo(target) < threshold) break;
+  const chainIds = getChainIds(result, tipBoneId, Math.max(1, Math.round(chainLength)));
+  if (chainIds.length === 0) return result;
 
-    // Rotate from parent of tip toward root (skip tip itself for rotation source).
-    for (let i = 1; i < chain.length; i += 1) {
-      const bone = chain[i];
-      if (bone.locked) continue;
+  const poseOf = (id: string) => result.find((b) => b.id === id);
 
-      const boneWorldPos = getWorldPosition(result, bone.id);
-      const toTip = tipPos.clone().sub(boneWorldPos).normalize();
-      const toTarget = target.clone().sub(boneWorldPos).normalize();
-      if (toTip.lengthSq() < 1e-8 || toTarget.lengthSq() < 1e-8) continue;
+  for (let iter = 0; iter < Math.max(1, iterations); iter += 1) {
+    let matrices = getBoneWorldMatrices(result, false);
+    let effector = worldTailOf(matrices, poseOf(tipBoneId));
+    if (effector.distanceTo(target) < threshold) break;
 
-      const delta = new THREE.Quaternion().setFromUnitVectors(toTip, toTarget);
-      const matrices = getBoneWorldMatrices(result, false);
-      const worldMatrix = matrices.get(bone.id) || new THREE.Matrix4();
-      const parent = bone.parentId ? result.find((b) => b.id === bone.parentId) : null;
-      const parentWorld = parent
-        ? matrices.get(parent.id) || new THREE.Matrix4()
-        : new THREE.Matrix4();
+    // Nearest-to-effector first: tip, then its parent, up to the chain root.
+    for (let i = 0; i < chainIds.length; i += 1) {
+      const bone = poseOf(chainIds[i]);
+      if (!bone || bone.locked) continue;
 
+      const worldMatrix = matrices.get(bone.id);
+      if (!worldMatrix) continue;
+      const joint = new THREE.Vector3().setFromMatrixPosition(worldMatrix);
+      const toEffector = effector.clone().sub(joint);
+      const toTarget = target.clone().sub(joint);
+      if (toEffector.lengthSq() < 1e-10 || toTarget.lengthSq() < 1e-10) continue;
+
+      const delta = new THREE.Quaternion().setFromUnitVectors(
+        toEffector.normalize(),
+        toTarget.normalize(),
+      );
       const worldQuat = new THREE.Quaternion().setFromRotationMatrix(worldMatrix);
       const newWorldQuat = delta.multiply(worldQuat);
-      const parentQuat = new THREE.Quaternion().setFromRotationMatrix(parentWorld);
+
+      const parent = bone.parentId ? poseOf(bone.parentId) : null;
+      const parentMatrix = parent ? matrices.get(parent.id) : null;
+      const parentQuat = parentMatrix
+        ? new THREE.Quaternion().setFromRotationMatrix(parentMatrix)
+        : new THREE.Quaternion();
       const localQuat = parentQuat.clone().invert().multiply(newWorldQuat);
 
       const idx = result.findIndex((b) => b.id === bone.id);
-      if (idx >= 0) {
-        result[idx] = { ...result[idx], rotation: eulerFromQuat(localQuat) };
-      }
+      if (idx < 0) continue;
+      result[idx] = { ...result[idx], rotation: eulerFromQuat(localQuat) };
 
-      // Refresh tip after each bone rotation
-      tipPos.copy(getWorldPosition(result, tipBoneId));
-      if (tipPos.distanceTo(target) < threshold) break;
+      // Refresh the effector so the next bone solves against the moved tail.
+      matrices = getBoneWorldMatrices(result, false);
+      effector = worldTailOf(matrices, poseOf(tipBoneId));
+      if (effector.distanceTo(target) < threshold) return result;
     }
   }
 
@@ -113,12 +153,14 @@ export function applyLimitRotation(bones: CADBone[]): CADBone[] {
 }
 
 export function applyCopyRotation(bones: CADBone[]): CADBone[] {
+  const byId = new Map(bones.map((bone) => [bone.id, bone]));
   return bones.map((bone) => {
     const copy = bone.constraints?.find((c) => c.type === 'copy-rotation' && c.enabled && c.targetBoneId);
-    if (!copy?.targetBoneId) return bone;
-    const source = bones.find((b) => b.id === copy.targetBoneId);
+    if (!copy?.targetBoneId || copy.targetBoneId === bone.id) return bone;
+    const source = byId.get(copy.targetBoneId);
     if (!source) return bone;
-    const influence = copy.influence ?? 1;
+    const influence = Math.max(0, Math.min(1, copy.influence ?? 1));
+    if (influence <= 0) return bone;
     return {
       ...bone,
       rotation: {
@@ -130,28 +172,40 @@ export function applyCopyRotation(bones: CADBone[]): CADBone[] {
   });
 }
 
+/**
+ * Look-at constraint: aim the bone's local +Y at the target bone.
+ *
+ * World matrices are rebuilt only when a bone actually changes, so a rig with no
+ * look-at constraints costs a single cheap check.
+ */
 export function applyLookAt(bones: CADBone[]): CADBone[] {
-  return bones.map((bone) => {
-    const look = bone.constraints?.find((c) => c.type === 'look-at' && c.enabled && c.targetBoneId);
-    if (!look?.targetBoneId) return bone;
-    const targetPos = getWorldPosition(bones, look.targetBoneId);
-    const bonePos = getWorldPosition(bones, bone.id);
-    const dir = targetPos.clone().sub(bonePos);
-    if (dir.lengthSq() < 1e-8) return bone;
+  const result = bones.map((bone) => ({ ...bone, rotation: cloneV(bone.rotation) }));
+  let matrices: Map<string, THREE.Matrix4> | null = null;
 
-    const parent = bone.parentId ? bones.find((b) => b.id === bone.parentId) : null;
-    const matrices = getBoneWorldMatrices(bones, false);
-    const parentWorld = parent ? matrices.get(parent.id) || new THREE.Matrix4() : new THREE.Matrix4();
-    const parentQuat = new THREE.Quaternion().setFromRotationMatrix(parentWorld);
+  for (let i = 0; i < result.length; i += 1) {
+    const bone = result[i];
+    const look = bone.constraints?.find((c) => c.type === 'look-at' && c.enabled && c.targetBoneId);
+    if (!look?.targetBoneId || look.targetBoneId === bone.id) continue;
+
+    matrices ??= getBoneWorldMatrices(result, false);
+    const targetPos = worldPositionOf(result, matrices, look.targetBoneId);
+    const bonePos = worldPositionOf(result, matrices, bone.id);
+    const dir = targetPos.clone().sub(bonePos);
+    if (dir.lengthSq() < 1e-10) continue;
+
+    const parentWorld = bone.parentId ? matrices.get(bone.parentId) ?? null : null;
+    const parentQuat = parentWorld
+      ? new THREE.Quaternion().setFromRotationMatrix(parentWorld)
+      : new THREE.Quaternion();
 
     const worldQuat = new THREE.Quaternion().setFromUnitVectors(
       new THREE.Vector3(0, 1, 0),
       dir.normalize(),
     );
     const localQuat = parentQuat.clone().invert().multiply(worldQuat);
-    const influence = look.influence ?? 1;
+    const influence = Math.max(0, Math.min(1, look.influence ?? 1));
     const targetEuler = eulerFromQuat(localQuat);
-    return {
+    result[i] = {
       ...bone,
       rotation: {
         x: bone.rotation.x + (targetEuler.x - bone.rotation.x) * influence,
@@ -159,6 +213,25 @@ export function applyLookAt(bones: CADBone[]): CADBone[] {
         z: bone.rotation.z + (targetEuler.z - bone.rotation.z) * influence,
       },
     };
+    matrices = null;
+  }
+
+  return result;
+}
+
+/** Blend two poses by slerping each bone's rotation (IK influence). */
+export function blendRotation(from: CADBone[], to: CADBone[], t: number): CADBone[] {
+  const fromById = new Map(from.map((bone) => [bone.id, bone]));
+  return to.map((bone) => {
+    const prev = fromById.get(bone.id);
+    if (!prev) return bone;
+    const a = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(prev.rotation.x, prev.rotation.y, prev.rotation.z),
+    );
+    const b = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(bone.rotation.x, bone.rotation.y, bone.rotation.z),
+    );
+    return { ...bone, rotation: eulerFromQuat(a.slerp(b, t)) };
   });
 }
 
@@ -175,17 +248,33 @@ export function evaluateConstraints(bones: CADBone[]): CADBone[] {
     ...(b.constraints ? { constraints: [...b.constraints] } : {}),
   }));
 
-  // Solve IK first
+  // Collect IK jobs before solving so a solved parent cannot corrupt a pending
+  // constraint's target pose mid-iteration.
+  const ikJobs: Array<{ boneId: string; constraint: BoneConstraint }> = [];
   result.forEach((bone) => {
-    const ik = bone.constraints?.find((c: BoneConstraint) => c.type === 'ik' && c.enabled && c.targetBoneId);
-    if (!ik?.targetBoneId) return;
-    const targetPos = getWorldPosition(result, ik.targetBoneId);
-    result = solveCcdIk(
+    if (bone.locked) return;
+    (bone.constraints || []).forEach((constraint) => {
+      if (constraint.type === 'ik' && constraint.enabled && constraint.targetBoneId) {
+        ikJobs.push({ boneId: bone.id, constraint });
+      }
+    });
+  });
+
+  ikJobs.forEach(({ boneId, constraint }) => {
+    const influence = Math.max(0, Math.min(1, constraint.influence ?? 1));
+    if (influence <= 0) return;
+    const targetId = constraint.targetBoneId;
+    if (!targetId) return;
+    const targetPos = worldPositionOf(result, getBoneWorldMatrices(result, false), targetId);
+    if (![targetPos.x, targetPos.y, targetPos.z].every(Number.isFinite)) return;
+    const solved = solveCcdIk(
       result,
-      bone.id,
+      boneId,
       { x: targetPos.x, y: targetPos.y, z: targetPos.z },
-      ik.chainLength ?? 3,
+      constraint.chainLength ?? 3,
     );
+    // Influence 0-1 blends between the unsolved pose and the IK result.
+    result = influence >= 1 ? solved : blendRotation(result, solved, influence);
   });
 
   result = applyCopyRotation(result);

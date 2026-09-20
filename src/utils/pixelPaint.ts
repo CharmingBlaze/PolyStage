@@ -176,7 +176,7 @@ export function drawEllipseOutline(
 export const ASEPRITE_DEFAULT_PALETTE = [
   '#000000', '#1d2b53', '#7e2553', '#008751', '#ab5236', '#5f574f', '#c2c3c7', '#fff1e8',
   '#ff004d', '#ffa300', '#ffec27', '#00e436', '#29adff', '#83769c', '#ff77a8', '#ffccaa',
-  '#ffffff', '#94e2ff', '#ed7300', '#ed7300', '#e68619', '#ec5b62', '#2d9d78', '#6e6e6e',
+  '#ffffff', '#94e2ff', '#00b4c4', '#00b4c4', '#00b4c4', '#ec5b62', '#2d9d78', '#6e6e6e',
   '#4d4d4d', '#8c8c8c', '#b3b3b3', '#e8e8e8', '#7b2cbf', '#f4a261', '#2a9d8f', '#e9c46a',
 ];
 

@@ -1,8 +1,8 @@
 /* Vector Blockout — PolyStage theme (charcoal + orange) */
 .vector-panel,
 .vector-overlay {
-  --accent: #ed7300;
-  --accent-hot: #ff9a3c;
+  --accent: #00b4c4;
+  --accent-hot: #00d4e2;
   --accent-dim: rgba(237, 115, 0, 0.18);
   --text: #e6e6e6;
   --fg: #e6e6e6;
@@ -34,14 +34,23 @@
   border-color: var(--accent);
   color: var(--accent-hot);
 }
-.vector-panel button.active,
+.vector-panel button.active {
+  background: transparent;
+  border: 1px dashed var(--accent);
+  color: var(--accent-hot);
+  font-weight: 600;
+}
 .vector-panel button.primary {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
   font-weight: 600;
 }
-.vector-panel button.active:hover:not(:disabled),
+.vector-panel button.active:hover:not(:disabled) {
+  background: transparent;
+  border-color: var(--accent-hot);
+  color: var(--accent-hot);
+}
 .vector-panel button.primary:hover:not(:disabled) {
   background: var(--accent-hot);
   border-color: var(--accent-hot);
@@ -159,7 +168,7 @@
 }
 .vector-marquee {
   fill: rgba(237, 115, 0, 0.12);
-  stroke: #ed7300;
+  stroke: #00b4c4;
   stroke-width: 1.5;
   stroke-dasharray: 5 4;
   pointer-events: none;
@@ -496,7 +505,9 @@
   color: var(--accent-hot); background: rgba(237, 115, 0, 0.08); border-color: transparent;
 }
 .vector-tabs button.active {
-  color: #fff; background: rgba(237, 115, 0, 0.16); border-bottom-color: var(--accent);
+  color: var(--text);
+  background: transparent;
+  border: 1px dashed var(--accent);
 }
 .vector-tab-body {
   display: flex; flex-direction: column; gap: 8px;
@@ -512,7 +523,7 @@
   text-transform: uppercase; letter-spacing: 0.03em; border-radius: 3px;
 }
 .vector-subtabs button:hover:not(:disabled) { color: var(--accent-hot); border-color: transparent }
-.vector-subtabs button.active { background: var(--accent); border-color: var(--accent); color: #fff }
+.vector-subtabs button.active { background: transparent; border: 1px dashed var(--accent); color: var(--accent-hot) }
 .vector-section-label {
   color: var(--dim); font-size: 9px; font-weight: 700;
   letter-spacing: 0.08em; text-transform: uppercase; margin-top: 2px;
@@ -630,9 +641,9 @@
   cursor: grab;
 }
 .vector-quality-presets button.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+  background: transparent;
+  border: 1px dashed var(--accent);
+  color: var(--accent-hot);
 }
 .vector-density input[type=range] { accent-color: var(--accent); }
 .vector-quality-presets { display: flex; gap: 4px; margin-bottom: 5px }
@@ -685,9 +696,9 @@
 }
 .vector-ref-opacity input[type=range] { width: 100%; accent-color: var(--accent); }
 .vector-cap-row .vector-quality-presets button.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+  background: transparent;
+  border: 1px dashed var(--accent);
+  color: var(--accent-hot);
 }
 
 /* Front / Side viewport reference chrome */
@@ -719,17 +730,17 @@
   line-height: 1.3;
 }
 .blockout-ref-btn:hover:not(:disabled) {
-  border-color: #ed7300;
-  color: #ff9a3c;
+  border-color: #00b4c4;
+  color: #00d4e2;
 }
 .blockout-ref-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 .blockout-ref-btn.active {
-  background: #ed7300;
-  border-color: #ed7300;
-  color: #fff;
+  background: transparent;
+  border: 1px dashed var(--ts-accent);
+  color: var(--ts-accent-hi);
 }
 .blockout-ref-btn.active.lock {
   background: #2e3136;
@@ -737,8 +748,8 @@
   color: #ffb366;
 }
 .blockout-ref-btn.primary {
-  background: #ed7300;
-  border-color: #ed7300;
+  background: #00b4c4;
+  border-color: #00b4c4;
   color: #fff;
 }
 .blockout-ref-btn.danger:hover:not(:disabled) {
@@ -755,7 +766,7 @@
 }
 .blockout-ref-opacity input[type=range] {
   width: 56px;
-  accent-color: #ed7300;
+  accent-color: #00b4c4;
 }
 .blockout-ref-hint {
   flex: 1 1 100%;

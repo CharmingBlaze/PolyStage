@@ -1,14 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  GripHorizontal, Minus, X, Scissors, Layers, Box, Maximize2,
-  Combine, Sparkles, Magnet, GitBranch, ArrowUpRight,
-  FlipHorizontal, Minimize2, CornerDownRight, Pencil, MousePointerClick,
+  Minus, X, Scissors, Layers, Box, Maximize2,
+  Sparkles, GitBranch,
+  FlipHorizontal, FlipVertical, CornerDownRight, Pencil, RotateCw, RotateCcw,
 } from 'lucide-react';
 import type { CADMesh, PrimitiveType, ToolState } from '../types/cad';
-import {
-  subdivideFaces, fillSelectedVerticesFace, bevelSelectedEdges
-} from '../utils/advancedMeshTools';
+import { bevelSelectedEdges } from '../utils/advancedMeshTools';
+import { fillTargets, resolveOperatorTargets, subdivideTargets } from '../utils/meshOperators';
 import { flipFaceNormals } from '../utils/blockbenchCore';
+import { BlenderIcon } from './icons/BlenderIcon';
+import { flipMesh, rotateMesh90, triangulateMeshFaces } from '../utils/meshUtils';
+import { originToBottom, originToGeometry, originToSelection, originToWorldZero } from '../utils/meshOrigin';
 
 export type ToolWindowTab = 'tools' | 'primitives';
 
@@ -47,26 +49,61 @@ interface FloatingToolWindowProps {
 }
 
 const PRIMITIVES: { type: PrimitiveType; name: string; is2D?: boolean }[] = [
-  { type: 'cube', name: 'Box / Cube' },
+  { type: 'cube', name: 'Cube' },
   { type: 'cylinder', name: 'Cylinder' },
   { type: 'cone', name: 'Cone' },
   { type: 'sphere', name: 'Sphere' },
-  { type: 'torus', name: 'Torus Ring' },
-  { type: 'torusKnot', name: 'Torus Knot' },
+  { type: 'torus', name: 'Torus' },
+  { type: 'torusKnot', name: 'Torus knot' },
   { type: 'pyramid', name: 'Pyramid' },
   { type: 'octahedron', name: 'Octahedron' },
   { type: 'dodecahedron', name: 'Dodecahedron' },
   { type: 'icosahedron', name: 'Icosahedron' },
   { type: 'tetrahedron', name: 'Tetrahedron' },
-  { type: 'plane', name: 'Plane / Quad', is2D: true },
-  { type: 'circle', name: 'Disk Circle', is2D: true },
-  { type: 'ring', name: 'Ring Surface', is2D: true },
-  { type: 'tube', name: 'Hollow Tube' },
-  { type: 'ramp', name: 'Wedge Ramp' },
-  { type: 'chest', name: 'Default Box' },
-  { type: 'car', name: 'Low-Poly Car' },
-  { type: 'tree', name: 'Pine Tree' },
+  { type: 'plane', name: 'Plane', is2D: true },
+  { type: 'circle', name: 'Circle', is2D: true },
+  { type: 'ring', name: 'Ring', is2D: true },
+  { type: 'tube', name: 'Tube' },
+  { type: 'ramp', name: 'Ramp' },
+  { type: 'wall', name: 'Wall' },
+  { type: 'window', name: 'Window' },
+  { type: 'stairs', name: 'Stairs' },
+  { type: 'roof', name: 'Roof' },
+  { type: 'arch', name: 'Arch' },
+  { type: 'ladder', name: 'Ladder' },
+  { type: 'chest', name: 'Chest' },
+  { type: 'car', name: 'Car' },
+  { type: 'tree', name: 'Tree' },
 ];
+
+function ToolCmd({
+  label,
+  kbd,
+  onClick,
+  icon,
+  danger,
+  title,
+}: {
+  label: string;
+  kbd?: string;
+  onClick?: () => void;
+  icon?: React.ReactNode;
+  danger?: boolean;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      className={`tool-cmd ${danger ? 'is-danger' : ''}`}
+      onClick={onClick}
+      title={title ?? (kbd ? `${label} (${kbd})` : label)}
+    >
+      <span className="tool-cmd__icon" aria-hidden>{icon}</span>
+      <span className="tool-cmd__label">{label}</span>
+      {kbd ? <kbd className="tool-cmd__kbd">{kbd}</kbd> : null}
+    </button>
+  );
+}
 
 export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
   isOpen,
@@ -99,7 +136,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
   onCopy,
   onPaste,
   onMagnetSnap,
-  mesh: _mesh,
+  mesh,
 }) => {
   // Default just below the viewport's top-left mode label so it stays readable.
   const [position, setPosition] = useState({ x: 52, y: 88 });
@@ -128,7 +165,7 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDragging) return;
       setPosition({
-        x: Math.max(10, Math.min(window.innerWidth - 280, e.clientX - dragStartRef.current.x)),
+        x: Math.max(10, Math.min(window.innerWidth - 320, e.clientX - dragStartRef.current.x)),
         y: Math.max(10, Math.min(window.innerHeight - 80, e.clientY - dragStartRef.current.y)),
       });
     };
@@ -147,9 +184,27 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
 
   if (!isOpen) return null;
 
+  /** Active sub-object mode the tool buttons resolve against. */
+  const componentMode: 'vertex' | 'edge' | 'face' =
+    toolState.editMode === 'vertex' || toolState.editMode === 'edge' || toolState.editMode === 'face'
+      ? toolState.editMode
+      : 'face';
+
+  const resolveTargets = () =>
+    resolveOperatorTargets(mesh, componentMode, {
+      vertexIds: selectedVertexIds,
+      edgeIds: selectedEdgeIds,
+      faceIds: selectedFaceIds,
+    });
+
   const handleSubdivide = () => {
-    if (onApplySubdivide) onApplySubdivide();
-    else setMesh((prev) => subdivideFaces(prev, selectedFaceIds));
+    if (onApplySubdivide) {
+      onApplySubdivide();
+      return;
+    }
+    const targets = resolveTargets();
+    if (targets.edgeIds.length === 0) return;
+    setMesh((prev) => subdivideTargets(prev, targets, 1));
   };
 
   const handleLoopCut = () => {
@@ -161,9 +216,8 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
   };
 
   const handleFillFace = () => {
-    if (selectedVertexIds.length >= 3) {
-      setMesh((prev) => fillSelectedVerticesFace(prev, selectedVertexIds));
-    }
+    const targets = resolveTargets();
+    setMesh((prev) => fillTargets(prev, targets, componentMode));
   };
 
   const handleBevel = () => {
@@ -171,10 +225,9 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
       onBevelEdges();
       return;
     }
-    if (selectedEdgeIds.length > 0) {
-      setMesh((prev) => bevelSelectedEdges(prev, selectedEdgeIds));
-    } else if (selectedFaceIds.length > 0) {
-      setMesh((prev) => subdivideFaces(prev, selectedFaceIds));
+    const targets = resolveTargets();
+    if (targets.edgeIds.length > 0) {
+      setMesh((prev) => bevelSelectedEdges(prev, targets.edgeIds));
     }
   };
 
@@ -187,8 +240,72 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
         });
         return current;
       });
+    } else {
+      setMesh((prev) => {
+        let current = prev;
+        prev.faces.forEach((f) => {
+          current = flipFaceNormals(current, f.id);
+        });
+        return current;
+      });
     }
   };
+
+  const selectedVertIds = (): string[] | null => {
+    const mode = toolState.editMode;
+    if (mode === 'object' || mode === 'bone') return null;
+    if (mode === 'vertex') return selectedVertexIds.length ? selectedVertexIds : null;
+    if (mode === 'edge') {
+      const ids = new Set<string>();
+      for (const e of mesh.edges) {
+        if (selectedEdgeIds.includes(e.id)) {
+          ids.add(e.v1Id);
+          ids.add(e.v2Id);
+        }
+      }
+      return ids.size ? [...ids] : null;
+    }
+    const ids = new Set<string>();
+    for (const f of mesh.faces) {
+      if (selectedFaceIds.includes(f.id)) {
+        f.vertexIds.forEach((id) => ids.add(id));
+      }
+    }
+    return ids.size ? [...ids] : null;
+  };
+
+  const applyFlip = (axis: 'x' | 'y' | 'z') => {
+    setMesh((prev) => flipMesh(prev, axis, selectedVertIds()));
+  };
+
+  const applyRotate90 = (axis: 'x' | 'y' | 'z', clockwise = false) => {
+    setMesh((prev) => rotateMesh90(prev, axis, clockwise, selectedVertIds()));
+  };
+
+  const handleTriangulate = () => {
+    setMesh((prev) =>
+      triangulateMeshFaces(prev, toolState.editMode === 'face' && selectedFaceIds.length ? selectedFaceIds : undefined),
+    );
+  };
+
+  const handleRecenter = () => {
+    setMesh((prev) => originToGeometry(prev));
+  };
+  const handleOriginToSelection = () => {
+    setMesh((prev) => originToSelection(prev, selectedVertIds()));
+  };
+  const handleOriginToWorld = () => {
+    setMesh((prev) => originToWorldZero(prev));
+  };
+  const handleOriginToBottom = () => {
+    setMesh((prev) => originToBottom(prev));
+  };
+
+  const mode = toolState.editMode === 'bone' ? 'object' : toolState.editMode;
+  const isObject = mode === 'object';
+  const isVertex = mode === 'vertex';
+  const isEdge = mode === 'edge';
+  const isFace = mode === 'face';
 
   const handleSelectPrimitive = (type: PrimitiveType) => {
     if (spawnMode === 'draw') {
@@ -210,68 +327,55 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
     }
   };
 
-  const title = activeTab === 'tools' ? 'MODELING TOOLS' : '3D PRIMITIVES';
+  const title = activeTab === 'tools' ? 'Tools' : 'Primitives';
 
   return (
     <div
-      className="fixed z-50 rounded-[10px] overflow-hidden border border-[#3b3f46] bg-[#26282d] font-sans text-[10px] select-none text-[#c6cad1] shadow-[0_10px_32px_rgba(0,0,0,0.5),0_2px_8px_rgba(0,0,0,0.35)]"
+      className="ts-float"
       style={{
         left: `${position.x}px`,
         top: `${position.y}px`,
-        width: isMinimized ? '240px' : '280px',
+        width: isMinimized ? '220px' : '300px',
       }}
     >
-      <div
-        onMouseDown={handleMouseDown}
-        className="h-7 px-2 flex items-center justify-between border-b border-[#101114] bg-[#212327] cursor-grab active:cursor-grabbing"
-      >
-        <div className="flex items-center gap-1.5 font-bold text-[#c6cad1] min-w-0 uppercase tracking-wide text-[9px]">
-          <GripHorizontal className="w-3.5 h-3.5 text-[#8b909a] shrink-0" />
-          <span className="truncate">{title}</span>
-        </div>
-        <div className="flex items-center gap-1 shrink-0">
+      <div onMouseDown={handleMouseDown} className="ts-float__bar">
+        <span className="ts-float__title">{title}</span>
+        <div className="flex items-center gap-0.5">
           <button
             type="button"
             onClick={() => setIsMinimized(!isMinimized)}
-            className="p-1 hover:bg-[#3b3f46] rounded text-[#a6abb4] hover:text-white"
-            title={isMinimized ? 'Expand Panel' : 'Minimize Panel'}
+            className="ts-btn ts-btn--ghost w-7 h-7"
+            title={isMinimized ? 'Expand' : 'Minimize'}
+            aria-label={isMinimized ? 'Expand' : 'Minimize'}
           >
-            {isMinimized ? <Maximize2 className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
+            {isMinimized ? <Maximize2 className="w-3.5 h-3.5" /> : <Minus className="w-3.5 h-3.5" />}
           </button>
           <button
             type="button"
             onClick={onClose}
-            className="p-1 hover:bg-rose-900/40 hover:text-rose-400 rounded text-[#a6abb4]"
-            title="Close Panel (Shift+T)"
+            className="ts-btn ts-btn--ghost w-7 h-7"
+            title="Close"
+            aria-label="Close"
           >
-            <X className="w-3 h-3" />
+            <X className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
-      {/* Top-level window tabs */}
-      <div className="grid grid-cols-2 gap-0.5 p-1 bg-[#191b1e] border-b border-[#101114]">
+      <div className="flex border-b border-[#1a1c22]">
         <button
           type="button"
           onClick={() => { setActiveTab('tools'); setIsMinimized(false); }}
-          className={`h-7 rounded text-[9px] font-bold uppercase tracking-wide flex items-center justify-center gap-1 transition ${
-            activeTab === 'tools'
-              ? 'bg-[#ed7300] text-white shadow'
-              : 'text-[#858a93] hover:bg-[#1e2023] hover:text-white'
-          }`}
+          className={`flex-1 insp-tab h-8 ${activeTab === 'tools' ? 'is-on' : ''}`}
         >
-          <Sparkles className="w-3 h-3" /> Tools
+          Tools
         </button>
         <button
           type="button"
           onClick={() => { setActiveTab('primitives'); setIsMinimized(false); }}
-          className={`h-7 rounded text-[9px] font-bold uppercase tracking-wide flex items-center justify-center gap-1 transition ${
-            activeTab === 'primitives'
-              ? 'bg-[#ed7300] text-white shadow'
-              : 'text-[#858a93] hover:bg-[#1e2023] hover:text-white'
-          }`}
+          className={`flex-1 insp-tab h-8 ${activeTab === 'primitives' ? 'is-on' : ''}`}
         >
-          <Box className="w-3 h-3" /> Primitives
+          Primitives
         </button>
       </div>
 
@@ -279,404 +383,294 @@ export const FloatingToolWindow: React.FC<FloatingToolWindowProps> = ({
         <div className="p-1.5 flex gap-1 flex-wrap items-center justify-around bg-[#202226] rounded-b-lg">
           {activeTab === 'tools' ? (
             <>
-              <button type="button" onClick={onExtrudeFace} title="Extrude (E)" className="p-1.5 cad-button text-cyan-400">
-                <ArrowUpRight className="w-3.5 h-3.5" />
+              <button type="button" onClick={onExtrudeFace} title="Extrude (E)" className="tool-cmd" aria-label="Extrude">
+                <BlenderIcon name="extrude" size={14} />
               </button>
-              <button type="button" onClick={handleSubdivide} title="Subdivide" className="p-1.5 cad-button text-amber-400">
-                <Sparkles className="w-3.5 h-3.5" />
+              <button type="button" onClick={handleSubdivide} title="Subdivide (W)" className="tool-cmd" aria-label="Subdivide">
+                <BlenderIcon name="inset" size={14} />
               </button>
-              <button type="button" onClick={handleLoopCut} title="Loop Cut (Ctrl+R)" className="p-1.5 cad-button text-emerald-400">
+              <button type="button" onClick={handleLoopCut} title="Loop Cut (Ctrl+R)" className="tool-cmd" aria-label="Loop cut">
                 <Scissors className="w-3.5 h-3.5" />
               </button>
-              <button type="button" onClick={handleKnife} title="Knife (K)" className="p-1.5 cad-button text-orange-400">
+              <button type="button" onClick={handleKnife} title="Knife (K)" className="tool-cmd" aria-label="Knife">
                 <Pencil className="w-3.5 h-3.5" />
               </button>
-              <button type="button" onClick={onMergeVertices} title="Merge Vertices" className="p-1.5 cad-button text-purple-400">
-                <Combine className="w-3.5 h-3.5" />
+              <button type="button" onClick={onMergeVertices} title="Merge vertices (M)" className="tool-cmd" aria-label="Merge vertices">
+                <BlenderIcon name="weld" size={14} />
               </button>
             </>
           ) : (
             <>
-              <button type="button" onClick={() => handleSelectPrimitive('cube')} title="Cube" className="p-1.5 cad-button text-[#ed7300]">
-                <Box className="w-3.5 h-3.5" />
+              <button type="button" onClick={() => handleSelectPrimitive('cube')} title="Cube" className="p-1.5 cad-button text-[#00b4c4]" aria-label="Cube">
+                <BlenderIcon name="object" size={14} />
               </button>
-              <button type="button" onClick={() => handleSelectPrimitive('sphere')} title="Sphere" className="p-1.5 cad-button text-cyan-400">
-                <Box className="w-3.5 h-3.5" />
+              <button type="button" onClick={() => handleSelectPrimitive('sphere')} title="Sphere" className="p-1.5 cad-button text-[#00b4c4]" aria-label="Sphere">
+                <BlenderIcon name="object" size={14} />
               </button>
-              <button type="button" onClick={() => handleSelectPrimitive('cylinder')} title="Cylinder" className="p-1.5 cad-button text-amber-400">
-                <Box className="w-3.5 h-3.5" />
+              <button type="button" onClick={() => handleSelectPrimitive('cylinder')} title="Cylinder" className="p-1.5 cad-button text-[#00b4c4]" aria-label="Cylinder">
+                <BlenderIcon name="object" size={14} />
               </button>
             </>
           )}
         </div>
       ) : activeTab === 'tools' ? (
-        <div className="p-2 space-y-2 max-h-[70vh] overflow-y-auto custom-scrollbar">
-          <div className="grid grid-cols-4 gap-1 p-1 bg-[#191b1e] rounded border border-[#101114]">
-            {(['object', 'vertex', 'edge', 'face'] as const).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => {
-                  setToolState((s) => ({ ...s, editMode: mode }));
-                  if (mode !== 'vertex') setSelectedVertexIds([]);
-                  if (mode !== 'edge') setSelectedEdgeIds([]);
-                  if (mode !== 'face') setSelectedFaceIds([]);
-                }}
-                className={`py-1 text-center rounded uppercase font-bold text-[9px] transition ${
-                  toolState.editMode === mode ? 'bg-[#ed7300] text-white shadow' : 'hover:bg-[#1e2023] text-[#858a93]'
-                }`}
-              >
-                {mode}
-              </button>
-            ))}
+        <div className="max-h-[70vh] overflow-y-auto custom-scrollbar pb-2">
+          <div className="px-2 pt-2">
+            <div className="ts-seg w-full">
+              {([
+                ['object', 'Object'],
+                ['vertex', 'Vertex'],
+                ['edge', 'Edge'],
+                ['face', 'Face'],
+              ] as const).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => {
+                    setToolState((s) => ({ ...s, editMode: mode }));
+                    if (mode !== 'vertex') setSelectedVertexIds([]);
+                    if (mode !== 'edge') setSelectedEdgeIds([]);
+                    if (mode !== 'face') setSelectedFaceIds([]);
+                  }}
+                  className={`ts-seg__item flex-1 ${toolState.editMode === mode ? 'ts-seg__item--active' : ''}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <section className="space-y-1">
-            <div className="text-[8px] uppercase tracking-wider text-[#858a93] font-bold">Topology & Geometry</div>
-            <div className="grid grid-cols-2 gap-1">
-              <button
-                type="button"
-                onClick={onExtrudeFace}
-                className="cad-button h-7 px-2 flex items-center justify-between font-bold text-cyan-400"
-                title="Extrude selected face or edge along normal"
-              >
-                <span className="flex items-center gap-1">
-                  <ArrowUpRight className="w-3 h-3" /> Extrude
-                </span>
-                <span className="bg-[#2e3136] px-1 rounded text-[8px] text-[#aaaaaa]">E</span>
-              </button>
+          <div className="ts-section-header">
+            {isObject ? 'Object' : isVertex ? 'Vertex' : isEdge ? 'Edge' : 'Face'}
+          </div>
 
-              <button
-                type="button"
-                onClick={onInsetFace}
-                className="cad-button h-7 px-2 flex items-center justify-between font-bold text-amber-400"
-                title="Inset face inwards"
-              >
-                <span className="flex items-center gap-1">
-                  <Minimize2 className="w-3 h-3" /> Inset Face
-                </span>
-                <span className="bg-[#2e3136] px-1 rounded text-[8px] text-[#aaaaaa]">I</span>
-              </button>
+          <div className="grid grid-cols-2 gap-1 px-1">
+            {(isObject || isFace || isEdge) && (
+              <ToolCmd label="Extrude" kbd="E" onClick={onExtrudeFace} icon={<BlenderIcon name="extrude" size={14} />} />
+            )}
+            {isFace && (
+              <ToolCmd label="Inset" kbd="I" onClick={onInsetFace} icon={<BlenderIcon name="inset" size={14} />} />
+            )}
+            {(isFace || isEdge) && (
+              <ToolCmd label="Bevel" kbd="Ctrl+B" onClick={handleBevel} icon={<CornerDownRight className="w-3.5 h-3.5" />} />
+            )}
+            {(isFace || isEdge) && (
+              <ToolCmd label="Subdivide" kbd="W" onClick={handleSubdivide} icon={<Sparkles className="w-3.5 h-3.5" />} />
+            )}
+            {isEdge && (
+              <ToolCmd label="Loop cut" kbd="Ctrl+R" onClick={handleLoopCut} icon={<Scissors className="w-3.5 h-3.5" />} />
+            )}
+            {(isEdge || isFace) && (
+              <ToolCmd label="Knife" kbd="K" onClick={handleKnife} icon={<Pencil className="w-3.5 h-3.5" />} />
+            )}
+            {isVertex && (
+              <ToolCmd label="Fill face" kbd="F" onClick={handleFillFace} icon={<Box className="w-3.5 h-3.5" />} />
+            )}
+            {(isVertex || isEdge) && (
+              <ToolCmd label="Merge" kbd="M" onClick={onMergeVertices} icon={<BlenderIcon name="weld" size={14} />} />
+            )}
+            {isVertex && (
+              <ToolCmd label="Snap" kbd="Shift+S" onClick={onMagnetSnap} icon={<BlenderIcon name="magnet" size={14} />} />
+            )}
+            {isFace && (
+              <ToolCmd label="Flip normals" onClick={handleFlipNormals} icon={<FlipHorizontal className="w-3.5 h-3.5" />} />
+            )}
+            {isFace && (
+              <ToolCmd label="Triangulate" onClick={handleTriangulate} icon={<Box className="w-3.5 h-3.5" />} />
+            )}
+            {(isFace || isObject) && (
+              <ToolCmd label="Separate" kbd="P" onClick={onSeparateSelected} icon={<Scissors className="w-3.5 h-3.5" />} />
+            )}
+          </div>
 
-              <button
-                type="button"
-                onClick={handleSubdivide}
-                className="cad-button h-7 px-2 flex items-center justify-between font-bold text-emerald-400"
-                title="Subdivide selected faces (simple) or apply SubD"
-              >
-                <span className="flex items-center gap-1">
-                  <Sparkles className="w-3 h-3" /> Subdivide
-                </span>
-                <span className="bg-[#2e3136] px-1 rounded text-[8px] text-[#aaaaaa]">W</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleLoopCut}
-                className="cad-button h-7 px-2 flex items-center justify-between font-bold text-indigo-400"
-                title="Insert loop cut across faces (hover edge, slide, wheel = cuts)"
-              >
-                <span className="flex items-center gap-1">
-                  <Scissors className="w-3 h-3" /> Loop Cut
-                </span>
-                <span className="bg-[#2e3136] px-1 rounded text-[8px] text-[#aaaaaa]">Ctrl+R</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleKnife}
-                className="cad-button h-7 px-2 flex items-center justify-between font-bold text-orange-400"
-                title="Knife cut: click polyline on mesh, Enter to confirm"
-              >
-                <span className="flex items-center gap-1">
-                  <Pencil className="w-3 h-3" /> Knife
-                </span>
-                <span className="bg-[#2e3136] px-1 rounded text-[8px] text-[#aaaaaa]">K</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleFillFace}
-                className="cad-button h-7 px-2 flex items-center justify-between font-bold text-rose-400"
-                title="Create polygon face from selected vertices"
-              >
-                <span className="flex items-center gap-1">
-                  <Box className="w-3 h-3" /> Fill Face
-                </span>
-                <span className="bg-[#2e3136] px-1 rounded text-[8px] text-[#aaaaaa]">F</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleBevel}
-                className="cad-button h-7 px-2 flex items-center justify-between font-bold text-purple-400"
-                title="Bevel edges / chamfer"
-              >
-                <span className="flex items-center gap-1">
-                  <CornerDownRight className="w-3 h-3" /> Bevel
-                </span>
-                <span className="bg-[#2e3136] px-1 rounded text-[8px] text-[#aaaaaa]">Ctrl+B</span>
-              </button>
-            </div>
-          </section>
-
-          <section className="space-y-1 pt-1 border-t border-[#101114]">
-            <div className="text-[8px] uppercase tracking-wider text-[#858a93] font-bold">Vertices & Symmetry</div>
-            <div className="grid grid-cols-2 gap-1">
-              <button
-                type="button"
-                onClick={onMergeVertices}
-                className="cad-button h-7 px-2 flex items-center justify-between font-bold text-yellow-400"
-                title="Merge selected vertices at center or by distance"
-              >
-                <span className="flex items-center gap-1">
-                  <Combine className="w-3 h-3" /> Merge Verts
-                </span>
-                <span className="bg-[#2e3136] px-1 rounded text-[8px] text-[#aaaaaa]">M</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={onMagnetSnap}
-                className="cad-button h-7 px-2 flex items-center justify-between font-bold text-cyan-300"
-                title="Snap selected vertices to nearest grid"
-              >
-                <span className="flex items-center gap-1">
-                  <Magnet className="w-3 h-3" /> Snap Verts
-                </span>
-                <span className="bg-[#2e3136] px-1 rounded text-[8px] text-[#aaaaaa]">Shift+S</span>
-              </button>
-            </div>
-
-            <div className="flex items-center gap-1 mt-1">
-              {(['x', 'y', 'z'] as const).map((axis) => (
-                <button
-                  key={axis}
-                  type="button"
-                  className={`h-6 flex-1 rounded text-[9px] font-bold uppercase ${
-                    (toolState.mirrorAxis || 'x') === axis
-                      ? 'bg-[#e68619]/25 text-[#e68619] border border-[#e68619]/50'
-                      : 'bg-[#101114] text-[#7e838c] border border-[#101114]'
-                  }`}
-                  onClick={() => setToolState((s) => ({ ...s, mirrorAxis: axis }))}
-                >
-                  {axis}
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-2 text-[9px] text-[#aaa]">
-              <label className="flex items-center gap-1 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={toolState.mirrorClip !== false}
-                  onChange={(e) => setToolState((s) => ({ ...s, mirrorClip: e.target.checked }))}
+          <div className="ts-section-header">Transform</div>
+          <div className="grid grid-cols-2 gap-1 px-1">
+            <ToolCmd label="Flip H" title="Flip left-right (X)" onClick={() => applyFlip('x')} icon={<FlipHorizontal className="w-3.5 h-3.5" />} />
+            <ToolCmd label="Flip V" title="Flip up-down (Y)" onClick={() => applyFlip('y')} icon={<FlipVertical className="w-3.5 h-3.5" />} />
+            <ToolCmd label="Flip depth" title="Flip front-back (Z)" onClick={() => applyFlip('z')} icon={<BlenderIcon name="mirror" size={14} />} />
+            <ToolCmd label="Rotate 90" title="Rotate 90 around up" onClick={() => applyRotate90('y', false)} icon={<RotateCw className="w-3.5 h-3.5" />} />
+            <ToolCmd label="Rotate -90" title="Rotate -90 around up" onClick={() => applyRotate90('y', true)} icon={<RotateCcw className="w-3.5 h-3.5" />} />
+            <ToolCmd label="Tilt 90" title="Rotate 90 around X" onClick={() => applyRotate90('x', false)} icon={<RotateCw className="w-3.5 h-3.5" />} />
+            {isObject && (
+              <>
+                <ToolCmd
+                  label="Transform"
+                  kbd="T"
+                  onClick={() => setToolState((s) => ({ ...s, transformMode: 'combined' }))}
+                  icon={<BlenderIcon name="transform" size={16} />}
                 />
-                Clip
-              </label>
-              <label className="flex items-center gap-1 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={!!toolState.liveMirror}
-                  onChange={(e) => setToolState((s) => ({ ...s, liveMirror: e.target.checked }))}
+                <ToolCmd
+                  label="Move"
+                  kbd="G"
+                  onClick={() => setToolState((s) => ({ ...s, transformMode: 'move' }))}
+                  icon={<BlenderIcon name="move" size={16} />}
                 />
-                Live
-              </label>
-              <label className="flex items-center gap-1 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={!!toolState.mirrorBones}
-                  onChange={(e) => setToolState((s) => ({ ...s, mirrorBones: e.target.checked }))}
+                <ToolCmd
+                  label="Rotate"
+                  kbd="R"
+                  onClick={() => setToolState((s) => ({ ...s, transformMode: 'rotate' }))}
+                  icon={<BlenderIcon name="rotate" size={16} />}
                 />
-                Bones
-              </label>
-            </div>
-            <div className="grid grid-cols-2 gap-1">
-              <button
-                type="button"
-                onClick={onMirrorSymmetry}
-                className="cad-button h-7 px-2 flex items-center justify-between font-bold text-fuchsia-400"
-                title="Apply mirror (clip + duplicate across axis)"
-              >
-                <span className="flex items-center gap-1">
-                  <GitBranch className="w-3 h-3" /> Apply Mirror
-                </span>
-                <span className="bg-[#2e3136] px-1 rounded text-[8px] text-[#aaaaaa]">Alt+X</span>
-              </button>
-              <button
-                type="button"
-                onClick={onAddMirrorModifier}
-                className="cad-button h-7 px-2 flex items-center gap-1 font-bold text-fuchsia-300"
-                title="Add non-destructive Mirror modifier"
-              >
-                <GitBranch className="w-3 h-3" /> + Mod
-              </button>
-            </div>
-          </section>
+                <ToolCmd
+                  label="Scale"
+                  kbd="S"
+                  onClick={() => setToolState((s) => ({ ...s, transformMode: 'scale' }))}
+                  icon={<BlenderIcon name="scale" size={16} />}
+                />
+                <ToolCmd
+                  label="Pivot"
+                  kbd="."
+                  onClick={() => setToolState((s) => ({ ...s, transformMode: 'pivot' }))}
+                  icon={<BlenderIcon name="pivot" size={16} />}
+                />
+                <ToolCmd label="Origin to center" onClick={handleRecenter} icon={<BlenderIcon name="center" size={16} />} />
+                <ToolCmd label="Origin to selection" onClick={handleOriginToSelection} icon={<BlenderIcon name="select" size={16} />} />
+                <ToolCmd label="Origin to world 0" onClick={handleOriginToWorld} icon={<BlenderIcon name="orientationGlobal" size={16} />} />
+                <ToolCmd label="Origin to bottom" onClick={handleOriginToBottom} icon={<BlenderIcon name="object" size={16} />} />
+              </>
+            )}
+          </div>
 
-          <section className="space-y-1 pt-1 border-t border-[#101114]">
-            <div className="text-[8px] uppercase tracking-wider text-[#858a93] font-bold">Subdivision Surface</div>
-            <div className="grid grid-cols-4 gap-1">
-              {[0, 1, 2, 3].map((lvl) => (
-                <button
-                  key={lvl}
-                  type="button"
-                  className="cad-button h-7 font-bold text-emerald-400"
-                  title={`SubD level ${lvl}`}
-                  onClick={() => onAddSubdivision?.(lvl)}
-                >
-                  {lvl}
-                </button>
-              ))}
-            </div>
-            <div className="grid grid-cols-2 gap-1">
-              <button
-                type="button"
-                onClick={handleSubdivide}
-                className="cad-button h-7 px-2 flex items-center justify-between font-bold text-emerald-400"
-                title="Apply Catmull-Clark / simple subdivide to mesh"
-              >
-                <span className="flex items-center gap-1">
-                  <Sparkles className="w-3 h-3" /> Apply SubD
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={onApplyModifiers}
-                className="cad-button h-7 px-2 flex items-center gap-1 font-bold text-[#a6abb4]"
-                title="Bake all modifiers into mesh"
-              >
-                Bake Mods
-              </button>
-            </div>
-            <div className="text-[8px] text-[#51565f]">Ctrl+Shift+D adds SubD · viewport shows levels</div>
-          </section>
+          {isObject && (
+            <>
+              <div className="ts-section-header">Mirror</div>
+              <div className="px-2 pb-1">
+                <div className="ts-seg w-full">
+                  {(['x', 'y', 'z'] as const).map((axis) => (
+                    <button
+                      key={axis}
+                      type="button"
+                      className={`ts-seg__item flex-1 ${
+                        (toolState.mirrorAxis || 'x') === axis ? 'ts-seg__item--active' : ''
+                      }`}
+                      onClick={() => setToolState((s) => ({ ...s, mirrorAxis: axis }))}
+                    >
+                      {axis.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-3 px-1 pt-2">
+                  <label className="tool-check">
+                    <input
+                      type="checkbox"
+                      checked={toolState.mirrorClip !== false}
+                      onChange={(e) => setToolState((s) => ({ ...s, mirrorClip: e.target.checked }))}
+                    />
+                    Clip
+                  </label>
+                  <label className="tool-check">
+                    <input
+                      type="checkbox"
+                      checked={!!toolState.liveMirror}
+                      onChange={(e) => setToolState((s) => ({ ...s, liveMirror: e.target.checked }))}
+                    />
+                    Live
+                  </label>
+                  <label className="tool-check">
+                    <input
+                      type="checkbox"
+                      checked={!!toolState.mirrorBones}
+                      onChange={(e) => setToolState((s) => ({ ...s, mirrorBones: e.target.checked }))}
+                    />
+                    Bones
+                  </label>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-1 px-1">
+                <ToolCmd label="Apply mirror" kbd="Alt+X" onClick={onMirrorSymmetry} icon={<BlenderIcon name="mirror" size={14} />} />
+                <ToolCmd label="Add modifier" onClick={onAddMirrorModifier} icon={<GitBranch className="w-3.5 h-3.5" />} />
+              </div>
 
-          <section className="space-y-1 pt-1 border-t border-[#101114]">
-            <div className="text-[8px] uppercase tracking-wider text-[#858a93] font-bold">Normals & Selection</div>
-            <div className="grid grid-cols-2 gap-1">
-              <button
-                type="button"
-                onClick={handleFlipNormals}
-                className="cad-button h-7 px-2 flex items-center gap-1 font-bold text-[#a6abb4]"
-                title="Flip face normals direction"
-              >
-                <FlipHorizontal className="w-3 h-3 text-cyan-400" /> Flip Normals
-              </button>
-              <button
-                type="button"
-                onClick={onDuplicateSelected}
-                className="cad-button h-7 px-2 flex items-center gap-1 font-bold text-[#a6abb4]"
-                title="Duplicate (Shift+D)"
-              >
-                <Layers className="w-3 h-3 text-emerald-400" /> Duplicate
-              </button>
-              <button
-                type="button"
-                onClick={onSeparateSelected}
-                className="cad-button h-7 px-2 flex items-center gap-1 font-bold text-[#a6abb4]"
-                title="Separate selection / loose parts into a new object (P)"
-              >
-                <Scissors className="w-3 h-3 text-amber-400" /> Separate
-              </button>
-              <button
-                type="button"
-                onClick={onCopy}
-                className="cad-button h-7 px-2 flex items-center gap-1 font-bold text-[#a6abb4]"
-                title="Copy (Ctrl+C)"
-              >
-                Copy
-              </button>
-              <button
-                type="button"
-                onClick={onPaste}
-                className="cad-button h-7 px-2 flex items-center gap-1 font-bold text-[#a6abb4]"
-                title="Paste (Ctrl+V)"
-              >
-                Paste
-              </button>
-              <button
-                type="button"
-                onClick={onDeleteSelected}
-                className="cad-button h-7 px-2 flex items-center gap-1 font-bold !text-rose-400 col-span-2"
-                title="Delete selected element"
-              >
-                <X className="w-3 h-3" /> Delete Selected (Del / X)
-              </button>
-            </div>
-          </section>
+              <div className="ts-section-header">Subdivision</div>
+              <div className="px-2 pb-1">
+                <div className="ts-seg w-full">
+                  {[0, 1, 2, 3].map((lvl) => (
+                    <button
+                      key={lvl}
+                      type="button"
+                      className="ts-seg__item flex-1"
+                      title={`Subdivision level ${lvl}`}
+                      onClick={() => onAddSubdivision?.(lvl)}
+                    >
+                      {lvl}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-1 px-1">
+                <ToolCmd label="Apply SubD" onClick={handleSubdivide} icon={<Sparkles className="w-3.5 h-3.5" />} />
+                <ToolCmd label="Bake modifiers" onClick={onApplyModifiers} icon={<Layers className="w-3.5 h-3.5" />} />
+              </div>
+            </>
+          )}
+
+          <div className="ts-section-header">Edit</div>
+          <div className="grid grid-cols-2 gap-1 px-1">
+            <ToolCmd label="Duplicate" kbd="Shift+D" onClick={onDuplicateSelected} icon={<Layers className="w-3.5 h-3.5" />} />
+            <ToolCmd label="Copy" kbd="Ctrl+C" onClick={onCopy} />
+            <ToolCmd label="Paste" kbd="Ctrl+V" onClick={onPaste} />
+            <ToolCmd label="Delete" kbd="X" onClick={onDeleteSelected} icon={<X className="w-3.5 h-3.5" />} danger />
+          </div>
         </div>
       ) : (
         <div className="flex flex-col max-h-[70vh]">
-          <div className="p-2 bg-[#1e1e1e] border-b border-[#3b3f46] flex items-center justify-between font-mono text-[10px]">
-            <span className="text-[#7e838c] font-bold">MODE:</span>
-            <div className="flex items-center bg-[#2e3136] p-0.5 rounded border border-[#3b3f46]">
+          <div className="px-2 py-2 border-b border-[#1a1c22] flex flex-col gap-1.5">
+            <div className="ts-seg w-full">
               <button
                 type="button"
                 onClick={() => {
                   setSpawnMode('draw');
                   setToolState((s) => ({ ...s, isCadDrawing: true, placeOnClick: false }));
                 }}
-                className={`px-2 py-0.5 rounded transition font-bold flex items-center gap-1 ${
-                  spawnMode === 'draw'
-                    ? 'bg-[#ed7300] text-white shadow-sm'
-                    : 'text-[#7e838c] hover:text-white'
-                }`}
+                className={`ts-seg__item flex-1 ${spawnMode === 'draw' ? 'ts-seg__item--active' : ''}`}
               >
-                <Pencil className="w-3 h-3 text-[#ed7300]" />
-                <span>CAD DRAW</span>
+                Draw
               </button>
-
               <button
                 type="button"
                 onClick={() => {
                   setSpawnMode('instant');
                   setToolState((s) => ({ ...s, isCadDrawing: false, placeOnClick: false }));
                 }}
-                className={`px-2 py-0.5 rounded transition font-bold flex items-center gap-1 ${
-                  spawnMode === 'instant'
-                    ? 'bg-[#ed7300] text-white shadow-sm'
-                    : 'text-[#7e838c] hover:text-white'
-                }`}
+                className={`ts-seg__item flex-1 ${spawnMode === 'instant' ? 'ts-seg__item--active' : ''}`}
               >
-                <MousePointerClick className="w-3 h-3 text-[#e68619]" />
-                <span>INSTANT</span>
+                Place
               </button>
             </div>
+            <p className="text-[11.5px] text-[#6e7584] m-0 leading-snug">
+              {spawnMode === 'draw'
+                ? 'Click in the viewport to draw size'
+                : toolState.placeOnClick
+                  ? `Click to place ${toolState.activePrimitive}`
+                  : 'Pick a shape, then click in the viewport'}
+            </p>
           </div>
 
-          <div className="px-2 py-1 bg-[#202226] border-b border-[#3b3f46] text-[9px] text-[#858a93] font-mono">
-            {spawnMode === 'draw'
-              ? 'CAD: click in any viewport · 2D = 2 clicks · 3D = base + height'
-              : toolState.placeOnClick
-                ? `Click any viewport to place ${toolState.activePrimitive}`
-                : 'INSTANT: select a primitive, then click any viewport'}
-          </div>
-
-          <div className="p-2 grid grid-cols-2 gap-1.5 overflow-y-auto custom-scrollbar bg-[#26282d] flex-1 min-h-0">
-            {PRIMITIVES.map((p) => {
-              const isSelected =
-                (toolState.cadDrawPrimitive === p.type && toolState.isCadDrawing) ||
-                (toolState.placeOnClick && toolState.activePrimitive === p.type);
-
-              return (
-                <button
-                  key={p.type}
-                  type="button"
-                  onClick={() => handleSelectPrimitive(p.type)}
-                  className={`p-2 rounded border flex items-center justify-between text-xs transition text-left font-sans ${
-                    isSelected
-                      ? 'bg-[#ed7300]/30 border-[#ed7300] text-white font-bold shadow-sm ring-1 ring-[#ed7300]'
-                      : 'bg-[#191b1e] border-[#3b3f46] text-[#c6cad1] hover:bg-[#34383f] hover:text-white hover:border-[#ed7300]'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 truncate">
-                    <Box className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-[#ed7300]' : 'text-[#858a93]'}`} />
-                    <span className="truncate text-[11px]">{p.name}</span>
-                  </div>
-                  <span className="text-[9px] font-mono text-[#ed7300] font-bold">{isSelected ? '✓' : '+'}</span>
-                </button>
-              );
-            })}
+          <div className="p-1 overflow-y-auto custom-scrollbar flex-1 min-h-0">
+            {(['3D', '2D'] as const).map((group) => (
+              <div key={group} className="mb-2">
+                <div className="ts-section-header">{group}</div>
+                <div className="grid grid-cols-2 gap-1 px-1">
+                  {PRIMITIVES.filter((p) => (group === '2D') === !!p.is2D).map((p) => {
+                    const isSelected =
+                      (toolState.cadDrawPrimitive === p.type && toolState.isCadDrawing) ||
+                      (toolState.placeOnClick && toolState.activePrimitive === p.type);
+                    return (
+                      <button
+                        key={p.type}
+                        type="button"
+                        onClick={() => handleSelectPrimitive(p.type)}
+                        className={`prim-row ${isSelected ? 'is-on' : ''}`}
+                        aria-pressed={isSelected}
+                      >
+                        <BlenderIcon name="object" size={14} />
+                        <span className="truncate">{p.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}

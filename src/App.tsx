@@ -10,17 +10,6 @@ import { UVEditorModal } from './components/UVEditorModal';
 import { PropertiesPanel } from './components/PropertiesPanel';
 import { RenderExportPanel } from './components/RenderExportPanel';
 import { OutlinerPanel } from './components/OutlinerPanel';
-/**
- * The animation and paint studios are the two heaviest modules in the app and each
- * is only reachable from its own workspace, so they load on demand instead of
- * inflating the initial bundle. Types are imported separately (erased at build time).
- */
-const CutsceneStudio = lazy(() =>
-  import('./components/CutsceneStudio').then((m) => ({ default: m.CutsceneStudio })),
-);
-const PixelPaintStudio = lazy(() =>
-  import('./components/PixelPaintStudio').then((m) => ({ default: m.PixelPaintStudio })),
-);
 import { ParticleStudioModal } from './components/ParticleStudioModal';
 import { RiggingPanel } from './components/RiggingPanel';
 import { MaterialPanel } from './components/MaterialPanel';
@@ -30,12 +19,12 @@ import { ShortcutsModal } from './components/ShortcutsModal';
 import { AssetBrowserModal } from './components/AssetBrowserModal';
 import { ImportModelModal } from './components/ImportModelModal';
 import { SpriteSheetModal } from './components/SpriteSheetModal';
-import type { PaintTool as StudioPaintTool } from './components/PixelPaintStudio';
-import { paint3dBridge } from './utils/paint3dSurface';
+import { paint3dBridge, type Paint3DTool as StudioPaintTool } from './utils/paint3dSurface';
 import { PaintBridgeHost } from './components/PaintBridgeHost';
 import { notifyTexturePreview, setLiveTextureCanvas } from './utils/texturePreviewBus';
 import { VectorPanel } from './components/VectorPanel';
 import { useVectorStore } from './store/useVectorStore';
+import { useHistoryStore } from './store/useHistoryStore';
 import {
   applyVectorSectionEdits,
   resolveVectorPartTransform,
@@ -72,7 +61,21 @@ import {
   pasteClipboardMeshes,
 } from './utils/clipboard';
 import { magnetSnapSelectedVertices } from './utils/vertexSnap';
-import { subdivideFaces, fillSelectedVerticesFace } from './utils/advancedMeshTools';
+import { subdivideFaces } from './utils/advancedMeshTools';
+import { fillTargets, mirrorTargets, resolveOperatorTargets, subdivideTargets } from './utils/meshOperators';
+import { PenToolPanel } from './components/PenToolPanel';
+import {
+  DEFAULT_PEN_SETTINGS,
+  createPenSession,
+  penCommitActive,
+  penDropActive,
+  penSessionToMesh,
+  penSetPointByOrder,
+  penUndoLastPoint,
+  type PenSession,
+  type PenToolSettings,
+} from './utils/penTool';
+import { constructionPlaneForView } from './utils/primitiveDraw';
 import {
   convertSelection,
   EMPTY_SELECTION,
@@ -95,21 +98,31 @@ import { createEmptySequence, createSequenceClip, addClipToTrack } from './utils
 import type { CutsceneSequence } from './types/sequence';
 import { deleteBoneBranch } from './utils/rigging';
 
-import { Sliders, Palette, Sparkles, Layers, Bone } from 'lucide-react';
+/**
+ * The animation and paint studios are the two heaviest modules in the app and each
+ * is only reachable from its own workspace, so they load on demand instead of
+ * inflating the initial bundle.
+ */
+const CutsceneStudio = lazy(() =>
+  import('./components/CutsceneStudio').then((m) => ({ default: m.CutsceneStudio })),
+);
+const PixelPaintStudio = lazy(() =>
+  import('./components/PixelPaintStudio').then((m) => ({ default: m.PixelPaintStudio })),
+);
 
 /** Placeholder shown while a lazily-loaded workspace chunk arrives. */
 const WorkspaceLoading: React.FC<{ label: string }> = ({ label }) => (
-  <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-[#252525] text-[11px] text-[#858a93]">
+  <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-[var(--ts-viewport)] text-[11px] text-[var(--ts-text-muted)]">
     <div className="sp-workspace-spinner" aria-hidden />
     <span>
-      Loading <b className="text-[#c6cad1]">{label}</b>…
+      Loading <b className="text-[var(--ts-text)]">{label}</b>…
     </span>
   </div>
 );
 
 export const App: React.FC = () => {
   const [scenes, setScenes] = useState<CADScene[]>(() => {
-    const mesh = generatePrimitive('chest');
+    const mesh = generatePrimitive('cube');
     const bones: CADBone[] = [
       {
         id: 'bone_root',
@@ -316,78 +329,20 @@ export const App: React.FC = () => {
 
   const activeMesh = meshes.find((m) => m.id === activeMeshId) || meshes[0] || generatePrimitive('cube');
 
-  // --- Smart undo / redo (meshes + bones) ---
-  type HistorySnap = { meshes: CADMesh[]; bones: CADBone[]; activeMeshId: string };
-  const MAX_HISTORY = 80;
-  const [undoStack, setUndoStack] = useState<HistorySnap[]>([]);
-  const [redoStack, setRedoStack] = useState<HistorySnap[]>([]);
-  const meshesRef = useRef(meshes);
-  const bonesRef = useRef(bones);
-  const activeMeshIdRef = useRef(activeMeshId);
-  meshesRef.current = meshes;
-  bonesRef.current = bones;
-  activeMeshIdRef.current = activeMeshId;
-  const skipHistoryRef = useRef(false);
-
-  const captureSnap = (): HistorySnap => ({
-    meshes: JSON.parse(JSON.stringify(meshesRef.current)),
-    bones: JSON.parse(JSON.stringify(bonesRef.current)),
-    activeMeshId: activeMeshIdRef.current,
-  });
-
-  const commitHistory = () => {
-    if (skipHistoryRef.current) return;
-    const snap = captureSnap();
-    setUndoStack((prev) => {
-      const next = [...prev, snap];
-      return next.length > MAX_HISTORY ? next.slice(next.length - MAX_HISTORY) : next;
-    });
-    setRedoStack([]);
-  };
-
-  const restoreSnap = (snap: HistorySnap) => {
-    skipHistoryRef.current = true;
-    setMeshes(snap.meshes);
-    setBones(snap.bones);
-    setActiveMeshId(snap.activeMeshId);
-    requestAnimationFrame(() => {
-      skipHistoryRef.current = false;
-    });
-  };
-
-  const handleUndo = () => {
-    setUndoStack((prev) => {
-      if (prev.length === 0) return prev;
-      const current = captureSnap();
-      const next = [...prev];
-      const snap = next.pop()!;
-      setRedoStack((r) => [...r, current]);
-      restoreSnap(snap);
-      return next;
-    });
-  };
-
-  const handleRedo = () => {
-    setRedoStack((prev) => {
-      if (prev.length === 0) return prev;
-      const current = captureSnap();
-      const next = [...prev];
-      const snap = next.pop()!;
-      setUndoStack((u) => [...u, current]);
-      restoreSnap(snap);
-      return next;
-    });
-  };
+  // --- Undo / redo via history store (snapshot-based) ---
+  const pushUndo = () => useHistoryStore.getState().pushUndo();
+  const handleUndo = () => useHistoryStore.getState().undo();
+  const handleRedo = () => useHistoryStore.getState().redo();
 
   const updateActiveMesh = (
     updater: CADMesh | ((prev: CADMesh) => CADMesh),
     opts?: { recordHistory?: boolean },
   ) => {
     // Default: no history (viewport gizmo streams). Discrete tools pass recordHistory: true.
-    if (opts?.recordHistory) commitHistory();
+    if (opts?.recordHistory) pushUndo();
     setMeshes((prev) =>
       prev.map((m) => {
-        if (m.id === activeMeshIdRef.current || m.id === activeMesh.id) {
+        if (m.id === activeMeshId || m.id === activeMesh.id) {
           return typeof updater === 'function' ? updater(m) : updater;
         }
         return m;
@@ -401,13 +356,13 @@ export const App: React.FC = () => {
   };
 
   const updateBonesWithHistory = (updater: CADBone[] | ((prev: CADBone[]) => CADBone[])) => {
-    commitHistory();
+    pushUndo();
     setBones((prev) => (typeof updater === 'function' ? updater(prev) : updater));
   };
 
   const [toolState, setToolState] = useState<ToolState>({
     editMode: 'object',
-    transformMode: 'move',
+    transformMode: 'combined',
     isPainting3D: false,
     isCadDrawing: false,
     cadDrawPrimitive: null,
@@ -416,7 +371,7 @@ export const App: React.FC = () => {
     activePrimitive: 'cube',
     viewMode: 'lit',
     viewportLayout: 'single',
-    activeColor: '#ff9a3c',
+    activeColor: '#00d4e2',
     brushSize: 3,
     drawTool: 'pencil',
     paintOpacity: 1,
@@ -437,6 +392,8 @@ export const App: React.FC = () => {
   });
   const toolStatePaintRef = useRef(toolState);
   toolStatePaintRef.current = toolState;
+  const toolStateRef = useRef(toolState);
+  toolStateRef.current = toolState;
 
   const [renderSettings, setRenderSettings] = useState<RenderSettings>({
     pixelScale: 1,
@@ -446,8 +403,8 @@ export const App: React.FC = () => {
     // OutlineForge LIVE 3D: hemisphere fill + strong soft key.
     ambientIntensity: 1.45,
     lightIntensity: 2.5,
-    wireframeColor: '#ff9a3c',
-    bgColor: '#141518',
+    wireframeColor: '#00d4e2',
+    bgColor: '#111318',
     turntableSpeed: 1,
     isTurntablePlaying: false,
     weather: 'clear',
@@ -456,11 +413,20 @@ export const App: React.FC = () => {
     // ≈ directional light at (4, 7, 5)
     sunElevation: 48,
     sunAzimuth: 39,
+    // Three.js Shadow System defaults (PCFSoftShadowMap recommended for 3D modelers)
+    shadowMapType: 'pcf-soft',
+    shadowQuality: 'standard',
+    shadowAutoFit: true,
+    showShadowHelper: false,
+    shadowBias: -0.0001,
+    shadowNormalBias: 0.02,
   });
 
   const [activeRightTab, setActiveRightTab] = useState<'outliner' | 'properties' | 'material' | 'rig' | 'render'>('outliner');
 
-  const [isToolWindowOpen, setIsToolWindowOpen] = useState(true);
+  const [isToolWindowOpen, setIsToolWindowOpen] = useState(false);
+  const [isToolbarOpen, setIsToolbarOpen] = useState(true);
+  const [isToolbarFloating, setIsToolbarFloating] = useState(false);
   const [toolWindowTab, setToolWindowTab] = useState<ToolWindowTab>('tools');
   const [isFloatingOutlinerOpen, setIsFloatingOutlinerOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
@@ -614,12 +580,15 @@ export const App: React.FC = () => {
   };
 
   const updateMeshesWithHistory = (newMeshes: CADMesh[]) => {
-    commitHistory();
+    pushUndo();
     setMeshes(newMeshes);
   };
 
   const hasCurrentSelection = () => {
-    if (toolState.editMode === 'object') return selectedMeshIds.length > 0;
+    if (sceneSelection && sceneSelection.kind !== 'mesh') return true;
+    if (toolState.editMode === 'object') {
+      return selectedMeshIds.length > 0 || (sceneSelection && sceneSelection.kind === 'mesh');
+    }
     if (toolState.editMode === 'vertex') return selectedVertexIds.length > 0;
     if (toolState.editMode === 'edge') return selectedEdgeIds.length > 0;
     if (toolState.editMode === 'face') return selectedFaceIds.length > 0;
@@ -646,6 +615,7 @@ export const App: React.FC = () => {
   };
 
   const handleUnselectAll = () => {
+    if (sceneSelection) setSceneSelection(null);
     if (toolState.editMode === 'object') {
       setSelectedMeshIds([]);
     } else if (toolState.editMode === 'vertex') {
@@ -761,6 +731,8 @@ export const App: React.FC = () => {
     baseMesh: CADMesh;
     faceIds: string[];
     edgeIds: string[];
+    vertexIds: string[];
+    editMode: string;
   } | null>(null);
 
   const confirmModalMeshOp = () => {
@@ -797,22 +769,46 @@ export const App: React.FC = () => {
 
   const startModalMeshOp = (type: 'extrude' | 'inset' | 'bevel' | 'loopCut' | 'knife') => {
     if (!activeMesh) return;
-    if ((type === 'extrude' || type === 'inset') && selectedFaceIds.length === 0) return;
-    if (type === 'bevel' && selectedEdgeIds.length === 0 && selectedFaceIds.length === 0) return;
+    const mode = toolState.editMode;
+    if (mode === 'object' || mode === 'bone') return;
+    // Resolve once so every operator honours vertices, edges and faces equally.
+    const resolved = resolveOperatorTargets(activeMesh, mode, {
+      vertexIds: selectedVertexIds,
+      edgeIds: selectedEdgeIds,
+      faceIds: selectedFaceIds,
+    });
+    if (type === 'extrude') {
+      if (
+        resolved.faceIds.length === 0 &&
+        resolved.edgeIds.length === 0 &&
+        resolved.vertexIds.length === 0
+      ) {
+        return;
+      }
+    } else if (type === 'inset' && resolved.faceIds.length === 0) return;
+    if (type === 'bevel' && resolved.edgeIds.length === 0 && resolved.vertexIds.length === 0) return;
 
-    commitHistory();
+    pushUndo();
     modalMeshSnapshotRef.current = {
       type,
       baseMesh: JSON.parse(JSON.stringify(activeMesh)) as CADMesh,
       faceIds: [...selectedFaceIds],
       edgeIds: [...selectedEdgeIds],
+      vertexIds: [...selectedVertexIds],
+      editMode: mode,
     };
     const editMode =
-      type === 'loopCut' || (type === 'bevel' && selectedEdgeIds.length > 0)
+      type === 'loopCut'
         ? 'edge'
         : type === 'knife'
           ? 'face'
-          : 'face';
+          : type === 'bevel'
+            // Edge bevel stays in edge mode; a vertex-only selection keeps vertex
+            // mode so the operator performs Blender's vertex bevel.
+            ? (selectedEdgeIds.length > 0 ? 'edge' : mode)
+            : type === 'extrude'
+              ? mode
+              : 'face';
     setToolState((s) => ({
       ...s,
       modalMeshOp: type,
@@ -835,6 +831,30 @@ export const App: React.FC = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (isInputFocused()) return;
+
+      // Pen tool owns Escape / Enter / Backspace while it is active.
+      if (toolStateRef.current.isPenTool) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          // First Escape abandons the open chain; a second one drops the tool.
+          setPenSession((s) => {
+            if (s && s.activeIds.length > 0) return penDropActive(s);
+            dropPenTool();
+            return null;
+          });
+          return;
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          finishPenPolygon();
+          return;
+        }
+        if (e.key === 'Backspace' || e.key === 'Delete') {
+          e.preventDefault();
+          undoPenPoint();
+          return;
+        }
+      }
 
       // Animation editor owns G/R/S/Esc modal transforms while active.
       if (workspaceModeRef.current === 'animation') return;
@@ -1008,6 +1028,12 @@ export const App: React.FC = () => {
       } else if (!inPaintWorkspace && e.key.toLowerCase() === 's' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         setToolState((s) => ({ ...s, transformMode: 'scale', modalTransform: 'scale', modalMeshOp: null, isPainting3D: false }));
+      } else if (!inPaintWorkspace && e.key.toLowerCase() === 't' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        setToolState((s) => ({ ...s, transformMode: 'combined', modalTransform: null, modalMeshOp: null, isPainting3D: false }));
+      } else if (!inPaintWorkspace && e.key === '.' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setToolState((s) => ({ ...s, transformMode: 'pivot', modalTransform: null, modalMeshOp: null, isPainting3D: false }));
       } else if (!inPaintWorkspace && e.key.toLowerCase() === 'e' && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         startModalMeshOp('extrude');
@@ -1027,7 +1053,11 @@ export const App: React.FC = () => {
         const tag = (e.target as HTMLElement)?.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
         e.preventDefault();
-        handleSeparateSelected();
+        if (inComponentMode && (selectedVertexIds.length || selectedEdgeIds.length || selectedFaceIds.length)) {
+          handleSeparateSelected();
+        } else {
+          activatePenTool();
+        }
       } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'd') {
         e.preventDefault();
         handleAddSubdivision();
@@ -1037,8 +1067,13 @@ export const App: React.FC = () => {
       } else if (!inPaintWorkspace && e.key.toLowerCase() === 'k' && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         startModalMeshOp('knife');
-      } else if (!inPaintWorkspace && e.key.toLowerCase() === 'f') {
-        if (activeMesh && selectedVertexIds.length >= 3) editActiveMesh(fillSelectedVerticesFace(activeMesh, selectedVertexIds));
+      } else if (!inPaintWorkspace && e.key.toLowerCase() === 'f' && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        handleFillSelection();
+      } else if (!inPaintWorkspace && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'm') {
+        // Blender Ctrl+M mirrors the selection, not the whole mesh.
+        e.preventDefault();
+        handleMirrorSelection();
       } else if (!inPaintWorkspace && e.key.toLowerCase() === 'm' && !e.ctrlKey) handleMergeVertices();
       else if (!inPaintWorkspace && e.shiftKey && e.key.toLowerCase() === 's') handleMagnetSnap();
       else if (!inPaintWorkspace && e.altKey && e.key.toLowerCase() === 'x') handleMirrorSymmetry();
@@ -1057,7 +1092,14 @@ export const App: React.FC = () => {
       ) {
         e.preventDefault();
         handleRedo();
-      } else if (e.key === 'Delete' || e.key === 'Backspace') handleDeleteSelected();
+      } else if (
+        e.key === 'Delete' ||
+        e.key === 'Backspace' ||
+        (!inPaintWorkspace && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'x')
+      ) {
+        e.preventDefault();
+        handleDeleteSelected();
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -1065,17 +1107,25 @@ export const App: React.FC = () => {
   }, [
     toolState.editMode,
     toolState.isPainting3D,
+    toolState.isPenTool,
+    toolState.mirrorAxis,
+    toolState.mirrorClip,
+    toolState.mirrorMergeThreshold,
+    toolState.mirrorBones,
     selectedFaceIds,
     selectedEdgeIds,
     selectedVertexIds,
     selectedMeshIds,
     selectedBoneId,
+    sceneSelection,
     activeMesh,
     activeMeshId,
+    activeWorkspaceMode,
     meshes,
     bones,
-    undoStack.length,
-    redoStack.length,
+    cameras,
+    lights,
+    particles,
     isToolWindowOpen,
     toolWindowTab,
   ]);
@@ -1102,6 +1152,120 @@ export const App: React.FC = () => {
 
     if (!activeMesh) return;
     editActiveMesh(applyMirrorSymmetry(activeMesh, axis, { clip, mergeThreshold: threshold }));
+  };
+
+  // ── Modo-style Pen tool ────────────────────────────────────────────────
+  const [penSession, setPenSession] = useState<PenSession | null>(null);
+  const [penCurrentOrder, setPenCurrentOrder] = useState(1);
+  const penBaseMeshRef = useRef<CADMesh | null>(null);
+  const penSettings = toolState.penSettings ?? DEFAULT_PEN_SETTINGS;
+
+  /** Activate the Pen tool: freeze the current mesh and open a fresh session. */
+  const activatePenTool = () => {
+    if (!activeMesh) return;
+    pushUndo();
+    penBaseMeshRef.current = JSON.parse(JSON.stringify(activeMesh)) as CADMesh;
+    setPenSession(createPenSession(penSettings, constructionPlaneForView('top')));
+    setPenCurrentOrder(1);
+    setToolState((s) => ({
+      ...s,
+      isPenTool: true,
+      penSettings,
+      isCadDrawing: false,
+      placeOnClick: false,
+      isPainting3D: false,
+      modalTransform: null,
+      modalMeshOp: null,
+    }));
+    setActiveRightTab('properties');
+  };
+
+  /** Drop the Pen tool. Finished geometry stays on the mesh. */
+  const dropPenTool = () => {
+    penBaseMeshRef.current = null;
+    setPenSession(null);
+    setPenCurrentOrder(1);
+    setToolState((s) => ({ ...s, isPenTool: false }));
+  };
+
+  const updatePenSettings = (patch: Partial<PenToolSettings>) => {
+    setToolState((s) => ({
+      ...s,
+      penSettings: { ...(s.penSettings ?? DEFAULT_PEN_SETTINGS), ...patch },
+    }));
+    setPenSession((s) => (s ? { ...s, settings: { ...s.settings, ...patch } } : s));
+  };
+
+  const finishPenPolygon = () => setPenSession((s) => (s ? penCommitActive(s) : s));
+
+  const undoPenPoint = () =>
+    setPenSession((s) => {
+      if (!s) return s;
+      const next = penUndoLastPoint(s);
+      setPenCurrentOrder(Math.max(1, next.points.length));
+      return next;
+    });
+
+  const movePenPoint = (order: number, position: { x: number; y: number; z: number }) =>
+    setPenSession((s) => (s ? penSetPointByOrder(s, order, position) : s));
+
+  /**
+   * Live geometry: rebuild from the frozen pre-tool mesh on every session change,
+   * so polygons appear as soon as they close and dragged vertices update in place.
+   */
+  useEffect(() => {
+    const base = penBaseMeshRef.current;
+    if (!toolState.isPenTool || !base || !penSession) return;
+    const { mesh, faceIds } = penSessionToMesh(base, penSession);
+    updateActiveMesh(mesh);
+    if (penSession.settings.selectNew && faceIds.length > 0) setSelectedFaceIds(faceIds);
+  }, [penSession, toolState.isPenTool]);
+
+  /** Sub-object mode the operators should resolve against. */
+  const activeComponentMode: ComponentMode =
+    toolState.editMode === 'vertex' || toolState.editMode === 'edge' || toolState.editMode === 'face'
+      ? toolState.editMode
+      : 'face';
+
+  /** Resolve the live selection into operator targets for the active mode. */
+  const operatorTargets = (mesh: CADMesh) =>
+    resolveOperatorTargets(mesh, activeComponentMode, {
+      vertexIds: selectedVertexIds,
+      edgeIds: selectedEdgeIds,
+      faceIds: selectedFaceIds,
+    });
+
+  /**
+   * Blender `F`: fill from vertices, from an edge loop, or close the holes
+   * bounded by the selected faces, depending on the active edit mode.
+   */
+  const handleFillSelection = () => {
+    if (!activeMesh) return;
+    if (toolState.editMode === 'object' || toolState.editMode === 'bone') return;
+    const next = fillTargets(activeMesh, operatorTargets(activeMesh), activeComponentMode);
+    if (next !== activeMesh) editActiveMesh(next);
+  };
+
+  /**
+   * Blender `Ctrl+M`: mirror only the selected geometry across the active axis.
+   * With nothing selected it falls back to mirroring the whole mesh.
+   */
+  const handleMirrorSelection = () => {
+    if (!activeMesh) return;
+    if (toolState.editMode === 'object' || toolState.editMode === 'bone') {
+      handleMirrorSymmetry();
+      return;
+    }
+    const axis = (toolState.mirrorAxis || 'x') as MirrorAxis;
+    const targets = operatorTargets(activeMesh);
+    if (targets.faceIds.length === 0) {
+      handleMirrorSymmetry();
+      return;
+    }
+    const next = mirrorTargets(activeMesh, axis, targets, {
+      mergeThreshold: toolState.mirrorMergeThreshold ?? 0.001,
+    });
+    if (next !== activeMesh) editActiveMesh(next);
   };
 
   const handleAddMirrorModifier = () => {
@@ -1135,9 +1299,21 @@ export const App: React.FC = () => {
 
   const handleApplySubdivideDestructive = () => {
     if (!activeMesh) return;
-    if (selectedFaceIds.length > 0) {
-      editActiveMesh(subdivideFaces(activeMesh, selectedFaceIds));
-      return;
+    // Vertex / edge / face selections all subdivide through the same resolver so
+    // the result matches Blender (neighbours absorb midpoints instead of cracking).
+    const targets = operatorTargets(activeMesh);
+    if (
+      toolState.editMode === 'vertex' ||
+      toolState.editMode === 'edge' ||
+      toolState.editMode === 'face'
+    ) {
+      if (targets.edgeIds.length > 0) {
+        const next = subdivideTargets(activeMesh, targets, 1);
+        if (next !== activeMesh) {
+          editActiveMesh(next);
+          return;
+        }
+      }
     }
     const sub = (activeMesh.modifiers || []).find((m) => m.type === 'subdivision' && m.enabled);
     if (sub && sub.type === 'subdivision') {
@@ -1195,7 +1371,7 @@ export const App: React.FC = () => {
       return;
     }
     if (toolState.editMode === 'object') {
-      commitHistory();
+      pushUndo();
       const { meshes: next, newIds } = pasteClipboardMeshes(meshes);
       if (newIds.length) {
         setMeshes(next);
@@ -1216,7 +1392,7 @@ export const App: React.FC = () => {
       }
       return;
     }
-    commitHistory();
+    pushUndo();
     const { meshes: nextMeshes, newIds } = pasteClipboardMeshes(meshes);
     if (newIds.length) {
       setMeshes(nextMeshes);
@@ -1251,7 +1427,7 @@ export const App: React.FC = () => {
 
   const handleVectorBuildAll = (built: CADMesh[]) => {
     if (!built.length) return;
-    commitHistory();
+    pushUndo();
     const sameVector = (
       a: { x: number; y: number; z: number },
       b: { x: number; y: number; z: number },
@@ -1357,7 +1533,7 @@ export const App: React.FC = () => {
   };
 
   const handleVectorAddActive = (mesh: CADMesh) => {
-    commitHistory();
+    pushUndo();
     const existing = meshes.find(
       (item) => mesh.blockoutPartId && item.blockoutPartId === mesh.blockoutPartId
     );
@@ -1424,7 +1600,31 @@ export const App: React.FC = () => {
   const handleKnife = () => startModalMeshOp('knife');
 
   const handleDeleteSelected = () => {
-    if (toolState.editMode === 'bone' && selectedBoneId) {
+    // 1. Scene selection for non-mesh objects (camera, light, particle emitter)
+    if (sceneSelection && sceneSelection.kind !== 'mesh') {
+      if (sceneSelection.kind === 'camera') {
+        pushUndo();
+        setCameras((prev) => prev.filter((c) => c.id !== sceneSelection.id));
+        setSceneSelection(null);
+        return;
+      }
+      if (sceneSelection.kind === 'light') {
+        pushUndo();
+        setLights((prev) => prev.filter((l) => l.id !== sceneSelection.id));
+        setSceneSelection(null);
+        return;
+      }
+      if (sceneSelection.kind === 'particle') {
+        pushUndo();
+        setParticles((prev) => prev.filter((p) => p.id !== sceneSelection.id));
+        setSceneSelection(null);
+        return;
+      }
+    }
+
+    // 2. Bone edit mode or rigging workspace with bone selected
+    if ((toolState.editMode === 'bone' || activeWorkspaceMode === 'rigging') && selectedBoneId) {
+      pushUndo();
       const removed = new Set<string>();
       const collect = (id: string) => {
         removed.add(id);
@@ -1451,8 +1651,9 @@ export const App: React.FC = () => {
       setSelectedBoneId('');
       return;
     }
-    if (!activeMesh) return;
-    if (toolState.editMode === 'vertex' && selectedVertexIds.length > 0) {
+
+    // 3. Sub-object element modes (vertex, edge, face)
+    if (toolState.editMode === 'vertex' && selectedVertexIds.length > 0 && activeMesh) {
       const remainingVerts = activeMesh.vertices.filter((v) => !selectedVertexIds.includes(v.id));
       const remainingFaces = activeMesh.faces.filter(
         (f) => !f.vertexIds.some((vId) => selectedVertexIds.includes(vId))
@@ -1463,7 +1664,10 @@ export const App: React.FC = () => {
         faces: remainingFaces,
       }), { recordHistory: true });
       setSelectedVertexIds([]);
-    } else if (toolState.editMode === 'edge' && selectedEdgeIds.length > 0) {
+      return;
+    }
+
+    if (toolState.editMode === 'edge' && selectedEdgeIds.length > 0 && activeMesh) {
       const removeKeys = new Set(
         activeMesh.edges
           .filter((e) => selectedEdgeIds.includes(e.id))
@@ -1484,7 +1688,10 @@ export const App: React.FC = () => {
         faces: remainingFaces,
       }), { recordHistory: true });
       setSelectedEdgeIds([]);
-    } else if (toolState.editMode === 'face' && selectedFaceIds.length > 0) {
+      return;
+    }
+
+    if (toolState.editMode === 'face' && selectedFaceIds.length > 0 && activeMesh) {
       const remainingFaces = activeMesh.faces.filter((f) => !selectedFaceIds.includes(f.id));
       const used = new Set<string>();
       remainingFaces.forEach((f) => f.vertexIds.forEach((id) => used.add(id)));
@@ -1494,11 +1701,34 @@ export const App: React.FC = () => {
         faces: remainingFaces,
       }), { recordHistory: true });
       setSelectedFaceIds([]);
+      return;
+    }
+
+    // 4. Object mode OR fallback when nothing is selected in sub-elements: delete selected mesh(es)
+    const targetIds = new Set<string>(selectedMeshIds);
+    if (sceneSelection?.kind === 'mesh' && sceneSelection.id) {
+      targetIds.add(sceneSelection.id);
+    }
+    if (targetIds.size === 0 && activeMeshId) {
+      targetIds.add(activeMeshId);
+    }
+
+    if (targetIds.size > 0 && meshes.length > 0) {
+      const remaining = meshes.filter((m) => !targetIds.has(m.id));
+      updateMeshesWithHistory(remaining);
+      const nextActiveId = remaining[0]?.id || '';
+      setActiveMeshId(nextActiveId);
+      setSelectedMeshIds(nextActiveId ? [nextActiveId] : []);
+      if (sceneSelection?.kind === 'mesh') {
+        setSceneSelection(nextActiveId ? { kind: 'mesh', id: nextActiveId } : null);
+      }
+      setSelectedVertexIds([]);
+      setSelectedEdgeIds([]);
+      setSelectedFaceIds([]);
     }
   };
 
   const handleDeleteMesh = (id: string) => {
-    if (meshes.length <= 1) return;
     const remaining = meshes.filter((m) => m.id !== id);
     updateMeshesWithHistory(remaining);
     setSelectedMeshIds((prev) => {
@@ -1506,7 +1736,10 @@ export const App: React.FC = () => {
       return next.length > 0 ? next : remaining[0] ? [remaining[0].id] : [];
     });
     if (activeMeshId === id) {
-      setActiveMeshId(remaining[0].id);
+      setActiveMeshId(remaining[0]?.id || '');
+    }
+    if (sceneSelection?.kind === 'mesh' && sceneSelection.id === id) {
+      setSceneSelection(remaining[0] ? { kind: 'mesh', id: remaining[0].id } : null);
     }
   };
 
@@ -1811,7 +2044,7 @@ export const App: React.FC = () => {
     paint3dBridge.paintUv(
       uvU,
       uvV,
-      ts.activeColor || '#ff9a3c',
+      ts.activeColor || '#00d4e2',
       ts.brushSize || 1,
       studioTool,
       ts.paintOpacity ?? 1,
@@ -2036,7 +2269,7 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-[#1e2023] text-[#c6cad1] overflow-hidden font-sans select-none app-shell">
+    <div className="flex flex-col h-screen w-screen bg-[var(--ts-app)] text-[var(--ts-text)] overflow-hidden font-sans select-none app-shell">
       <Header
         toolState={toolState}
         setToolState={setToolState}
@@ -2053,8 +2286,8 @@ export const App: React.FC = () => {
         onSelectWorkspace={selectWorkspace}
         undo={handleUndo}
         redo={handleRedo}
-        canUndo={undoStack.length > 0}
-        canRedo={redoStack.length > 0}
+        canUndo={useHistoryStore((s) => { void s.version; return s.canUndo(); })}
+        canRedo={useHistoryStore((s) => { void s.version; return s.canRedo(); })}
         onOpenShortcuts={() => setIsShortcutsOpen(true)}
         onOpenPresets={() => setIsAssetBrowserOpen(true)}
         onOpenAssetBrowser={() => setIsAssetBrowserOpen(true)}
@@ -2086,6 +2319,13 @@ export const App: React.FC = () => {
         }}
         isOutlinerOpen={isFloatingOutlinerOpen}
         onToggleOutliner={() => setIsFloatingOutlinerOpen((prev) => !prev)}
+        isToolbarOpen={isToolbarOpen}
+        onToggleToolbar={() => setIsToolbarOpen((prev) => !prev)}
+        isToolbarFloating={isToolbarFloating}
+        onToggleToolbarFloat={() => {
+          setIsToolbarOpen(true);
+          setIsToolbarFloating((prev) => !prev);
+        }}
       />
 
       <div className="flex-1 flex overflow-hidden relative">
@@ -2093,6 +2333,10 @@ export const App: React.FC = () => {
         <Toolbar
           toolState={toolState}
           setToolState={setToolState}
+          isOpen={isToolbarOpen}
+          onClose={() => setIsToolbarOpen(false)}
+          isFloating={isToolbarFloating}
+          onFloatingChange={setIsToolbarFloating}
           onSpawnPrimitive={handleSpawnPrimitive}
           onExtrudeFace={handleExtrudeFace}
           onInsetFace={handleInsetFace}
@@ -2103,12 +2347,21 @@ export const App: React.FC = () => {
           onMagnetSnap={handleMagnetSnap}
           onSelectAll={handleSelectAll}
           onDeselectAll={handleUnselectAll}
+          primitivesOpen={isToolWindowOpen && toolWindowTab === 'primitives'}
+          onTogglePrimitives={() => {
+            if (isToolWindowOpen && toolWindowTab === 'primitives') setIsToolWindowOpen(false);
+            else {
+              setToolWindowTab('primitives');
+              setIsToolWindowOpen(true);
+            }
+          }}
           paintWorkspace={activeWorkspaceMode === 'paint'}
           rigWorkspace={activeWorkspaceMode === 'rigging'}
+          onTogglePenTool={() => (toolState.isPenTool ? dropPenTool() : activatePenTool())}
         />
         )}
 
-        <main ref={splitWorkspaceRef} className="flex-1 h-full relative overflow-hidden bg-[#252525] flex">
+        <main ref={splitWorkspaceRef} className="flex-1 h-full relative overflow-hidden bg-[var(--ts-viewport)] flex">
           <section
             className={`h-full relative overflow-hidden ${activeWorkspaceMode === 'blockout' ? 'vector-panel-host' : ''}`}
             style={{ width: editorSplitOpen ? `calc(${100 - uvPanelPercent}% - 8px)` : '100%' }}
@@ -2179,7 +2432,7 @@ export const App: React.FC = () => {
               onModalMeshCancel={() => cancelModalMeshOpRef.current()}
               onModalLoopCutConfirm={(loopEdgeIds, factors) => confirmModalLoopCutRef.current(loopEdgeIds, factors)}
               onModalKnifeConfirm={(hits) => confirmModalKnifeRef.current(hits)}
-              onBeginHistory={commitHistory}
+              onBeginHistory={pushUndo}
               cameras={cameras}
               lights={lights}
               particles={particles}
@@ -2217,7 +2470,7 @@ export const App: React.FC = () => {
               onModalMeshCancel={() => cancelModalMeshOpRef.current()}
               onModalLoopCutConfirm={(loopEdgeIds, factors) => confirmModalLoopCutRef.current(loopEdgeIds, factors)}
               onModalKnifeConfirm={(hits) => confirmModalKnifeRef.current(hits)}
-              onBeginHistory={commitHistory}
+              onBeginHistory={pushUndo}
               cameras={cameras}
               lights={lights}
               particles={particles}
@@ -2230,6 +2483,8 @@ export const App: React.FC = () => {
               setSceneSelection={setSceneSelection}
               activeWorkspaceMode={activeWorkspaceMode}
               layout={activeWorkspaceMode === 'blockout' ? 'blockout' : 'quad'}
+              penSession={penSession}
+              setPenSession={setPenSession}
             />
           )}
           </ErrorBoundary>
@@ -2287,15 +2542,15 @@ export const App: React.FC = () => {
                 className="adobe-divider group relative z-30 w-2 shrink-0 cursor-col-resize border-x touch-none"
                 title="Drag to resize · Double-click to reset"
               >
-                <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-[#3b3f46] group-hover:w-0.5 group-hover:bg-[#ed7300]" />
+                <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-[var(--ts-border-hi)] group-hover:w-0.5 group-hover:bg-[var(--ts-accent)]" />
                 <div className="adobe-divider-handle absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-14 w-3 flex flex-col items-center justify-center gap-1">
-                  <span className="w-0.5 h-0.5 rounded-full bg-[#3b3f46]" />
-                  <span className="w-0.5 h-0.5 rounded-full bg-[#3b3f46]" />
-                  <span className="w-0.5 h-0.5 rounded-full bg-[#3b3f46]" />
+                  <span className="w-0.5 h-0.5 rounded-full bg-[var(--ts-border-hi)]" />
+                  <span className="w-0.5 h-0.5 rounded-full bg-[var(--ts-border-hi)]" />
+                  <span className="w-0.5 h-0.5 rounded-full bg-[var(--ts-border-hi)]" />
                 </div>
               </div>
               <section
-                className="min-w-0 h-full bg-[#1e2023]"
+                className="min-w-0 h-full bg-[var(--ts-app)]"
                 style={{ width: `${uvPanelPercent}%` }}
               >
                 {activeWorkspaceMode === 'paint' ? (
@@ -2372,9 +2627,9 @@ export const App: React.FC = () => {
           />
         )}
 
-        {!editorSplitOpen && activeWorkspaceMode !== 'animation' && activeWorkspaceMode !== 'blockout' && <aside className="w-80 bg-[#26282d] border-l border-[#101114] flex flex-col z-20 panel-surface">
+        {!editorSplitOpen && activeWorkspaceMode !== 'animation' && activeWorkspaceMode !== 'blockout' && <aside className="ts-right-panel w-80 bg-[var(--ts-panel)] flex flex-col z-20 panel-surface">
           {activeWorkspaceMode === 'rigging' ? (
-            <div className="flex-1 overflow-hidden bg-[#26282d]">
+            <div className="flex-1 overflow-hidden bg-[var(--ts-panel)]">
               <RiggingPanel
                 bones={bones}
                 setBones={setBones}
@@ -2392,47 +2647,41 @@ export const App: React.FC = () => {
             </div>
           ) : (
           <>
-          <div className="h-9 bg-[#191b1e] border-b border-[#3b3f46] flex items-stretch px-1 text-xs">
+          <div className="insp-tabs-bar flex flex-row items-stretch h-9 bg-[var(--ts-app)] border-b border-[var(--ts-border)] px-1 gap-0.5 shrink-0 w-full" role="tablist" aria-label="Inspector">
             <button
-              onClick={() => {
-                setActiveRightTab('outliner');
-              }}
-              className={`flex-1 flex items-center justify-center gap-1 font-mono text-[9px] transition ${
-                activeRightTab === 'outliner' ? 'cad-tab-active' : 'cad-tab-inactive'
-              }`}
-              title="Scene Outliner Hierarchy"
+              type="button"
+              role="tab"
+              aria-selected={activeRightTab === 'outliner'}
+              onClick={() => setActiveRightTab('outliner')}
+              className={`flex-1 min-w-0 insp-tab ${activeRightTab === 'outliner' ? 'is-on' : ''}`}
+              title="Scene outliner"
             >
-              <Layers className="w-3 h-3" />
-              <span>Tree</span>
+              Tree
             </button>
-
             <button
-              onClick={() => {
-                setActiveRightTab('properties');
-              }}
-              className={`flex-1 flex items-center justify-center gap-1 font-mono text-[9px] transition ${
-                activeRightTab === 'properties' ? 'cad-tab-active' : 'cad-tab-inactive'
-              }`}
-              title="Properties & Numerics"
+              type="button"
+              role="tab"
+              aria-selected={activeRightTab === 'properties'}
+              onClick={() => setActiveRightTab('properties')}
+              className={`flex-1 min-w-0 insp-tab ${activeRightTab === 'properties' ? 'is-on' : ''}`}
+              title="Properties"
             >
-              <Sliders className="w-3 h-3" />
-              <span>Props</span>
+              Props
             </button>
-
             <button
-              onClick={() => {
-                setActiveRightTab('material');
-              }}
-              className={`flex-1 flex items-center justify-center gap-1 font-mono text-[9px] transition ${
-                activeRightTab === 'material' ? 'cad-tab-active' : 'cad-tab-inactive'
-              }`}
-              title="Material & Gradient Studio"
+              type="button"
+              role="tab"
+              aria-selected={activeRightTab === 'material'}
+              onClick={() => setActiveRightTab('material')}
+              className={`flex-1 min-w-0 insp-tab ${activeRightTab === 'material' ? 'is-on' : ''}`}
+              title="Material"
             >
-              <Palette className="w-3 h-3 text-[#e68619]" />
-              <span>Mat</span>
+              Mat
             </button>
-
             <button
+              type="button"
+              role="tab"
+              aria-selected={activeRightTab === 'rig'}
               onClick={() => {
                 setActiveRightTab('rig');
                 setToolState((state) => ({
@@ -2443,28 +2692,24 @@ export const App: React.FC = () => {
                   showBones: true,
                 }));
               }}
-              className={`flex-1 flex items-center justify-center gap-1 font-mono text-[9px] transition ${
-                activeRightTab === 'rig' ? 'cad-tab-active' : 'cad-tab-inactive'
-              }`}
-              title="Skeleton Rigging Studio"
+              className={`flex-1 min-w-0 insp-tab ${activeRightTab === 'rig' ? 'is-on' : ''}`}
+              title="Rig"
             >
-              <Bone className="w-3 h-3" />
-              <span>Rig</span>
+              Rig
             </button>
-
             <button
+              type="button"
+              role="tab"
+              aria-selected={activeRightTab === 'render'}
               onClick={() => setActiveRightTab('render')}
-              className={`flex-1 flex items-center justify-center gap-1 font-mono text-[9px] transition ${
-                activeRightTab === 'render' ? 'cad-tab-active' : 'cad-tab-inactive'
-              }`}
-              title="Modern AAA Shaders & Export Studio"
+              className={`flex-1 min-w-0 insp-tab ${activeRightTab === 'render' ? 'is-on' : ''}`}
+              title="Render and FX"
             >
-              <Sparkles className="w-3 h-3" />
-              <span>FX</span>
+              FX
             </button>
           </div>
 
-          <div className="flex-1 overflow-hidden bg-[#26282d] p-1">
+          <div className="flex-1 overflow-hidden bg-[var(--ts-panel)] p-1">
             {activeRightTab === 'outliner' && (
               <OutlinerPanel
                 meshes={meshes}
@@ -2499,6 +2744,19 @@ export const App: React.FC = () => {
             )}
 
             {activeRightTab === 'properties' && (
+              toolState.isPenTool ? (
+                <PenToolPanel
+                  settings={penSettings}
+                  onSettingsChange={updatePenSettings}
+                  session={penSession}
+                  currentOrder={penCurrentOrder}
+                  onCurrentOrderChange={setPenCurrentOrder}
+                  onPointMove={movePenPoint}
+                  onFinish={finishPenPolygon}
+                  onDrop={dropPenTool}
+                  onUndo={undoPenPoint}
+                />
+              ) : (
               <PropertiesPanel
                 mesh={activeMesh}
                 setMesh={updateActiveMesh}
@@ -2506,6 +2764,7 @@ export const App: React.FC = () => {
                 setToolState={setToolState}
                 selectedVertexIds={selectedVertexIds}
                 selectedFaceIds={selectedFaceIds}
+                selectedEdgeIds={selectedEdgeIds}
                 sceneSelection={sceneSelection}
                 cameras={cameras}
                 lights={lights}
@@ -2516,6 +2775,7 @@ export const App: React.FC = () => {
                 setParticles={setParticles}
                 setEnvironment={setEnvironment}
               />
+              )
             )}
 
             {activeRightTab === 'material' && (
@@ -2566,66 +2826,52 @@ export const App: React.FC = () => {
         </aside>}
       </div>
 
-      <footer className="adobe-statusbar z-30 select-none justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 font-bold text-[#e4e7eb]">
-            <span className="w-2 h-2 rounded-full bg-[#ed7300]" />
-            <span>PolyStage</span>
-          </div>
-          <div>
-            Scene: <strong className="text-[#ed7300]">{activeScene.name}</strong>
-          </div>
-          <div>
-            Rig Bones: <strong className="text-[#ed7300]">{bones.length}</strong>
-          </div>
-          <div>
-            Objects in Scene: <strong className="text-[#ff9a3c]">{meshes.length}</strong>
-          </div>
+      <footer className="adobe-statusbar select-none justify-between">
+        <div className="flex items-center gap-3 text-[var(--ts-text)]">
+          <strong className="text-[var(--ts-text-hi)] font-semibold">{activeScene.name}</strong>
+          <span className="font-mono text-[11px] text-[var(--ts-text-muted)]">
+            {meshes.length} objects
+          </span>
+          <span>{activeMesh?.name || 'No mesh'}</span>
+          <span className="text-[var(--ts-text-hi)]">
+            {toolState.editMode}
+            {toolState.editMode === 'object' && ` · ${selectedMeshIds.length} selected`}
+            {toolState.editMode === 'vertex' && ` · ${selectedVertexIds.length} selected`}
+            {toolState.editMode === 'edge' && ` · ${selectedEdgeIds.length} selected`}
+            {toolState.editMode === 'face' && ` · ${selectedFaceIds.length} selected`}
+          </span>
+          <span>{toolState.transformMode === 'combined' ? 'transform' : toolState.transformMode}</span>
+          <label className="flex items-center gap-1.5">
+            Snap
+            <select
+              value={toolState.gridSnap}
+              onChange={(e) => setToolState((s) => ({ ...s, gridSnap: parseFloat(e.target.value) }))}
+              className="h-6 px-1 bg-[var(--ts-app)] text-[var(--ts-text-hi)] font-mono text-[11px] rounded-[6px] border border-[var(--ts-border-hi)] outline-none"
+              aria-label="Grid snap"
+            >
+              {[0, 0.1, 0.25, 0.5, 1].map((val) => (
+                <option key={val} value={val}>
+                  {val === 0 ? 'Off' : val}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
-        <div className="flex items-center gap-3 text-[#7e838c]">
+        <div className="kbd-hint">
           {activeWorkspaceMode === 'rigging' ? (
-            <>
-              <span className="text-[#ed7300] font-bold">Easy Rig</span>
-              <span>Preset → Rest → Bind → Paint → Test → ANIM</span>
-              <span>[Edit / Pose / Skin]</span>
-              <span>Shift=Sub · Alt=Smooth weights</span>
-            </>
+            <span>Edit / Pose / Skin · Shift+T tools</span>
           ) : activeWorkspaceMode === 'blockout' ? (
-            <>
-              <span className="text-[#5b9bd5] font-bold">Blockout</span>
-              <span>{blockoutStatus}</span>
-              <span>RMB/MMB pan · Wheel zoom · Space+LMB pan</span>
-              <span>[Ctrl+Z] Undo path</span>
-              <span>[Ctrl+drag] Box-select points</span>
-              <span>[Del] Delete points</span>
-            </>
+            <span>{blockoutStatus}</span>
           ) : (
             <>
-              <button onClick={() => setIsUVModalOpen(true)} className="inline-flex items-center gap-1 text-[#ff9a3c] font-bold hover:underline">
-                <kbd>U</kbd> UV Studio
-              </button>
-              <button
-                onClick={() => {
-                  setToolWindowTab('primitives');
-                  setIsToolWindowOpen(true);
-                }}
-                className="text-amber-400 font-bold hover:underline"
-              >
-                Primitives
-              </button>
-              <span className="kbd-hint"><kbd>Esc</kbd> Cancel</span>
-              <span className="kbd-hint"><kbd>Ctrl+Z</kbd> Undo</span>
-              <span className="kbd-hint"><kbd>Ctrl+Y</kbd> Redo</span>
-              <span className="kbd-hint"><kbd>Ctrl+C/V</kbd> Copy/Paste</span>
-              <span className="kbd-hint"><kbd>G</kbd> Move</span>
-              <span className="kbd-hint"><kbd>R</kbd> Rotate</span>
-              <span className="kbd-hint"><kbd>S</kbd> Scale</span>
-              <span className="kbd-hint"><kbd>E</kbd> Extrude</span>
-              <span className="kbd-hint"><kbd>I</kbd> Inset</span>
-              <span className="kbd-hint"><kbd>Shift+D</kbd> Dup</span>
-              <span className="kbd-hint"><kbd>P</kbd> Separate</span>
-              <span className="kbd-hint"><kbd>Alt+X</kbd> Mirror</span>
+              <kbd>Shift</kbd>+<kbd>T</kbd> tools
+              <span>·</span>
+              <kbd>U</kbd> UV
+              <span>·</span>
+              <kbd>?</kbd> shortcuts
+              <span>·</span>
+              <kbd>Alt</kbd>+<kbd>Z</kbd> x-ray
             </>
           )}
         </div>

@@ -19,72 +19,101 @@ export function snapToGrid(val: number, step: number): number {
   return Math.round(val / step) * step;
 }
 
+import { originToGeometry } from './meshOrigin';
+
 /**
  * Move the mesh pivot to the local bounding-box center without changing world
  * appearance. Object-mode gizmos use `mesh.position`, so uncentered blockout
  * verts (silhouette space with position 0) leave the gizmo on the floor.
  */
 export function recenterMeshOrigin(mesh: CADMesh): CADMesh {
-  if (!mesh.vertices.length) return mesh;
+  return originToGeometry(mesh);
+}
 
-  let minX = Infinity;
-  let minY = Infinity;
-  let minZ = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  let maxZ = -Infinity;
+function selectionCentroid(
+  mesh: CADMesh,
+  vertexIds: string[] | null,
+): { cx: number; cy: number; cz: number; ids: Set<string> | null } {
+  const ids = vertexIds && vertexIds.length ? new Set(vertexIds) : null;
+  let cx = 0;
+  let cy = 0;
+  let cz = 0;
+  let n = 0;
   for (const v of mesh.vertices) {
-    if (v.x < minX) minX = v.x;
-    if (v.y < minY) minY = v.y;
-    if (v.z < minZ) minZ = v.z;
-    if (v.x > maxX) maxX = v.x;
-    if (v.y > maxY) maxY = v.y;
-    if (v.z > maxZ) maxZ = v.z;
+    if (ids && !ids.has(v.id)) continue;
+    cx += v.x;
+    cy += v.y;
+    cz += v.z;
+    n += 1;
   }
-  const cx = (minX + maxX) / 2;
-  const cy = (minY + maxY) / 2;
-  const cz = (minZ + maxZ) / 2;
-  if (Math.abs(cx) < 1e-10 && Math.abs(cy) < 1e-10 && Math.abs(cz) < 1e-10) {
-    return mesh;
-  }
+  if (!n) return { cx: 0, cy: 0, cz: 0, ids };
+  return { cx: cx / n, cy: cy / n, cz: cz / n, ids };
+}
 
-  const vertices = mesh.vertices.map((v) => ({
-    ...v,
-    x: v.x - cx,
-    y: v.y - cy,
-    z: v.z - cz,
-  }));
-
-  // Offset world position by the local center transformed by scale + Euler XYZ.
-  const { x: sx, y: sy, z: sz } = mesh.scale;
-  const { x: rx, y: ry, z: rz } = mesh.rotation;
-  let dx = cx * sx;
-  let dy = cy * sy;
-  let dz = cz * sz;
-
-  let y1 = dy * Math.cos(rx) - dz * Math.sin(rx);
-  let z1 = dy * Math.sin(rx) + dz * Math.cos(rx);
-  dy = y1;
-  dz = z1;
-
-  let x2 = dx * Math.cos(ry) + dz * Math.sin(ry);
-  let z2 = -dx * Math.sin(ry) + dz * Math.cos(ry);
-  dx = x2;
-  dz = z2;
-
-  let x3 = dx * Math.cos(rz) - dy * Math.sin(rz);
-  let y3 = dx * Math.sin(rz) + dy * Math.cos(rz);
-  dx = x3;
-  dy = y3;
-
+/** Flip selected verts (or the whole mesh) across a local axis through the selection center. */
+export function flipMesh(
+  mesh: CADMesh,
+  axis: 'x' | 'y' | 'z',
+  vertexIds?: string[] | null,
+): CADMesh {
+  const { cx, cy, cz, ids } = selectionCentroid(mesh, vertexIds ?? null);
+  const whole = !ids;
+  const vertices = mesh.vertices.map((v) => {
+    if (ids && !ids.has(v.id)) return v;
+    const p = { x: v.x, y: v.y, z: v.z };
+    p[axis] = (axis === 'x' ? cx : axis === 'y' ? cy : cz) * 2 - p[axis];
+    const normal = v.normal
+      ? { ...v.normal, [axis]: -(v.normal[axis] as number) }
+      : v.normal;
+    return { ...v, ...p, normal };
+  });
+  const faces = whole
+    ? mesh.faces.map((f) => ({
+        ...f,
+        vertexIds: [...f.vertexIds].reverse(),
+        uvs: [...f.uvs].reverse(),
+      }))
+    : mesh.faces;
   return finalizeEditableMesh({
     ...mesh,
     vertices,
-    position: {
-      x: mesh.position.x + dx,
-      y: mesh.position.y + dy,
-      z: mesh.position.z + dz,
-    },
+    faces,
+    revision: (mesh.revision || 0) + 1,
+  });
+}
+
+/** Rotate selected verts (or the whole mesh) 90 degrees around a local axis. */
+export function rotateMesh90(
+  mesh: CADMesh,
+  axis: 'x' | 'y' | 'z',
+  clockwise = false,
+  vertexIds?: string[] | null,
+): CADMesh {
+  const { cx, cy, cz, ids } = selectionCentroid(mesh, vertexIds ?? null);
+  const s = clockwise ? -1 : 1;
+  const vertices = mesh.vertices.map((v) => {
+    if (ids && !ids.has(v.id)) return v;
+    const x = v.x - cx;
+    const y = v.y - cy;
+    const z = v.z - cz;
+    let nx = x;
+    let ny = y;
+    let nz = z;
+    if (axis === 'y') {
+      nx = s * z;
+      nz = -s * x;
+    } else if (axis === 'x') {
+      ny = -s * z;
+      nz = s * y;
+    } else {
+      nx = -s * y;
+      ny = s * x;
+    }
+    return { ...v, x: nx + cx, y: ny + cy, z: nz + cz };
+  });
+  return finalizeEditableMesh({
+    ...mesh,
+    vertices,
     revision: (mesh.revision || 0) + 1,
   });
 }

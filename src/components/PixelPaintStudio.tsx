@@ -8,6 +8,7 @@ import {
 import { setLiveTextureCanvas } from '../utils/texturePreviewBus';
 import {
   Pencil,
+  Box,
   Eraser,
   PaintBucket,
   Pipette,
@@ -31,7 +32,6 @@ import {
   Layers,
   Move,
   SprayCan,
-  Box,
   MousePointer2,
   Wand2,
   Hand,
@@ -51,6 +51,15 @@ import {
   Sparkles,
   ArrowUp,
   ArrowDown,
+  Sun,
+  Moon,
+  Flame,
+  Zap,
+  Dices,
+  SquareDashed,
+  Ban,
+  LayoutGrid,
+  Droplets,
 } from 'lucide-react';
 import type { CADMesh, MeshTextureAnimation, ToolState } from '../types/cad';
 import {
@@ -172,7 +181,7 @@ function formatZoomPercent(z: number) {
   if (z < 1) return `${Number(pct.toFixed(1))}%`;
   return `${Math.round(pct)}%`;
 }
-export const PIXEL_CANVAS_SIZES = [16, 32, 64, 128, 256, 512, 1024] as const;
+export const PIXEL_CANVAS_SIZES = [32, 64, 128, 256, 512, 1024, 1028] as const;
 export type PixelCanvasSize = (typeof PIXEL_CANVAS_SIZES)[number];
 
 /** Above this, undo snapshots are deferred to stroke-end and capped. */
@@ -201,7 +210,7 @@ export function setPaintFullResPreferred(on: boolean) {
   }
 }
 
-function nearestCanvasSize(w: number, h: number, maxSize: PixelCanvasSize = 1024): PixelCanvasSize {
+function nearestCanvasSize(w: number, h: number, maxSize: PixelCanvasSize = 1028): PixelCanvasSize {
   const dim = Math.max(w, h);
   let best: PixelCanvasSize = PIXEL_CANVAS_SIZES[0];
   for (const s of PIXEL_CANVAS_SIZES) {
@@ -300,6 +309,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
   const [previewClipId, setPreviewClipId] = useState<string | null>(null);
   const [clipboardFrame, setClipboardFrame] = useState<FrameMeta | null>(null);
   const [sizeMenuOpen, setSizeMenuOpen] = useState(false);
+  const [customSizeInput, setCustomSizeInput] = useState('');
   const [importPrompt, setImportPrompt] = useState<ImportPrompt | null>(null);
   const [importSize, setImportSize] = useState<PixelCanvasSize>(32);
   const [importSizeMenuOpen, setImportSizeMenuOpen] = useState(false);
@@ -346,7 +356,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
   const [frameIndex, setFrameIndex] = useState(0);
   const [activeLayerId, setActiveLayerId] = useState(frames[0].layers[0].id);
 
-  const colorRamp = useMemo(() => generateColorRamp(toolState.activeColor || '#ed7300'), [toolState.activeColor]);
+  const colorRamp = useMemo(() => generateColorRamp(toolState.activeColor || '#00b4c4'), [toolState.activeColor]);
 
   const layerCanvasMap = useRef(new Map<string, HTMLCanvasElement>());
   const onTextureUpdatedRef = useRef(onTextureUpdated);
@@ -1114,7 +1124,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     erase: boolean,
     dither = false
   ) => {
-    const color = toolState.activeColor || '#ed7300';
+    const color = toolState.activeColor || '#00b4c4';
     const half = Math.floor(brushSize / 2);
     for (let by = 0; by < brushSize; by++) {
       for (let bx = 0; bx < brushSize; bx++) {
@@ -1220,7 +1230,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     }
     if (tool === 'fill') {
       const img = ctx.getImageData(0, 0, canvasSize, canvasSize);
-      floodFill(img, px, py, hexToRgba(toolState.activeColor || '#ed7300'));
+      floodFill(img, px, py, hexToRgba(toolState.activeColor || '#00b4c4'));
       ctx.putImageData(img, 0, 0);
       paint();
       return;
@@ -1504,7 +1514,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       const ctx = c.getContext('2d')!;
       ctx.putImageData(snapshotBeforeStrokeRef.current, 0, 0);
       const s = shapeStartRef.current;
-      const color = toolState.activeColor || '#ed7300';
+      const color = toolState.activeColor || '#00b4c4';
       ctx.fillStyle = color;
       ctx.strokeStyle = color;
 
@@ -1889,11 +1899,11 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       { id: 'picker', icon: <Pipette className="w-3.5 h-3.5" />, title: 'Eyedropper (I)', group: 'draw' },
       { id: 'dither', icon: <Grid3x3 className="w-3.5 h-3.5" />, title: 'Dither', group: 'draw' },
       { id: 'spray', icon: <SprayCan className="w-3.5 h-3.5" />, title: 'Spray', group: 'draw' },
-      { id: 'shade', icon: <span className="text-[10px] font-bold">Dk</span>, title: 'Shade / darken', group: 'draw' },
-      { id: 'lighten', icon: <span className="text-[10px] font-bold">Lt</span>, title: 'Lighten', group: 'draw' },
-      { id: 'burn', icon: <span className="text-[10px] font-bold">Bn</span>, title: 'Burn (strong darken)', group: 'draw' },
-      { id: 'dodge', icon: <span className="text-[10px] font-bold">Dg</span>, title: 'Dodge (strong lighten)', group: 'draw' },
-      { id: 'noise', icon: <span className="text-[10px] font-bold">Nz</span>, title: 'Noise', group: 'draw' },
+      { id: 'shade', icon: <Moon className="w-3.5 h-3.5" />, title: 'Shade / darken', group: 'draw' },
+      { id: 'lighten', icon: <Sun className="w-3.5 h-3.5" />, title: 'Lighten', group: 'draw' },
+      { id: 'burn', icon: <Flame className="w-3.5 h-3.5" />, title: 'Burn (strong darken)', group: 'draw' },
+      { id: 'dodge', icon: <Zap className="w-3.5 h-3.5" />, title: 'Dodge (strong lighten)', group: 'draw' },
+      { id: 'noise', icon: <Dices className="w-3.5 h-3.5" />, title: 'Noise', group: 'draw' },
       { id: 'select', icon: <MousePointer2 className="w-3.5 h-3.5" />, title: 'Marquee Select (V)', group: 'select' },
       { id: 'wand', icon: <Wand2 className="w-3.5 h-3.5" />, title: 'Magic Wand (W)', group: 'select' },
       { id: 'move', icon: <Move className="w-3.5 h-3.5" />, title: 'Move Selection (M)', group: 'select' },
@@ -1941,13 +1951,10 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
     <div className="pixel-paint flex flex-col h-full w-full select-none overflow-hidden text-[11px]">
       {/* Header */}
       <header className="pixel-paint__header shrink-0">
-        <div className="pixel-paint__brand">
-          <span className="pixel-paint__brand-mark" aria-hidden />
-          <div className="min-w-0">
-            <div className="pixel-paint__title">Pixel Paint</div>
-            <div className="pixel-paint__subtitle truncate">{mesh?.name || 'Texture'}</div>
-          </div>
-        </div>
+        <span className="pixel-paint__mesh-name" title={mesh?.name || 'Texture'}>
+          {mesh?.name || 'Texture'}
+        </span>
+        <div className="pixel-paint__vdiv" />
 
         <div className="pixel-paint__seg pixel-paint__size-menu" ref={sizeMenuRef}>
           <button
@@ -1974,6 +1981,48 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                   {s >= 512 ? <span className="pixel-paint__size-hint">HD</span> : null}
                 </button>
               ))}
+              <div className="p-1.5 border-t border-[var(--ts-border,#282c35)] flex flex-col gap-1">
+                <div className="flex items-center justify-between text-[10px] text-[var(--ts-text-muted,#858a93)] font-medium">
+                  <span>Custom size</span>
+                  {!(PIXEL_CANVAS_SIZES as readonly number[]).includes(canvasSize) && (
+                    <span className="text-[#00b4c4] font-mono">{canvasSize}×{canvasSize}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min={8}
+                    max={4096}
+                    value={customSizeInput}
+                    onChange={(e) => setCustomSizeInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const val = parseInt(customSizeInput, 10);
+                        if (Number.isFinite(val) && val >= 8 && val <= 4096) {
+                          resizeCanvas(val);
+                          setCustomSizeInput('');
+                        }
+                      }
+                    }}
+                    placeholder="e.g. 768"
+                    className="w-20 h-6 px-1.5 rounded-[4px] bg-[#16191e] border border-[#3a3f4a] focus:border-[#00b4c4] text-[11px] font-mono text-[#e2e6ec] outline-none"
+                    aria-label="Custom canvas size"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const val = parseInt(customSizeInput, 10);
+                      if (Number.isFinite(val) && val >= 8 && val <= 4096) {
+                        resizeCanvas(val);
+                        setCustomSizeInput('');
+                      }
+                    }}
+                    className="h-6 px-2 rounded-[4px] bg-[#00b4c4] hover:bg-[#00d4e2] text-[#0a1114] text-[10.5px] font-semibold"
+                  >
+                    Set
+                  </button>
+                </div>
+              </div>
               <button
                 type="button"
                 className={`pixel-paint__size-option ${isPaintFullResPreferred() ? 'is-active' : ''}`}
@@ -2007,60 +2056,57 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
           <button type="button" className="pixel-paint__icon-btn" onClick={invertLayer} title="Invert colors">
             <Contrast className="w-3.5 h-3.5" />
           </button>
-          <button type="button" className="pixel-paint__text-btn" onClick={outlineLayer} title="Outline opaque pixels">
-            Outline
+          <button type="button" className="pixel-paint__icon-btn" onClick={outlineLayer} title="Outline opaque pixels">
+            <SquareDashed className="w-3.5 h-3.5" />
           </button>
-          <button type="button" className="pixel-paint__text-btn" onClick={clearLayer} title="Clear layer to solid white (keeps UV layout)">
-            Clear
+          <button type="button" className="pixel-paint__icon-btn" onClick={clearLayer} title="Clear layer to solid white (keeps UV layout)">
+            <Ban className="w-3.5 h-3.5" />
           </button>
-          <button type="button" className="pixel-paint__text-btn" onClick={fillLayerSolid} title="Fill layer with the active color">
-            Fill Color
+          <button type="button" className="pixel-paint__icon-btn" onClick={fillLayerSolid} title="Fill layer with the active color">
+            <Droplets className="w-3.5 h-3.5" />
           </button>
           <button
             type="button"
-            className="pixel-paint__text-btn flex items-center gap-1 font-bold text-amber-400"
+            className="pixel-paint__icon-btn"
             onClick={() => setAdjustmentsModalOpen(true)}
             title="Photo Adjustments & Filters (Brightness, Contrast, Hue, Posterize, Lineart)"
           >
-            <Sliders className="w-3.5 h-3.5 text-amber-400" />
-            Filters
+            <Sliders className="w-3.5 h-3.5" />
           </button>
           <button
             type="button"
-            className={`pixel-paint__text-btn flex items-center gap-1 ${pixelPerfect ? 'is-active' : ''}`}
+            className={`pixel-paint__icon-btn ${pixelPerfect ? 'is-active' : ''}`}
             onClick={() => setPixelPerfect((v) => !v)}
-            title="Pixel-Perfect pencil mode (removes L-shaped corner double pixels)"
+            title="Pixel-Perfect pencil (removes L-shaped corner double pixels)"
           >
-            <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-            P-Perfect
+            <Sparkles className="w-3.5 h-3.5" />
           </button>
           <button
             type="button"
-            className={`pixel-paint__text-btn flex items-center gap-1 ${symmetryMode !== 'off' ? 'is-active !border-cyan-500 !text-cyan-400 font-bold' : ''}`}
+            className={`pixel-paint__text-btn ${symmetryMode !== 'off' ? 'is-active' : ''}`}
             onClick={() => {
               const modes: SymmetryMode[] = ['off', 'horizontal', 'vertical', 'radial'];
               const nextIdx = (modes.indexOf(symmetryMode) + 1) % modes.length;
               setSymmetryMode(modes[nextIdx]);
             }}
-            title="Toggle Symmetry Mode (Off → Horizontal → Vertical → 4-Way Radial)"
+            title="Toggle Symmetry (Off → Horizontal → Vertical → 4-Way Radial)"
           >
-            <Grid3x3 className="w-3.5 h-3.5 text-cyan-400" />
-            Sym: {symmetryMode.toUpperCase()}
+            <Grid3x3 className="w-3.5 h-3.5" />
+            {symmetryMode === 'off' ? 'Off' : symmetryMode === 'horizontal' ? 'H' : symmetryMode === 'vertical' ? 'V' : '4'}
           </button>
           <button
             type="button"
-            className={`pixel-paint__text-btn flex items-center gap-1 ${tilingPreview ? 'is-active !border-emerald-500 !text-emerald-400 font-bold' : ''}`}
+            className={`pixel-paint__icon-btn ${tilingPreview ? 'is-active' : ''}`}
             onClick={() => setTilingPreview((v) => !v)}
-            title="3x3 Tileable Texture Repeat Preview"
+            title="3x3 tileable texture preview"
           >
-            <Layers className="w-3.5 h-3.5 text-emerald-400" />
-            Tile View
+            <Layers className="w-3.5 h-3.5" />
           </button>
           {tool === 'dither' && (
             <select
               value={ditherPattern}
               onChange={(e) => setDitherPattern(e.target.value as DitherPattern)}
-              className="bg-[#1e2023] text-amber-400 text-[10px] font-bold rounded px-1.5 py-0.5 outline-none border border-[#3b3f46]"
+              className="pixel-paint__select"
               title="Select Dither Matrix Pattern"
             >
               <option value="bayer4x4">Bayer 4x4</option>
@@ -2068,6 +2114,16 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
               <option value="checker">Checkerboard</option>
               <option value="stripe">45° Stripe</option>
             </select>
+          )}
+          {(tool === 'rect' || tool === 'ellipse') && (
+            <button
+              type="button"
+              className={`pixel-paint__text-btn ${shapeFilled ? 'is-active' : ''}`}
+              onClick={() => setShapeFilled((v) => !v)}
+              title="Toggle shape fill (Filled vs Outline)"
+            >
+              {shapeFilled ? 'Filled' : 'Outline'}
+            </button>
           )}
         </div>
 
@@ -2082,8 +2138,8 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
           <button type="button" className="pixel-paint__icon-btn" onClick={exportPng} title="Export PNG">
             <Download className="w-3.5 h-3.5" />
           </button>
-          <button type="button" className="pixel-paint__text-btn" onClick={exportSheet} title="Export spritesheet">
-            Sheet
+          <button type="button" className="pixel-paint__icon-btn" onClick={exportSheet} title="Export spritesheet">
+            <LayoutGrid className="w-3.5 h-3.5" />
           </button>
         </div>
 
@@ -2092,13 +2148,13 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
         <div className="pixel-paint__seg pixel-paint__color-chip">
           <input
             type="color"
-            value={toolState.activeColor || '#ed7300'}
+            value={toolState.activeColor || '#00b4c4'}
             onChange={(e) => setToolState((s) => ({ ...s, activeColor: e.target.value, brushSize }))}
             className="pixel-paint__color-input"
             title="Brush color"
           />
-          <span className="font-mono text-[10px] text-[#9a9a9a] uppercase tracking-wide">
-            {(toolState.activeColor || '#ed7300').replace('#', '')}
+          <span className="font-mono text-[10px] text-[var(--ts-text-muted)]">
+            {(toolState.activeColor || '#00b4c4').replace('#', '')}
           </span>
         </div>
 
@@ -2116,56 +2172,6 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
               {s}
             </button>
           ))}
-        </div>
-
-        <div className="pixel-paint__seg">
-          <button
-            type="button"
-            className={`pixel-paint__text-btn ${showUvOverlay ? 'is-active' : ''}`}
-            onClick={toggleUvOverlay}
-            title="UV outlines"
-          >
-            <Box className="w-3.5 h-3.5" />
-            UV
-          </button>
-          <button
-            type="button"
-            className="pixel-paint__text-btn flex items-center gap-1"
-            onClick={() => {
-              const fileInput = document.createElement('input');
-              fileInput.type = 'file';
-              fileInput.accept = 'image/*';
-              fileInput.onchange = (e) => {
-                const file = (e.target as HTMLInputElement).files?.[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = () => {
-                  if (typeof reader.result === 'string') {
-                    const img = new Image();
-                    img.onload = () => {
-                      setImportSize(nearestCanvasSize(img.naturalWidth, img.naturalHeight));
-                      setImportPrompt({ dataUrl: reader.result as string, naturalW: img.naturalWidth, naturalH: img.naturalHeight });
-                    };
-                    img.src = reader.result;
-                  }
-                };
-                reader.readAsDataURL(file);
-              };
-              fileInput.click();
-            }}
-            title="Load custom UV Image onto canvas"
-          >
-            <ImagePlus className="w-3.5 h-3.5" />
-            Load UV
-          </button>
-          <button
-            type="button"
-            className={`pixel-paint__text-btn ${shapeFilled ? 'is-active' : ''}`}
-            onClick={() => setShapeFilled((v) => !v)}
-            title="Filled shapes"
-          >
-            Fill
-          </button>
         </div>
       </header>
 
@@ -2272,10 +2278,10 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
               {symmetryMode !== 'off' && (
                 <div className="absolute inset-0 pointer-events-none z-30">
                   {(symmetryMode === 'horizontal' || symmetryMode === 'radial') && (
-                    <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-0.5 bg-cyan-400/80 shadow-[0_0_8px_#06b6d4]" />
+                    <div className="pixel-paint__sym-guide is-v" />
                   )}
                   {(symmetryMode === 'vertical' || symmetryMode === 'radial') && (
-                    <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-0.5 bg-cyan-400/80 shadow-[0_0_8px_#06b6d4]" />
+                    <div className="pixel-paint__sym-guide is-h" />
                   )}
                 </div>
               )}
@@ -2287,7 +2293,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                       return (
                         <div
                           key={`tile_${ox}_${oy}`}
-                          className="absolute inset-0 border border-dashed border-emerald-400/50"
+                          className="absolute inset-0 border border-dashed border-[var(--ts-accent)]/40"
                           style={{
                             transform: `translate(${ox * 100}%, ${oy * 100}%)`,
                             backgroundImage: displayRef.current ? `url(${displayRef.current.toDataURL()})` : undefined,
@@ -2317,7 +2323,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                         key={face.id}
                         points={points}
                         fill={selected ? 'rgba(230,134,25,0.14)' : 'none'}
-                        stroke={selected ? '#e68619' : 'rgba(20,115,230,0.85)'}
+                        stroke={selected ? '#00b4c4' : 'rgba(20,115,230,0.85)'}
                         strokeWidth={selected ? 1.75 : 1.15}
                         vectorEffect="non-scaling-stroke"
                       />
@@ -2351,11 +2357,50 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
           </div>
 
           <div className="pixel-paint__hud">
-            <button type="button" className={`pixel-paint__hud-btn ${showGrid ? 'is-active' : ''}`} onClick={() => setShowGrid((v) => !v)}>
+            <button type="button" className={`pixel-paint__hud-btn ${showGrid ? 'is-active' : ''}`} onClick={() => setShowGrid((v) => !v)} title="Pixel grid">
               Grid
             </button>
-            <button type="button" className={`pixel-paint__hud-btn ${showUvOverlay ? 'is-active' : ''}`} onClick={toggleUvOverlay}>
+            <button type="button" className={`pixel-paint__hud-btn ${showUvOverlay ? 'is-active' : ''}`} onClick={toggleUvOverlay} title="UV outlines">
+              <Box className="w-3 h-3" />
               UV
+            </button>
+            <button
+              type="button"
+              className="pixel-paint__hud-btn"
+              title="Load custom UV image onto canvas"
+              onClick={() => {
+                const fileInput = document.createElement('input');
+                fileInput.type = 'file';
+                fileInput.accept = 'image/*';
+                fileInput.onchange = (e) => {
+                  const file = (e.target as HTMLInputElement).files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    if (typeof reader.result === 'string') {
+                      const img = new Image();
+                      img.onload = () => {
+                        setImportSize(nearestCanvasSize(img.naturalWidth, img.naturalHeight));
+                        setImportPrompt({ dataUrl: reader.result as string, naturalW: img.naturalWidth, naturalH: img.naturalHeight });
+                      };
+                      img.src = reader.result;
+                    }
+                  };
+                  reader.readAsDataURL(file);
+                };
+                fileInput.click();
+              }}
+            >
+              <ImagePlus className="w-3 h-3" />
+              Load
+            </button>
+            <button
+              type="button"
+              className={`pixel-paint__hud-btn ${shapeFilled ? 'is-active' : ''}`}
+              onClick={() => setShapeFilled((v) => !v)}
+              title="Filled shapes"
+            >
+              Fill
             </button>
             <button type="button" className={`pixel-paint__hud-btn ${onionSkin ? 'is-active' : ''}`} onClick={() => setOnionSkin((v) => !v)} title="Onion skin previous frame">
               Onion
@@ -2395,7 +2440,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
         <aside className="pixel-paint__inspector shrink-0 flex flex-col min-h-0">
           <div className="pixel-paint__section-head">
             <span>Palette</span>
-            <span className="text-[9px] font-mono normal-case tracking-normal text-[#51565f]">
+            <span className="text-[10px] font-mono normal-case tracking-normal text-[#6e7584]">
               {activePalette.colors.length}
             </span>
           </div>
@@ -2435,7 +2480,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                           ))}
                         </span>
                         <span className="truncate flex-1 text-left">{p.name}</span>
-                        <span className="font-mono text-[9px] text-[#51565f]">{p.colors.length}</span>
+                        <span className="font-mono text-[10px] text-[#6e7584]">{p.colors.length}</span>
                       </button>
                     ))}
                   </div>
@@ -2455,19 +2500,19 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
               />
             ))}
           </div>
-          <div className="px-2 pt-2 pb-2 bg-[#181a1d] border-t border-[#2e3136]">
-            <div className="text-[9px] uppercase tracking-wider text-[#8b909a] mb-1 font-bold flex items-center justify-between">
+          <div className="px-2 pt-2 pb-2 bg-[#181a1d] border-t border-[#282c35]">
+            <div className="text-[10px] uppercase tracking-wider text-[#6e7584] mb-1 font-bold flex items-center justify-between">
               <span>Shading Ramp</span>
-              <span className="text-[8px] font-mono text-amber-400">Lite → Dark</span>
+              <span className="text-[10px] font-mono text-[#6e7584]">Lite → Dark</span>
             </div>
-            <div className="grid grid-cols-5 gap-1 p-1 bg-[#141518] rounded border border-[#2e3136]">
+            <div className="grid grid-cols-5 gap-1 p-1 bg-[#111318] rounded-[4px] border border-[#282c35]">
               {colorRamp.map((shade, i) => (
                 <button
                   key={`${shade}_${i}`}
                   type="button"
                   title={`Shade ${i + 1}: ${shade}`}
                   onClick={() => setToolState((s) => ({ ...s, activeColor: shade }))}
-                  className={`h-5 rounded border hover:scale-105 transition-transform ${toolState.activeColor === shade ? 'border-amber-400 scale-105 shadow-sm' : 'border-[#3b3f46]'}`}
+                  className={`h-5 rounded-[4px] border hover:scale-105 transition-transform ${toolState.activeColor === shade ? 'border-[#e6b422] scale-105 shadow-sm' : 'border-[#3a3f4a]'}`}
                   style={{ backgroundColor: shade }}
                 />
               ))}
@@ -2528,7 +2573,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                       )
                     );
                   }}
-                  className="bg-[#1e2023] text-[#b0b0b0] text-[8px] rounded px-0.5 py-0.5 outline-none border border-[#3b3f46]"
+                  className="bg-[#16191e] text-[#b0b0b0] text-[10px] rounded-[4px] px-1 py-0.5 outline-none border border-[#3a3f4a]"
                   title="Layer Blend Mode"
                 >
                   <option value="normal">Norm</option>
@@ -2624,10 +2669,10 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
           </div>
 
           {/* UV Texture Animation Clips Panel */}
-          <div className="border-t border-[#101114] px-2 py-2 space-y-2">
+          <div className="border-t border-[#1a1c22] px-2 py-2 space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-[9px] uppercase tracking-[0.12em] text-[#858a93] font-bold flex items-center gap-1">
-                <Film className="w-3 h-3 text-[#ed7300]" /> Clips & Animations
+              <span className="text-[10px] uppercase tracking-[0.12em] text-[#858a93] font-bold flex items-center gap-1">
+                <Film className="w-3 h-3 text-[#00b4c4]" /> Clips & Animations
               </span>
               <div className="flex items-center gap-1">
                 <button
@@ -2641,7 +2686,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                     });
                     setClipModalOpen(true);
                   }}
-                  className="px-1.5 py-0.5 bg-[#ed7300] text-white text-[9px] font-bold rounded flex items-center gap-0.5"
+                  className="px-1.5 py-0.5 bg-[#00b4c4] hover:bg-[#009aa7] text-white text-[10px] font-medium rounded-[4px] flex items-center gap-0.5"
                   title="Create Custom Texture Animation Clip"
                 >
                   <Plus className="w-2.5 h-2.5" /> + Clip
@@ -2661,10 +2706,10 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                   return (
                     <div
                       key={c.id}
-                      className={`p-1.5 rounded border text-[10px] flex items-center justify-between transition ${
+                      className={`p-1.5 rounded-[4px] border text-[10px] flex items-center justify-between transition ${
                         isPreviewing
-                          ? 'bg-[#ed7300]/20 border-[#ed7300] text-[#ed7300]'
-                          : 'bg-[#212121] border-[#3b3f46] text-[#d8d8d8]'
+                          ? 'bg-[#00b4c4]/20 border-[#00b4c4] text-[#00b4c4]'
+                          : 'bg-[#212121] border-[#3a3f4a] text-[#d8d8d8]'
                       }`}
                     >
                       <div className="flex items-center gap-1.5 truncate flex-1">
@@ -2679,7 +2724,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                               setIsPlaying(true);
                             }
                           }}
-                          className={`p-0.5 rounded ${isPreviewing ? 'text-[#ed7300]' : 'text-[#858a93] hover:text-white'}`}
+                          className={`p-0.5 rounded-[4px] ${isPreviewing ? 'text-[#00b4c4]' : 'text-[#858a93] hover:text-white'}`}
                           title={isPreviewing ? 'Stop Preview' : 'Play Clip Preview'}
                         >
                           {isPreviewing ? <Pause className="w-3 h-3" /> : <PlayCircle className="w-3 h-3" />}
@@ -2688,13 +2733,13 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                         <span className="font-semibold truncate">{c.name}</span>
                         {isDefault && (
                           <span title="Default Clip" className="shrink-0 flex items-center">
-                            <Star className="w-2.5 h-2.5 text-amber-400 fill-amber-400" />
+                            <Star className="w-2.5 h-2.5 text-[#e6b422] fill-[#e6b422]" />
                           </span>
                         )}
                       </div>
 
                       <div className="flex items-center gap-1 shrink-0">
-                        <span className="text-[8px] px-1 py-0.2 bg-[#202226] text-[#858a93] rounded font-mono">
+                        <span className="text-[10px] px-1 py-0.5 bg-[#1a1c22] text-[#858a93] rounded-[4px] font-mono">
                           {c.frameIds.length}f · {c.loop ? 'loop' : 'once'}
                         </span>
 
@@ -2754,10 +2799,10 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
             <Copy className="w-3.5 h-3.5" />
           </button>
           <button type="button" className="pixel-paint__icon-btn" onClick={copyFrame} title="Copy frame">
-            <span className="text-[9px] font-semibold">C</span>
+            <span className="text-[10px] font-mono font-semibold">C</span>
           </button>
           <button type="button" className="pixel-paint__icon-btn" onClick={pasteFrame} title="Paste frame" disabled={!clipboardFrame}>
-            <span className="text-[9px] font-semibold">V</span>
+            <span className="text-[10px] font-mono font-semibold">V</span>
           </button>
           <button type="button" className="pixel-paint__icon-btn is-danger" onClick={deleteFrame} title="Delete frame">
             <Trash2 className="w-3.5 h-3.5" />
@@ -2900,9 +2945,9 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       {clipModalOpen && editingClip && (
         <div className="pixel-paint__modal-backdrop">
           <div className="pixel-paint__modal w-96 max-w-full" role="dialog">
-            <div className="flex items-center justify-between pb-2 border-b border-[#3b3f46]">
+            <div className="flex items-center justify-between pb-2 border-b border-[#3a3f4a]">
               <div className="flex items-center gap-2 font-bold text-white text-sm">
-                <Film className="w-4 h-4 text-[#ed7300]" />
+                <Film className="w-4 h-4 text-[#00b4c4]" />
                 <span>Edit Animation Clip</span>
               </div>
               <button
@@ -2922,30 +2967,30 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                   value={editingClip.name}
                   onChange={(e) => setEditingClip({ ...editingClip, name: e.target.value })}
                   placeholder="e.g. Talk Happy, Blink Loop, Dialog Laugh"
-                  className="w-full bg-[#1e2023] border border-[#3b3f46] rounded px-2 py-1 text-white outline-none focus:border-[#ed7300]"
+                  className="w-full bg-[#16191e] border border-[#3a3f4a] rounded px-2 py-1 text-white outline-none focus:border-[#00b4c4]"
                 />
               </label>
 
-              <div className="flex items-center justify-between py-1 border-t border-b border-[#101114]">
+              <div className="flex items-center justify-between py-1 border-t border-b border-[#1a1c22]">
                 <div>
                   <div className="font-bold text-white">Loop Animation</div>
-                  <div className="text-[9px] text-[#858a93]">Repeats infinitely vs plays once</div>
+                  <div className="text-[10px] text-[#858a93]">Repeats infinitely vs plays once</div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setEditingClip({ ...editingClip, loop: !editingClip.loop })}
-                  className={`px-2 py-1 rounded font-bold text-[10px] ${
-                    editingClip.loop ? 'bg-[#ed7300] text-white' : 'bg-[#34383f] text-[#858a93]'
+                  className={`px-2 py-1 rounded-[4px] font-bold text-[10px] ${
+                    editingClip.loop ? 'bg-[#00b4c4] text-white' : 'bg-[#282c35] text-[#858a93]'
                   }`}
                 >
                   {editingClip.loop ? 'LOOP' : 'ONCE'}
                 </button>
               </div>
 
-              <div className="flex items-center justify-between py-1 border-b border-[#101114]">
+              <div className="flex items-center justify-between py-1 border-b border-[#1a1c22]">
                 <div>
                   <div className="font-bold text-white">Default Mesh Clip</div>
-                  <div className="text-[9px] text-[#858a93]">Plays when no animation key is active</div>
+                  <div className="text-[10px] text-[#858a93]">Plays when no animation key is active</div>
                 </div>
                 <button
                   type="button"
@@ -2956,8 +3001,8 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                       setDefaultClipId(editingClip.id);
                     }
                   }}
-                  className={`p-1 rounded ${
-                    defaultClipId === editingClip.id ? 'text-amber-400 bg-amber-400/20' : 'text-[#858a93] bg-[#34383f]'
+                  className={`p-1 rounded-[4px] ${
+                    defaultClipId === editingClip.id ? 'text-[#e6b422] bg-[#e6b422]/20' : 'text-[#858a93] bg-[#282c35]'
                   }`}
                 >
                   <Star className="w-3.5 h-3.5 fill-current" />
@@ -2967,11 +3012,11 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
               <div>
                 <div className="font-bold text-white mb-1.5 flex items-center justify-between">
                   <span>Include Frames ({editingClip.frameIds.length}/{frames.length})</span>
-                  <div className="flex gap-1 text-[9px]">
+                  <div className="flex gap-1 text-[10px]">
                     <button
                       type="button"
                       onClick={() => setEditingClip({ ...editingClip, frameIds: frames.map((f) => f.id) })}
-                      className="text-[#ed7300] hover:underline"
+                      className="text-[#00b4c4] hover:underline"
                     >
                       All
                     </button>
@@ -2986,7 +3031,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-4 gap-1.5 max-h-36 overflow-y-auto custom-scrollbar p-1 bg-[#1e2023] rounded border border-[#101114]">
+                <div className="grid grid-cols-4 gap-1.5 max-h-36 overflow-y-auto custom-scrollbar p-1 bg-[#16191e] rounded-[4px] border border-[#1a1c22]">
                   {frames.map((f, i) => {
                     const included = editingClip.frameIds.includes(f.id);
                     return (
@@ -2999,14 +3044,14 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                             : [...editingClip.frameIds, f.id];
                           setEditingClip({ ...editingClip, frameIds: nextIds });
                         }}
-                        className={`p-1.5 rounded border flex flex-col items-center justify-center transition ${
+                        className={`p-1.5 rounded-[4px] border flex flex-col items-center justify-center transition ${
                           included
-                            ? 'bg-[#ed7300]/20 border-[#ed7300] text-white font-bold'
-                            : 'bg-[#212121] border-[#3b3f46] text-[#858a93] opacity-60'
+                            ? 'bg-[#00b4c4]/20 border-[#00b4c4] text-white font-bold'
+                            : 'bg-[#212121] border-[#3a3f4a] text-[#858a93] opacity-60'
                         }`}
                       >
                         <span className="text-[10px]">f{i + 1}</span>
-                        <span className="text-[8px] truncate max-w-full">{f.name || `${f.durationMs}ms`}</span>
+                        <span className="text-[10px] font-mono truncate max-w-full">{f.name || `${f.durationMs}ms`}</span>
                       </button>
                     );
                   })}
@@ -3014,7 +3059,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
               </div>
             </div>
 
-            <div className="pixel-paint__modal-actions pt-2 border-t border-[#3b3f46]">
+            <div className="pixel-paint__modal-actions pt-2 border-t border-[#3a3f4a]">
               <button
                 type="button"
                 className="pixel-paint__modal-btn is-primary"
@@ -3044,9 +3089,9 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
       {adjustmentsModalOpen && (
         <div className="pixel-paint__modal-backdrop">
           <div className="pixel-paint__modal w-[480px] max-w-full" role="dialog">
-            <div className="flex items-center justify-between pb-2 border-b border-[#3b3f46]">
+            <div className="flex items-center justify-between pb-2 border-b border-[#3a3f4a]">
               <div className="flex items-center gap-2 font-bold text-white text-sm">
-                <Sliders className="w-4 h-4 text-amber-400" />
+                <Sliders className="w-4 h-4 text-[#00b4c4]" />
                 <span>Photo Editing & Image Adjustments</span>
               </div>
               <button
@@ -3060,41 +3105,41 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
 
             <div className="py-3 space-y-3 font-mono text-xs max-h-[420px] overflow-y-auto custom-scrollbar">
               {/* Preset Buttons */}
-              <div className="flex items-center gap-1.5 flex-wrap pb-2 border-b border-[#101114]">
+              <div className="flex items-center gap-1.5 flex-wrap pb-2 border-b border-[#1a1c22]">
                 <button
                   type="button"
                   onClick={() => setAdjustments(DEFAULT_ADJUSTMENTS)}
-                  className="px-2 py-0.5 bg-[#202226] hover:bg-[#3b3f46] text-white rounded text-[10px]"
+                  className="px-2 py-0.5 bg-[#202226] hover:bg-[#3a3f4a] text-white rounded-[4px] border border-[#3a3f4a] text-[10px]"
                 >
                   Reset All
                 </button>
                 <button
                   type="button"
                   onClick={() => setAdjustments({ ...DEFAULT_ADJUSTMENTS, grayscale: true })}
-                  className="px-2 py-0.5 bg-[#202226] hover:bg-[#3b3f46] text-white rounded text-[10px]"
+                  className="px-2 py-0.5 bg-[#202226] hover:bg-[#3a3f4a] text-[#858a93] hover:text-white rounded-[4px] border border-[#3a3f4a] text-[10px]"
                 >
                   Grayscale
                 </button>
                 <button
                   type="button"
                   onClick={() => setAdjustments({ ...DEFAULT_ADJUSTMENTS, sepia: true })}
-                  className="px-2 py-0.5 bg-[#202226] hover:bg-[#3b3f46] text-amber-300 rounded text-[10px]"
+                  className="px-2 py-0.5 bg-[#202226] hover:bg-[#3a3f4a] text-[#858a93] hover:text-white rounded-[4px] border border-[#3a3f4a] text-[10px]"
                 >
                   Sepia
                 </button>
                 <button
                   type="button"
                   onClick={() => setAdjustments({ ...DEFAULT_ADJUSTMENTS, posterizeLevels: 8 })}
-                  className="px-2 py-0.5 bg-[#202226] hover:bg-[#3b3f46] text-emerald-400 rounded text-[10px]"
+                  className="px-2 py-0.5 bg-[#202226] hover:bg-[#3a3f4a] text-[#858a93] hover:text-white rounded-[4px] border border-[#3a3f4a] text-[10px]"
                 >
-                  8-Color Pixel Quantize
+                  8-Color Quantize
                 </button>
                 <button
                   type="button"
                   onClick={() => setAdjustments({ ...DEFAULT_ADJUSTMENTS, edgeDetection: true, edgeThreshold: 45 })}
-                  className="px-2 py-0.5 bg-[#202226] hover:bg-[#3b3f46] text-cyan-400 rounded text-[10px]"
+                  className="px-2 py-0.5 bg-[#202226] hover:bg-[#3a3f4a] text-[#858a93] hover:text-white rounded-[4px] border border-[#3a3f4a] text-[10px]"
                 >
-                  Sobel Pixel Lineart
+                  Sobel Lineart
                 </button>
               </div>
 
@@ -3111,7 +3156,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                     max={100}
                     value={adjustments.brightness}
                     onChange={(e) => setAdjustments({ ...adjustments, brightness: Number(e.target.value) })}
-                    className="w-full accent-[#ed7300]"
+                    className="w-full accent-[#00b4c4]"
                   />
                 </label>
 
@@ -3126,7 +3171,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                     max={100}
                     value={adjustments.contrast}
                     onChange={(e) => setAdjustments({ ...adjustments, contrast: Number(e.target.value) })}
-                    className="w-full accent-[#ed7300]"
+                    className="w-full accent-[#00b4c4]"
                   />
                 </label>
 
@@ -3141,7 +3186,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                     max={180}
                     value={adjustments.hue}
                     onChange={(e) => setAdjustments({ ...adjustments, hue: Number(e.target.value) })}
-                    className="w-full accent-[#ed7300]"
+                    className="w-full accent-[#00b4c4]"
                   />
                 </label>
 
@@ -3156,7 +3201,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                     max={100}
                     value={adjustments.saturation}
                     onChange={(e) => setAdjustments({ ...adjustments, saturation: Number(e.target.value) })}
-                    className="w-full accent-[#ed7300]"
+                    className="w-full accent-[#00b4c4]"
                   />
                 </label>
 
@@ -3171,7 +3216,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                     max={32}
                     value={adjustments.posterizeLevels}
                     onChange={(e) => setAdjustments({ ...adjustments, posterizeLevels: Number(e.target.value) })}
-                    className="w-full accent-[#ed7300]"
+                    className="w-full accent-[#00b4c4]"
                   />
                 </label>
 
@@ -3186,19 +3231,19 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                     max={254}
                     value={adjustments.threshold}
                     onChange={(e) => setAdjustments({ ...adjustments, threshold: Number(e.target.value) })}
-                    className="w-full accent-[#ed7300]"
+                    className="w-full accent-[#00b4c4]"
                   />
                 </label>
               </div>
 
               {/* Checkbox Toggles */}
-              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[#101114]">
+              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[#1a1c22]">
                 <label className="flex items-center gap-1.5 cursor-pointer text-white">
                   <input
                     type="checkbox"
                     checked={adjustments.invert}
                     onChange={(e) => setAdjustments({ ...adjustments, invert: e.target.checked })}
-                    className="accent-[#ed7300]"
+                    className="accent-[#00b4c4]"
                   />
                   <span>Invert Colors</span>
                 </label>
@@ -3208,7 +3253,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                     type="checkbox"
                     checked={adjustments.grayscale}
                     onChange={(e) => setAdjustments({ ...adjustments, grayscale: e.target.checked })}
-                    className="accent-[#ed7300]"
+                    className="accent-[#00b4c4]"
                   />
                   <span>Grayscale</span>
                 </label>
@@ -3218,7 +3263,7 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                     type="checkbox"
                     checked={adjustments.sepia}
                     onChange={(e) => setAdjustments({ ...adjustments, sepia: e.target.checked })}
-                    className="accent-[#ed7300]"
+                    className="accent-[#00b4c4]"
                   />
                   <span>Sepia Filter</span>
                 </label>
@@ -3228,14 +3273,14 @@ export const PixelPaintStudio: React.FC<PixelPaintStudioProps> = ({
                     type="checkbox"
                     checked={adjustments.edgeDetection}
                     onChange={(e) => setAdjustments({ ...adjustments, edgeDetection: e.target.checked })}
-                    className="accent-[#ed7300]"
+                    className="accent-[#00b4c4]"
                   />
                   <span>Sobel Lineart</span>
                 </label>
               </div>
             </div>
 
-            <div className="pixel-paint__modal-actions pt-2 border-t border-[#3b3f46]">
+            <div className="pixel-paint__modal-actions pt-2 border-t border-[#3a3f4a]">
               <button
                 type="button"
                 className="pixel-paint__modal-btn is-primary"

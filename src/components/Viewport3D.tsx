@@ -15,8 +15,37 @@ import {
 } from '../utils/viewportNav';
 import { applyThemedTransformGizmo, VIEWPORT_THEME } from '../utils/viewportTheme';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
-import type { CADMesh, CADBone, CADCamera, CADLight, ParticleEmitter, EnvironmentSettings, ToolState, RenderSettings, PrimitiveType, SceneSelection, Vector3D, WorkspaceMode } from '../types/cad';
-import { buildThreeGeometry, generatePrimitive, snapToGrid } from '../utils/meshUtils';
+import type { CADMesh, CADBone, CADCamera, CADLight, ParticleEmitter, EnvironmentSettings, ToolState, RenderSettings, SceneSelection, Vector3D, WorkspaceMode } from '../types/cad';
+import { buildThreeGeometry, snapToGrid } from '../utils/meshUtils';
+import {
+  beginDrawSession,
+  collectMeshSnapCandidates,
+  formatDrawDimensions,
+  fromThree,
+  heightAlongNormal,
+  intersectRayPlane,
+  isFlatPrimitive,
+  lockDrawBase,
+  makeConstructionPlane,
+  meshFromPreview,
+  placementSession,
+  resolvePrimitiveWorkPlane,
+  sessionToPreview,
+  snapDrawPoint,
+  toThree,
+  updateDrawBase,
+  updateDrawHeight,
+  vecDot,
+  vecNorm,
+  vecScale,
+  vecSub,
+  worldUnitsPerPixel,
+  type ConstructionPlane,
+  type CreationPreview,
+  type DrawViewKind,
+  type PrimitiveDrawSession,
+  type Vec3,
+} from '../utils/primitiveDraw';
 import {
   beginModalMeshOp,
   applyModalAmount,
@@ -28,9 +57,22 @@ import { buildLogicalEdgeGeometry, buildTriangulationDebugGeometry } from '../ut
 import {
   findEdgeLoop,
   getLoopCutPreviewPolylines,
-  loopCutFactors,
   type KnifeHit,
 } from '../utils/meshCutTools';
+import {
+  DEFAULT_LOOP_CUT_SETTINGS,
+  KNIFE_COLORS,
+  LOOP_CUT_COLORS,
+  adjustLoopCutCount,
+  cycleKnifeAngleConstraint,
+  knifeSnapT,
+  knifeStartNewCut,
+  loopCutCountFromKey,
+  loopCutFactorsFor,
+  loopCutSlideFromRay,
+  snapScreenAngle,
+  type LoopCutSettings,
+} from '../utils/blenderCuts';
 import { pickPaintUv, samplePaintStrokeUvs, setRayFromPointer } from '../utils/bvh/picking';
 import { createPaintStrokeController } from '../utils/paintStrokeController';
 import {
@@ -154,7 +196,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   activeRightTab = 'outliner',
   onDirect3DPaintPixel,
   onSpawnDrawnPrimitive,
-  onOpenUVModal,
+  onOpenUVModal: _onOpenUVModal,
   isQuadSubViewport = false,
   onMaximizeViewport,
   isViewportMaximized = false,
@@ -370,8 +412,13 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const pickClosestEdgeIdRef = useRef(pickClosestEdgeId);
   pickClosestEdgeIdRef.current = pickClosestEdgeId;
 
-  const [cadStep, setCadStep] = useState<0 | 1 | 2>(0);
-  const [placementHoverPos, setPlacementHoverPos] = useState<THREE.Vector3 | null>(null);
+  const [drawSession, setDrawSession] = useState<PrimitiveDrawSession | null>(null);
+  const [placementHover, setPlacementHover] = useState<{
+    point: Vec3;
+    plane: ConstructionPlane;
+    surface: boolean;
+  } | null>(null);
+  const heightStartRef = useRef<{ clientY: number } | null>(null);
   const [isPainting3DActive, setIsPainting3DActive] = useState<boolean>(false);
   /** Immediate gesture state — source of truth for an in-flight LMB stroke. */
   const isPainting3DActiveRef = useRef(false);
@@ -418,10 +465,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const [hoveredFaceId, setHoveredFaceId] = useState<string | null>(null);
   const [hoveredMeshId, setHoveredMeshId] = useState<string | null>(null);
 
-  const [drawBaseStart, setDrawBaseStart] = useState<THREE.Vector3 | null>(null);
-  const [drawBaseEnd, setDrawBaseEnd] = useState<THREE.Vector3 | null>(null);
-  const [drawHeight, setDrawHeight] = useState<number>(1.0);
-
   const [marqueeBox, setMarqueeBox] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
   const marqueeStartRef = useRef<{ x: number; y: number } | null>(null);
   const isMarqueeDraggingRef = useRef<boolean>(false);
@@ -450,9 +493,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     ? toolState.showBones
     : (isBoneEditMode || isRigOrAnimTab || isAnimWorkspace || isRigWorkspace);
 
-  const is2DPrimitive = (type: PrimitiveType | null): boolean => {
-    return type === 'plane' || type === 'circle' || type === 'ring';
-  };
+  const drawViewKind = (): DrawViewKind => cameraType;
 
   const vectorMode = useVectorStore((s) => s.mode);
   const vectorRefTool = useVectorStore((s) => s.refTool);
@@ -557,13 +598,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     };
   }, [activeWorkspaceMode, vectorMode, cameraType]);
 
-  // Esc / mode switch clears isCadDrawing in App, but CAD step is local — reset it or orbit stays dead.
+  // Esc / mode switch clears isCadDrawing in App, but CAD session is local — reset it or orbit stays dead.
   useEffect(() => {
     if (toolState.isCadDrawing) return;
-    setCadStep(0);
-    setDrawBaseStart(null);
-    setDrawBaseEnd(null);
-    setDrawHeight(1.0);
+    setDrawSession(null);
+    heightStartRef.current = null;
     const strokeLive =
       isPainting3DActive
       || isPainting3DActiveRef.current
@@ -2245,12 +2284,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     if (controlsRef.current) controlsRef.current.enabled = false;
 
+    // Blender: step 1 chooses the face loop, step 2 slides the new edge loop(s).
     let phase: 'hover' | 'slide' = 'hover';
     let loopEdgeIds: string[] = [];
-    let cutCount = 1;
-    let slide = 0.5;
-    let pinX = 0;
-    let ignoreUp = true;
+    const cut: LoopCutSettings = { ...DEFAULT_LOOP_CUT_SETTINGS };
+    let altHeld = false;
 
     const clearPreview = () => {
       const g = cutPreviewGroupRef.current;
@@ -2262,11 +2300,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       }
     };
 
-    const factorsNow = () => {
-      const base = loopCutFactors(cutCount);
-      const offset = slide - 0.5;
-      return base.map((f) => Math.max(0.05, Math.min(0.95, f + offset)));
-    };
+    const factorsNow = () =>
+      loopCutFactorsFor({ ...cut, clamp: cut.clamp && !altHeld });
 
     const drawPreview = (mesh: CADMesh, edges: string[], factors: number[]) => {
       clearPreview();
@@ -2281,11 +2316,41 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           positions.push(a.x, a.y, a.z, b.x, b.y, b.z);
         }
       });
+      const vertMap = new Map(mesh.vertices.map((v) => [v.id, v]));
+      const edgePositions: number[] = [];
+      mesh.edges.forEach((edge) => {
+        if (!edges.includes(edge.id)) return;
+        const a = vertMap.get(edge.v1Id);
+        const b = vertMap.get(edge.v2Id);
+        if (!a || !b) return;
+        const wa = localToWorld(mesh, a.x, a.y, a.z);
+        const wb = localToWorld(mesh, b.x, b.y, b.z);
+        edgePositions.push(wa.x, wa.y, wa.z, wb.x, wb.y, wb.z);
+      });
+
+      // Blender highlights the edges the cut passes through alongside the yellow
+      // cut preview line.
+      if (edgePositions.length) {
+        const edgeGeo = new THREE.BufferGeometry();
+        edgeGeo.setAttribute('position', new THREE.Float32BufferAttribute(edgePositions, 3));
+        const edgeSegs = new THREE.LineSegments(
+          edgeGeo,
+          new THREE.LineBasicMaterial({
+            color: LOOP_CUT_COLORS.crossedEdge,
+            depthTest: false,
+            transparent: true,
+            opacity: 0.9,
+          }),
+        );
+        edgeSegs.renderOrder = 998;
+        g.add(edgeSegs);
+      }
+
       if (!positions.length) return;
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
       const mat = new THREE.LineBasicMaterial({
-        color: 0xffee00,
+        color: LOOP_CUT_COLORS.line,
         depthTest: false,
         transparent: true,
         opacity: 0.95,
@@ -2298,10 +2363,16 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const pickEdgeNearPointer = (clientX: number, clientY: number): string | null =>
       pickClosestEdgeIdRef.current(clientX, clientY, activeMeshRef.current);
 
+    const redraw = () => {
+      const mesh = activeMeshRef.current;
+      if (mesh && loopEdgeIds.length) drawPreview(mesh, loopEdgeIds, factorsNow());
+    };
+
     const onMove = (e: PointerEvent) => {
       const mesh = activeMeshRef.current;
       if (!mesh) return;
       if (phase === 'hover') {
+        // Step 1: hover an edge the cut should pass through.
         const edgeId = pickEdgeNearPointer(e.clientX, e.clientY);
         if (!edgeId) {
           loopEdgeIds = [];
@@ -2310,15 +2381,60 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         }
         loopEdgeIds = findEdgeLoop(mesh, edgeId);
         drawPreview(mesh, loopEdgeIds, factorsNow());
-      } else {
-        slide = Math.max(0.05, Math.min(0.95, 0.5 + (e.clientX - pinX) * 0.0025));
-        drawPreview(mesh, loopEdgeIds, factorsNow());
+        return;
       }
+
+      // Step 2: slide by projecting the cursor onto a crossed edge, so the loop
+      // follows the mouse across the surface instead of the screen.
+      const reference = mesh.edges.find((edge) => edge.id === loopEdgeIds[0]);
+      const camera = cameraRef.current;
+      const container = containerRef.current;
+      if (reference && camera && container) {
+        const vertMap = new Map(mesh.vertices.map((v) => [v.id, v]));
+        const a = vertMap.get(reference.v1Id);
+        const b = vertMap.get(reference.v2Id);
+        if (a && b) {
+          const wa = localToWorld(mesh, a.x, a.y, a.z);
+          const wb = localToWorld(mesh, b.x, b.y, b.z);
+          const rect = container.getBoundingClientRect();
+          const raycaster = new THREE.Raycaster();
+          raycaster.setFromCamera(
+            new THREE.Vector2(
+              ((e.clientX - rect.left) / rect.width) * 2 - 1,
+              -((e.clientY - rect.top) / rect.height) * 2 + 1,
+            ),
+            camera,
+          );
+          cut.slide = loopCutSlideFromRay(
+            { x: wa.x, y: wa.y, z: wa.z },
+            { x: wb.x, y: wb.y, z: wb.z },
+            { x: raycaster.ray.origin.x, y: raycaster.ray.origin.y, z: raycaster.ray.origin.z },
+            {
+              x: raycaster.ray.direction.x,
+              y: raycaster.ray.direction.y,
+              z: raycaster.ray.direction.z,
+            },
+            cut.clamp && !altHeld,
+          );
+        }
+      }
+      drawPreview(mesh, loopEdgeIds, factorsNow());
     };
 
     const onDown = (e: PointerEvent) => {
+      const mesh = activeMeshRef.current;
+      if (!mesh) return;
+
+      // RMB: abort in step 1, but create the cut at the center in step 2.
       if (e.button === 2) {
         e.preventDefault();
+        if (phase === 'slide') {
+          cut.slide = 0.5;
+          const factors = factorsNow();
+          clearPreview();
+          onModalLoopCutConfirm(loopEdgeIds, factors);
+          return;
+        }
         clearPreview();
         onModalMeshCancel();
         return;
@@ -2326,8 +2442,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       if (e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
-      const mesh = activeMeshRef.current;
-      if (!mesh) return;
+
       if (phase === 'hover') {
         if (loopEdgeIds.length === 0) {
           const edgeId = pickEdgeNearPointer(e.clientX, e.clientY);
@@ -2335,54 +2450,77 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           loopEdgeIds = findEdgeLoop(mesh, edgeId);
         }
         if (loopEdgeIds.length === 0) return;
+        // Step 2 begins: the loop follows the cursor until LMB/RMB.
         phase = 'slide';
-        pinX = e.clientX;
-        ignoreUp = true;
-        drawPreview(mesh, loopEdgeIds, factorsNow());
-      }
-    };
-
-    const onUp = (e: PointerEvent) => {
-      if (e.button !== 0 || phase !== 'slide') return;
-      if (ignoreUp) {
-        ignoreUp = false;
+        redraw();
         return;
       }
+
+      // Step 2 confirm: create the cut where the loop currently sits.
+      const factors = factorsNow();
       clearPreview();
-      onModalLoopCutConfirm(loopEdgeIds, factorsNow());
+      onModalLoopCutConfirm(loopEdgeIds, factors);
     };
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const mesh = activeMeshRef.current;
-      if (!mesh || loopEdgeIds.length === 0) return;
-      cutCount = Math.max(1, Math.min(8, cutCount + (e.deltaY < 0 ? 1 : -1)));
-      drawPreview(mesh, loopEdgeIds, factorsNow());
+      if (altHeld) return; // Alt+Wheel is Blender's Smoothness, not implemented here.
+      // Blender: the Wheel changes the number of cuts during step 1.
+      cut.count = adjustLoopCutCount(cut.count, e.deltaY < 0 ? 1 : -1);
+      redraw();
     };
 
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Alt') altHeld = true;
+
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopImmediatePropagation();
         clearPreview();
         onModalMeshCancel();
+        return;
       }
+
+      // PageUp / PageDown and typing a digit both set the Number of Cuts.
+      const typed = loopCutCountFromKey(e.key, cut.count);
+      if (typed != null) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        cut.count = typed;
+        redraw();
+        return;
+      }
+
+      // Blender's step-2 toggles: E = Even, F = Flipped, C = Clamp.
+      const key = e.key.toLowerCase();
+      if (key === 'e' || key === 'f' || key === 'c') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (key === 'e') cut.even = !cut.even;
+        else if (key === 'f') cut.flipped = !cut.flipped;
+        else cut.clamp = !cut.clamp;
+        redraw();
+      }
+    };
+
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Alt') altHeld = false;
     };
     const onContext = (e: Event) => e.preventDefault();
 
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerdown', onDown, true);
-    window.addEventListener('pointerup', onUp);
     window.addEventListener('wheel', onWheel, { passive: false });
     window.addEventListener('keydown', onKey, true);
+    window.addEventListener('keyup', onKeyUp, true);
     window.addEventListener('contextmenu', onContext);
     return () => {
       clearPreview();
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerdown', onDown, true);
-      window.removeEventListener('pointerup', onUp);
       window.removeEventListener('wheel', onWheel);
       window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('keyup', onKeyUp, true);
       window.removeEventListener('contextmenu', onContext);
       if (controlsRef.current) {
         controlsRef.current.enabled = !toolState.isCadDrawing && !toolState.placeOnClick;
@@ -2403,8 +2541,13 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     if (controlsRef.current) controlsRef.current.enabled = false;
 
-    const hits: KnifeHit[] = [];
-    let ignoreFirstUp = true;
+    let hits: KnifeHit[] = knifeStartNewCut();
+    // Blender knife state: Z toggles Cut Through, C cycles the angle constraint,
+    // and a double-click finishes the cut.
+    let cutThrough = false;
+    let angleConstraint = 0;
+    let lastClickAt = 0;
+    let lastClick = { x: 0, y: 0 };
 
     const clearPreview = () => {
       const g = cutPreviewGroupRef.current;
@@ -2416,30 +2559,56 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       }
     };
 
-    const drawPreview = (mesh: CADMesh) => {
+    const drawPreview = (mesh: CADMesh, provisional: KnifeHit | null = null) => {
       clearPreview();
       const g = cutPreviewGroupRef.current;
-      if (!g || hits.length === 0) return;
+      if (!g || (hits.length === 0 && !provisional)) return;
+
+      const chain = provisional ? [...hits, provisional] : hits;
       const positions: number[] = [];
-      hits.forEach((h, i) => {
+      chain.forEach((h, i) => {
         const w = localToWorld(mesh, h.point.x, h.point.y, h.point.z);
         if (i > 0) {
-          const prev = hits[i - 1];
+          const prev = chain[i - 1];
           const pw = localToWorld(mesh, prev.point.x, prev.point.y, prev.point.z);
           positions.push(pw.x, pw.y, pw.z, w.x, w.y, w.z);
         }
-        const dotGeo = new THREE.SphereGeometry(0.04, 8, 8);
-        const dotMat = new THREE.MeshBasicMaterial({ color: 0xffee00, depthTest: false });
-        const dot = new THREE.Mesh(dotGeo, dotMat);
+      });
+
+      // Placed cut points; the provisional point under the cursor is dimmer.
+      hits.forEach((h) => {
+        const w = localToWorld(mesh, h.point.x, h.point.y, h.point.z);
+        const dot = new THREE.Mesh(
+          new THREE.SphereGeometry(0.035, 8, 8),
+          new THREE.MeshBasicMaterial({ color: KNIFE_COLORS.point, depthTest: false }),
+        );
         dot.position.copy(w);
         dot.renderOrder = 1000;
         g.add(dot);
       });
+      if (provisional) {
+        const w = localToWorld(mesh, provisional.point.x, provisional.point.y, provisional.point.z);
+        const dot = new THREE.Mesh(
+          new THREE.SphereGeometry(0.028, 8, 8),
+          new THREE.MeshBasicMaterial({
+            color: KNIFE_COLORS.point,
+            depthTest: false,
+            transparent: true,
+            opacity: 0.55,
+          }),
+        );
+        dot.position.copy(w);
+        dot.renderOrder = 1000;
+        g.add(dot);
+      }
+
       if (positions.length) {
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-        const mat = new THREE.LineBasicMaterial({ color: 0xffee00, depthTest: false });
-        const segs = new THREE.LineSegments(geo, mat);
+        const segs = new THREE.LineSegments(
+          geo,
+          new THREE.LineBasicMaterial({ color: KNIFE_COLORS.line, depthTest: false }),
+        );
         segs.renderOrder = 999;
         g.add(segs);
       }
@@ -2452,7 +2621,16 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       return Math.max(0, Math.min(1, p.clone().sub(a).dot(ab) / len2));
     };
 
-    const pickHit = (clientX: number, clientY: number): KnifeHit | null => {
+    const pickHit = (
+      clientX: number,
+      clientY: number,
+      opts: {
+        midpoint: boolean;
+        ignoreSnapping: boolean;
+        /** Z (Cut Through / X-Ray): pick the far side of the mesh instead. */
+        deepest?: boolean;
+      } = { midpoint: false, ignoreSnapping: false },
+    ): KnifeHit | null => {
       const mesh = activeMeshRef.current;
       const cam = cameraRef.current;
       const el = containerRef.current;
@@ -2466,7 +2644,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       const raycaster = new THREE.Raycaster();
       raycaster.setFromCamera(ndc, cam);
       const intersects = raycaster.intersectObject(meshObj);
-      const hit = intersects[0];
+      // Z (Cut Through / X-Ray) picks the exit surface so the cut goes through.
+      const hit = opts.deepest ? intersects[intersects.length - 1] : intersects[0];
       if (!hit || hit.faceIndex == null) return null;
       const triIndex = hit.faceIndex;
       const geo = meshObj.geometry as THREE.BufferGeometry;
@@ -2483,6 +2662,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       let bestEdgeId: string | undefined;
       let bestT = 0.5;
       let bestDist = 0.08;
+      let bestA: THREE.Vector3 | null = null;
+      let bestB: THREE.Vector3 | null = null;
       for (let i = 0; i < n; i++) {
         const va = vertMap.get(face.vertexIds[i]);
         const vb = vertMap.get(face.vertexIds[(i + 1) % n]);
@@ -2495,21 +2676,76 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         if (dist < bestDist) {
           bestDist = dist;
           bestT = t;
+          bestA = a;
+          bestB = b;
           const edge = mesh.edges.find(
             (ed) =>
               (ed.v1Id === face.vertexIds[i] && ed.v2Id === face.vertexIds[(i + 1) % n]) ||
               (ed.v2Id === face.vertexIds[i] && ed.v1Id === face.vertexIds[(i + 1) % n]),
           );
           bestEdgeId = edge?.id;
-          localPt.copy(closest);
         }
       }
+
+      // Ctrl ignores snapping (the point lands exactly under the cursor), Shift
+      // snaps to the edge midpoint, and a point near an end snaps onto it.
+      if (bestEdgeId && bestA && bestB) {
+        const snappedT = knifeSnapT(bestT, opts);
+        const point = bestA.clone().lerp(bestB, snappedT);
+        return {
+          faceId,
+          edgeId: bestEdgeId,
+          t: snappedT,
+          point: { x: point.x, y: point.y, z: point.z },
+        };
+      }
+      if (opts.ignoreSnapping) {
+        return {
+          faceId,
+          point: { x: localPt.x, y: localPt.y, z: localPt.z },
+        };
+      }
+      // No edge close enough and no snap requested: keep the surface point and
+      // still attach it to the nearest edge so the cut can be welded later.
       return {
         faceId,
         edgeId: bestEdgeId,
         t: bestEdgeId ? bestT : undefined,
         point: { x: localPt.x, y: localPt.y, z: localPt.z },
       };
+    };
+
+    /** Enter / double-click confirm the cut, exactly like Blender. */
+    const finishCut = () => {
+      if (hits.length < 2) return;
+      clearPreview();
+      onModalKnifeConfirm([...hits]);
+    };
+
+    /**
+     * Blender constrains the cut line in screen space, so the next point keeps
+     * the chosen angle relative to the previous one.
+     */
+    const applyAngleConstraint = (clientX: number, clientY: number) => {
+      if (!angleConstraint || hits.length === 0) return { x: clientX, y: clientY };
+      const mesh = activeMeshRef.current;
+      const cam = cameraRef.current;
+      const el = containerRef.current;
+      if (!mesh || !cam || !el) return { x: clientX, y: clientY };
+      const rect = el.getBoundingClientRect();
+      const previous = hits[hits.length - 1];
+      const world = localToWorld(mesh, previous.point.x, previous.point.y, previous.point.z);
+      const projected = world.clone().project(cam);
+      const previousScreen = {
+        x: rect.left + ((projected.x + 1) / 2) * rect.width,
+        y: rect.top + ((1 - projected.y) / 2) * rect.height,
+      };
+      const snapped = snapScreenAngle(
+        clientX - previousScreen.x,
+        clientY - previousScreen.y,
+        angleConstraint,
+      );
+      return { x: previousScreen.x + snapped.dx, y: previousScreen.y + snapped.dy };
     };
 
     const onDown = (e: PointerEvent) => {
@@ -2524,18 +2760,47 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       e.stopPropagation();
       const mesh = activeMeshRef.current;
       if (!mesh) return;
-      const hit = pickHit(e.clientX, e.clientY);
+
+      const now = performance.now();
+      const isDoubleClick =
+        now - lastClickAt < 300 &&
+        Math.hypot(e.clientX - lastClick.x, e.clientY - lastClick.y) < 6;
+      lastClickAt = now;
+      lastClick = { x: e.clientX, y: e.clientY };
+      if (isDoubleClick) {
+        finishCut();
+        return;
+      }
+
+      // Shift = midpoint snap, Ctrl = ignore snapping, C = angle constraint.
+      const target = applyAngleConstraint(e.clientX, e.clientY);
+      const snapOptions = { midpoint: e.shiftKey, ignoreSnapping: e.ctrlKey || e.metaKey };
+      const hit = pickHit(target.x, target.y, snapOptions);
       if (!hit) return;
       hits.push(hit);
+      if (cutThrough) {
+        // Z (Cut Through / X-Ray): also cut the far side of the mesh.
+        const far = pickHit(target.x, target.y, { ...snapOptions, deepest: true });
+        if (
+          far &&
+          Math.hypot(far.point.x - hit.point.x, far.point.y - hit.point.y, far.point.z - hit.point.z) > 1e-4
+        ) {
+          hits.push(far);
+        }
+      }
       drawPreview(mesh);
-      ignoreFirstUp = false;
     };
 
-    const onUp = (e: PointerEvent) => {
-      if (e.button !== 0) return;
-      if (ignoreFirstUp) {
-        ignoreFirstUp = false;
-      }
+    /** Live cut line: preview the segment from the last point to the cursor. */
+    const onMove = (e: PointerEvent) => {
+      const mesh = activeMeshRef.current;
+      if (!mesh || hits.length === 0) return;
+      const target = applyAngleConstraint(e.clientX, e.clientY);
+      const provisional = pickHit(target.x, target.y, {
+        midpoint: e.shiftKey,
+        ignoreSnapping: e.ctrlKey || e.metaKey,
+      });
+      drawPreview(mesh, provisional);
     };
 
     const onKey = (e: KeyboardEvent) => {
@@ -2550,29 +2815,43 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       if (e.key === 'Enter') {
         e.preventDefault();
         e.stopImmediatePropagation();
-        if (hits.length < 2) return;
-        clearPreview();
-        onModalKnifeConfirm([...hits]);
+        finishCut();
         return;
       }
-      if (e.key.toLowerCase() === 'z' && !e.ctrlKey && !e.metaKey) {
+      // Backspace removes the last cut point. (Blender's Z is Cut Through, not
+      // undo, so undo lives on Backspace here.)
+      if (e.key === 'Backspace' || e.key === 'Delete') {
         e.preventDefault();
         e.stopImmediatePropagation();
         hits.pop();
         if (mesh) drawPreview(mesh);
         else clearPreview();
+        return;
+      }
+      const key = e.key.toLowerCase();
+      if ((key === 'z' || key === 'c' || key === 'e') && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (key === 'z') {
+          cutThrough = !cutThrough; // Cut Through (X-Ray)
+        } else if (key === 'c') {
+          angleConstraint = cycleKnifeAngleConstraint(angleConstraint);
+        } else {
+          hits = knifeStartNewCut(); // E starts a new cut, tool stays active
+          clearPreview();
+        }
       }
     };
     const onContext = (ev: Event) => ev.preventDefault();
 
     window.addEventListener('pointerdown', onDown, true);
-    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointermove', onMove);
     window.addEventListener('keydown', onKey, true);
     window.addEventListener('contextmenu', onContext);
     return () => {
       clearPreview();
       window.removeEventListener('pointerdown', onDown, true);
-      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointermove', onMove);
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('contextmenu', onContext);
       if (controlsRef.current) {
@@ -2685,98 +2964,76 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const showTrianglesDebug = !!toolState.showTriangulation;
     const isWireframe = toolState.viewMode === 'wireframe' || showTrianglesDebug;
 
-    // Interactive Primitive Placement Ghost Preview (Logical Edge Overlay)
-    if (toolState.placeOnClick && placementHoverPos && hoverHighlightGroupRef.current) {
-      const primType = toolState.activePrimitive || 'cube';
-      const is2D = is2DPrimitive(primType);
-
-      const ghostCADMesh = generatePrimitive(primType);
-      const ghostGeo = buildThreeGeometry(ghostCADMesh);
-
+    const mountGhost = (preview: CreationPreview, fill: number, wire: number, showRing: boolean) => {
+      const group = hoverHighlightGroupRef.current;
+      if (!group) return;
+      const cad = meshFromPreview(preview);
       const ghostMat = new THREE.MeshStandardMaterial({
-        color: VIEWPORT_THEME.ghostFill,
+        color: fill,
         transparent: true,
-        opacity: 0.45,
+        opacity: 0.48,
         side: THREE.DoubleSide,
         roughness: 0.2,
         metalness: 0.1,
       });
+      const ghostMesh = new THREE.Mesh(buildThreeGeometry(cad), ghostMat);
+      ghostMesh.position.set(cad.position.x, cad.position.y, cad.position.z);
+      ghostMesh.rotation.set(cad.rotation.x, cad.rotation.y, cad.rotation.z);
+      group.add(ghostMesh);
 
-      const cy = is2D ? 0.0025 : ghostCADMesh.scale.y / 2;
-      const ghostMesh = new THREE.Mesh(ghostGeo, ghostMat);
-      ghostMesh.position.set(placementHoverPos.x, cy, placementHoverPos.z);
-      hoverHighlightGroupRef.current.add(ghostMesh);
+      const ghostWire = new THREE.LineSegments(
+        buildLogicalEdgeGeometry(cad),
+        new THREE.LineBasicMaterial({ color: wire, linewidth: 2 }),
+      );
+      ghostWire.position.copy(ghostMesh.position);
+      ghostWire.rotation.copy(ghostMesh.rotation);
+      group.add(ghostWire);
 
-      // Clean Logical Edge Wireframe Overlay (No Triangulation Diagonals)
-      const ghostWireMat = new THREE.LineBasicMaterial({
-        color: VIEWPORT_THEME.ghostWire,
-        linewidth: 2.5,
-      });
-      const ghostWireGeo = buildLogicalEdgeGeometry(ghostCADMesh);
-      const ghostWireframe = new THREE.LineSegments(ghostWireGeo, ghostWireMat);
-      ghostWireframe.position.set(placementHoverPos.x, cy, placementHoverPos.z);
-      hoverHighlightGroupRef.current.add(ghostWireframe);
+      const corners = preview.boundingBox.baseCorners;
+      const footprint = new THREE.BufferGeometry().setFromPoints(corners.map((c: Vec3) => toThree(c)));
+      group.add(new THREE.LineLoop(footprint, new THREE.LineBasicMaterial({ color: 0x00ffcc, linewidth: 2 })));
 
-      // Placement Target Ring
-      const ringGeo = new THREE.RingGeometry(0.1, 0.4, 32);
-      const ringMat = new THREE.MeshBasicMaterial({ color: VIEWPORT_THEME.ghostRing, side: THREE.DoubleSide, transparent: true, opacity: 0.7 });
-      const ringMesh = new THREE.Mesh(ringGeo, ringMat);
-      ringMesh.rotation.x = -Math.PI / 2;
-      ringMesh.position.set(placementHoverPos.x, 0.003, placementHoverPos.z);
-      hoverHighlightGroupRef.current.add(ringMesh);
+      if (showRing) {
+        const ring = new THREE.Mesh(
+          new THREE.RingGeometry(0.08, 0.32, 32),
+          new THREE.MeshBasicMaterial({
+            color: VIEWPORT_THEME.ghostRing,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.7,
+          }),
+        );
+        const basis = new THREE.Matrix4().makeBasis(
+          toThree(preview.plane.u),
+          toThree(preview.plane.v),
+          toThree(preview.plane.n),
+        );
+        ring.setRotationFromMatrix(basis);
+        ring.position.copy(toThree(preview.plane.origin));
+        group.add(ring);
+      }
+    };
+
+    if (toolState.placeOnClick && placementHover && hoverHighlightGroupRef.current) {
+      const preview = sessionToPreview(
+        placementSession({
+          primitiveType: toolState.activePrimitive || 'cube',
+          viewKind: drawViewKind(),
+          plane: { ...placementHover.plane, origin: placementHover.point },
+        }),
+      );
+      mountGhost(preview, VIEWPORT_THEME.ghostFill, VIEWPORT_THEME.ghostWire, true);
     }
 
-    // 2-Step CAD Ghost Primitive Preview: Part 1 (Flat Footprint) & Part 2 (3D Height Extrusion)
-    if (toolState.isCadDrawing && drawBaseStart && drawBaseEnd && hoverHighlightGroupRef.current) {
-      const primitiveType = toolState.cadDrawPrimitive || 'cube';
-      const is2D = is2DPrimitive(primitiveType);
-
-      const sx = Math.max(0.05, Math.abs(drawBaseEnd.x - drawBaseStart.x));
-      const sz = Math.max(0.05, Math.abs(drawBaseEnd.z - drawBaseStart.z));
-      const sy = cadStep === 1 || is2D ? 0.005 : Math.max(0.05, drawHeight);
-
-      const cx = (drawBaseStart.x + drawBaseEnd.x) / 2;
-      const cz = (drawBaseStart.z + drawBaseEnd.z) / 2;
-      const cy = cadStep === 1 || is2D ? 0.0025 : sy / 2;
-
-      const ghostCADMesh = generatePrimitive(primitiveType, { x: sx, y: sy, z: sz });
-      const ghostGeo = buildThreeGeometry(ghostCADMesh);
-
-      const ghostMat = new THREE.MeshStandardMaterial({
-        color: cadStep === 1 ? VIEWPORT_THEME.ghostFill : VIEWPORT_THEME.warning,
-        transparent: true,
-        opacity: cadStep === 1 ? 0.55 : 0.45,
-        side: THREE.DoubleSide,
-        roughness: 0.2,
-        metalness: 0.1,
-      });
-
-      const ghostMesh = new THREE.Mesh(ghostGeo, ghostMat);
-      ghostMesh.position.set(cx, cy, cz);
-      hoverHighlightGroupRef.current.add(ghostMesh);
-
-      // Clean Logical Edge Overlay for CAD Ghost
-      const ghostWireMat = new THREE.LineBasicMaterial({
-        color: cadStep === 1 ? VIEWPORT_THEME.ghostWire : VIEWPORT_THEME.accentSoft,
-        linewidth: 2,
-      });
-      const ghostWireGeo = buildLogicalEdgeGeometry(ghostCADMesh);
-      const ghostWireframe = new THREE.LineSegments(ghostWireGeo, ghostWireMat);
-      ghostWireframe.position.set(cx, cy, cz);
-      hoverHighlightGroupRef.current.add(ghostWireframe);
-
-      const footprintPositions = [
-        drawBaseStart.x, 0.002, drawBaseStart.z,
-        drawBaseEnd.x, 0.002, drawBaseStart.z,
-        drawBaseEnd.x, 0.002, drawBaseEnd.z,
-        drawBaseStart.x, 0.002, drawBaseEnd.z,
-        drawBaseStart.x, 0.002, drawBaseStart.z,
-      ];
-      const footprintGeo = new THREE.BufferGeometry();
-      footprintGeo.setAttribute('position', new THREE.Float32BufferAttribute(footprintPositions, 3));
-      const footprintMat = new THREE.LineBasicMaterial({ color: 0x00ffcc, linewidth: 3 });
-      const footprintLine = new THREE.Line(footprintGeo, footprintMat);
-      hoverHighlightGroupRef.current.add(footprintLine);
+    if (toolState.isCadDrawing && drawSession && hoverHighlightGroupRef.current) {
+      const preview = sessionToPreview(drawSession);
+      const heightPhase = drawSession.phase === 'height';
+      mountGhost(
+        preview,
+        heightPhase ? VIEWPORT_THEME.warning : VIEWPORT_THEME.ghostFill,
+        heightPhase ? VIEWPORT_THEME.accentSoft : VIEWPORT_THEME.ghostWire,
+        false,
+      );
     }
 
     meshes.forEach((m) => {
@@ -3319,7 +3576,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         transformControlsRef.current.getHelper().visible = false;
       }
     }
-  }, [meshes, bones, selectedBoneId, activeMeshId, hoveredMeshId, hoveredVertexId, hoveredFaceId, toolState.viewMode, toolState.editMode, toolState.rigMode, toolState.isCadDrawing, toolState.cadDrawPrimitive, toolState.placeOnClick, toolState.activePrimitive, toolState.showTriangulation, toolState.isPainting3D, toolState.xray, placementHoverPos, cadStep, drawBaseStart, drawBaseEnd, drawHeight, selectedVertexIds, selectedEdgeIds, selectedFaceIds, selectedMeshIds, renderSettings.wireframeColor, meshTextureTick, cameras, lights, particles, environment, sceneSelection, activeWorkspaceMode, vectorRevision, vectorBuiltRevision]);
+  }, [meshes, bones, selectedBoneId, activeMeshId, hoveredMeshId, hoveredVertexId, hoveredFaceId, toolState.viewMode, toolState.editMode, toolState.rigMode, toolState.isCadDrawing, toolState.cadDrawPrimitive, toolState.placeOnClick, toolState.activePrimitive, toolState.showTriangulation, toolState.isPainting3D, toolState.xray, placementHover, drawSession, selectedVertexIds, selectedEdgeIds, selectedFaceIds, selectedMeshIds, renderSettings.wireframeColor, meshTextureTick, cameras, lights, particles, environment, sceneSelection, activeWorkspaceMode, vectorRevision, vectorBuiltRevision]);
 
   // Update edge hover/selection colors in place — avoid full scene rebuild on every hover
   useEffect(() => {
@@ -3735,51 +3992,119 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     controlsRef.current.update();
   };
 
-  const getGridIntersection = (e: React.PointerEvent<HTMLDivElement>): THREE.Vector3 | null => {
+  const pointerRay = (e: { clientX: number; clientY: number }) => {
     if (!containerRef.current || !cameraRef.current) return null;
     const rect = containerRef.current.getBoundingClientRect();
-    const mouseX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    const mouseY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-
+    const ndc = new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1,
+    );
     const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(new THREE.Vector2(mouseX, mouseY), cameraRef.current);
-
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-    const target = new THREE.Vector3();
-    const hit = raycaster.ray.intersectPlane(plane, target);
-    if (hit) {
-      const step = toolState.gridSnap || 0.25;
-      return new THREE.Vector3(snapToGrid(hit.x, step), 0, snapToGrid(hit.z, step));
-    }
-    return null;
+    raycaster.setFromCamera(ndc, cameraRef.current);
+    return { ray: raycaster.ray, rect, ndc };
   };
 
-  const getVerticalHeightIntersection = (e: React.PointerEvent<HTMLDivElement>, basePoint: THREE.Vector3): number => {
-    if (!containerRef.current || !cameraRef.current) return 1.0;
-    const rect = containerRef.current.getBoundingClientRect();
-    const mouseX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    const mouseY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  const snapCandidates = () =>
+    collectMeshSnapCandidates(
+      meshes
+        .filter((m) => m.visible !== false)
+        .map((m) => ({
+          vertices: m.vertices,
+          edges: m.edges,
+          faces: m.faces,
+          worldPoint: (x: number, y: number, z: number) => fromThree(localToWorld(m, x, y, z)),
+        })),
+    );
 
+  const pickSurfaceHit = (ray: THREE.Ray) => {
+    if (!meshesGroupRef.current || !cameraRef.current) return null;
     const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(new THREE.Vector2(mouseX, mouseY), cameraRef.current);
+    raycaster.set(ray.origin, ray.direction);
+    const hits = raycaster.intersectObjects(meshesGroupRef.current.children, true);
+    const hit = hits.find((h) => h.face && h.object.visible);
+    if (!hit?.face) return null;
+    const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
+    return { point: fromThree(hit.point), normal: fromThree(normal) };
+  };
 
-    const camDir = new THREE.Vector3();
-    cameraRef.current.getWorldDirection(camDir);
-    camDir.y = 0;
-    if (camDir.lengthSq() < 0.001) camDir.set(0, 0, 1);
-    camDir.normalize();
+  const resolveDrawPlane = (
+    e: { clientX: number; clientY: number; altKey?: boolean },
+    locked?: PrimitiveDrawSession | null,
+  ) => {
+    const parsed = pointerRay(e);
+    if (!parsed) return null;
+    const surface = !e.altKey ? pickSurfaceHit(parsed.ray) : null;
+    const resolved = resolvePrimitiveWorkPlane({
+      view: drawViewKind(),
+      rayOrigin: fromThree(parsed.ray.origin),
+      rayDir: fromThree(parsed.ray.direction),
+      surface,
+      lockedPlane: locked?.planeLocked ? locked.plane : null,
+    });
+    if (!resolved) return null;
+    return { plane: resolved.plane, raw: resolved.hit, surface: resolved.surface };
+  };
 
-    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(camDir, basePoint);
-    const target = new THREE.Vector3();
-    const hit = raycaster.ray.intersectPlane(plane, target);
+  const snapForDraw = (
+    e: { clientX: number; clientY: number; shiftKey?: boolean },
+    plane: ConstructionPlane,
+    raw: Vec3,
+  ) => {
+    const camera = cameraRef.current;
+    const el = containerRef.current;
+    const gridStep = toolStateRef.current.gridSnap || 0;
+    return snapDrawPoint({
+      point: raw,
+      plane,
+      gridStep: gridStep > 0 ? gridStep : 0.25,
+      shiftSnap: gridStep > 0 || !!e.shiftKey,
+      candidates: snapCandidates(),
+      camera: camera ?? undefined,
+      viewW: el?.clientWidth,
+      viewH: el?.clientHeight,
+    });
+  };
 
-    const step = toolState.gridSnap || 0.25;
-    if (hit) {
-      return snapToGrid(Math.max(0.1, Math.abs(hit.y)), step);
+  const sampleDrawHeight = (e: { clientX: number; clientY: number }, session: PrimitiveDrawSession) => {
+    const parsed = pointerRay(e);
+    const camera = cameraRef.current;
+    const el = containerRef.current;
+    if (!parsed || !camera || !el) return session.height;
+    const camDir = fromThree(parsed.ray.direction);
+    const n = session.plane.n;
+    const parallel = Math.abs(vecDot(camDir, n)) > 0.92;
+    let hit: Vec3 | null = null;
+    if (!parallel) {
+      const heightN = vecNorm(vecSub(camDir, vecScale(n, vecDot(camDir, n))));
+      const heightPlane = makeConstructionPlane(session.currentPoint, heightN);
+      hit = intersectRayPlane(fromThree(parsed.ray.origin), fromThree(parsed.ray.direction), heightPlane);
     }
+    const orthoSpan =
+      camera instanceof THREE.OrthographicCamera ? Math.abs(camera.top - camera.bottom) : 8;
+    const wpp = worldUnitsPerPixel({
+      ortho: cameraType !== 'perspective',
+      orthoSpan,
+      fovDeg: camera instanceof THREE.PerspectiveCamera ? camera.fov : 38,
+      distance: camera.position.distanceTo(toThree(session.currentPoint)),
+      viewH: el.clientHeight,
+    });
+    const screenDeltaPx = heightStartRef.current ? heightStartRef.current.clientY - e.clientY : 0;
+    return heightAlongNormal({
+      hit,
+      plane: session.plane,
+      screenDeltaPx,
+      worldPerPixel: wpp,
+      cameraParallelToNormal: parallel,
+    });
+  };
 
-    const fallbackY = Math.max(0.1, (rect.height / 2 - (e.clientY - rect.top)) * 0.02);
-    return snapToGrid(fallbackY, step);
+  const commitDrawnMesh = (preview: CreationPreview) => {
+    if (!onSpawnDrawnPrimitive) return;
+    const mesh = meshFromPreview(preview);
+    onSpawnDrawnPrimitive(mesh);
+    setActiveMeshId(mesh.id);
+    setDrawSession(null);
+    heightStartRef.current = null;
   };
 
   const resolvePaintMesh = (): THREE.Mesh | null => {
@@ -4458,71 +4783,75 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       }
     }
 
-    // Interactive Ghost Placement Click Handler
-    if (toolState.placeOnClick && placementHoverPos && onSpawnDrawnPrimitive) {
-      const primType = toolState.activePrimitive || 'cube';
-      const is2D = is2DPrimitive(primType);
-
-      const newMesh = generatePrimitive(primType);
-      const cy = is2D ? 0.001 : newMesh.scale.y / 2;
-      newMesh.position = { x: placementHoverPos.x, y: cy, z: placementHoverPos.z };
-
-      onSpawnDrawnPrimitive(newMesh);
-      setActiveMeshId(newMesh.id);
+    // Click-to-place: drop an oriented primitive on the view plane or a mesh face.
+    if (toolState.placeOnClick && onSpawnDrawnPrimitive) {
+      const resolved = resolveDrawPlane(e) || (placementHover
+        ? { plane: placementHover.plane, raw: placementHover.point, surface: placementHover.surface }
+        : null);
+      if (!resolved) return;
+      const snapped = snapForDraw(e, resolved.plane, resolved.raw);
+      const preview = sessionToPreview(
+        placementSession({
+          primitiveType: toolState.activePrimitive || 'cube',
+          viewKind: drawViewKind(),
+          plane: { ...resolved.plane, origin: snapped.point },
+        }),
+      );
+      commitDrawnMesh(preview);
+      setPlacementHover(null);
       setToolState((s) => ({ ...s, placeOnClick: false }));
+      e.preventDefault();
+      e.stopPropagation();
       return;
     }
 
-    // 2-Step CAD Drawing Click Handler
+    // CAD draw: click viewport / surface for the base, click again to size, then height.
     if (toolState.isCadDrawing) {
-      if (cadStep === 0) {
-        const point = getGridIntersection(e);
-        if (!point) return;
-        setCadStep(1);
-        setDrawBaseStart(point);
-        setDrawBaseEnd(point);
-        setDrawHeight(1.0);
-      } else if (cadStep === 1) {
-        const point = getGridIntersection(e);
-        if (point) setDrawBaseEnd(point);
-
-        if (is2DPrimitive(toolState.cadDrawPrimitive)) {
-          if (drawBaseStart && drawBaseEnd && onSpawnDrawnPrimitive) {
-            const sx = Math.max(0.1, Math.abs(drawBaseEnd.x - drawBaseStart.x));
-            const sz = Math.max(0.1, Math.abs(drawBaseEnd.z - drawBaseStart.z));
-            const cx = (drawBaseEnd.x + drawBaseStart.x) / 2;
-            const cz = (drawBaseEnd.z + drawBaseStart.z) / 2;
-
-            const finalMesh = generatePrimitive(toolState.cadDrawPrimitive || 'plane', { x: sx, y: 0.001, z: sz });
-            finalMesh.position = { x: cx, y: 0.001, z: cz };
-            onSpawnDrawnPrimitive(finalMesh);
-            setActiveMeshId(finalMesh.id);
-          }
-          setCadStep(0);
-          setDrawBaseStart(null);
-          setDrawBaseEnd(null);
-        } else {
-          setCadStep(2);
-        }
-      } else if (cadStep === 2) {
-        if (drawBaseStart && drawBaseEnd && onSpawnDrawnPrimitive) {
-          const sx = Math.max(0.1, Math.abs(drawBaseEnd.x - drawBaseStart.x));
-          const sz = Math.max(0.1, Math.abs(drawBaseEnd.z - drawBaseStart.z));
-          const sy = Math.max(0.1, Math.abs(drawHeight));
-          const cx = (drawBaseStart.x + drawBaseEnd.x) / 2;
-          const cz = (drawBaseStart.z + drawBaseEnd.z) / 2;
-
-          const finalMesh = generatePrimitive(toolState.cadDrawPrimitive || 'cube', { x: sx, y: sy, z: sz });
-          finalMesh.position = { x: cx, y: sy / 2, z: cz };
-          onSpawnDrawnPrimitive(finalMesh);
-          setActiveMeshId(finalMesh.id);
-        }
-
-        setCadStep(0);
-        setDrawBaseStart(null);
-        setDrawBaseEnd(null);
-        setDrawHeight(1.0);
+      e.preventDefault();
+      e.stopPropagation();
+      const type = toolState.cadDrawPrimitive || toolState.activePrimitive || 'cube';
+      if (!drawSession) {
+        const resolved = resolveDrawPlane(e);
+        if (!resolved) return;
+        const snapped = snapForDraw(e, resolved.plane, resolved.raw);
+        const plane = { ...resolved.plane, origin: snapped.point };
+        setDrawSession(
+          beginDrawSession({
+            primitiveType: type,
+            viewKind: drawViewKind(),
+            plane,
+            start: snapped.point,
+            snap: { ...snapped, kind: resolved.surface ? 'surface' : snapped.kind },
+            gridSnap: toolState.gridSnap || 0,
+            shiftSnap: e.shiftKey,
+          }),
+        );
+        return;
       }
+      if (drawSession.phase === 'base') {
+        const resolved = resolveDrawPlane(e, drawSession);
+        if (resolved) {
+          const snapped = snapForDraw(e, drawSession.plane, resolved.raw);
+          const next = updateDrawBase(drawSession, snapped.point, snapped);
+          if (isFlatPrimitive(type)) {
+            commitDrawnMesh(sessionToPreview(next));
+            return;
+          }
+          heightStartRef.current = { clientY: e.clientY };
+          setDrawSession(lockDrawBase(next));
+          return;
+        }
+        if (isFlatPrimitive(type)) {
+          commitDrawnMesh(sessionToPreview(drawSession));
+        } else {
+          heightStartRef.current = { clientY: e.clientY };
+          setDrawSession(lockDrawBase(drawSession));
+        }
+        return;
+      }
+      const height = sampleDrawHeight(e, drawSession);
+      const next = updateDrawHeight(drawSession, height, drawSession.snap);
+      commitDrawnMesh(sessionToPreview(next));
       return;
     }
 
@@ -4757,9 +5086,16 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     }
 
     if (toolState.placeOnClick) {
-      const hit = getGridIntersection(e);
-      if (hit) setPlacementHoverPos(hit);
-    } else if (toolState.editMode === 'vertex' && verticesGroupRef.current) {
+      const resolved = resolveDrawPlane(e);
+      if (resolved) {
+        const snapped = snapForDraw(e, resolved.plane, resolved.raw);
+        setPlacementHover({ point: snapped.point, plane: resolved.plane, surface: resolved.surface });
+      } else {
+        setPlacementHover(null);
+      }
+    } else if (placementHover) {
+      setPlacementHover(null);
+    } else if (!toolState.isCadDrawing && toolState.editMode === 'vertex' && verticesGroupRef.current) {
       const intersects = raycaster.intersectObjects(verticesGroupRef.current.children);
       if (intersects.length > 0) {
         setHoveredVertexId(intersects[0].object.userData.vertexId);
@@ -4801,30 +5137,23 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       }
     }
 
-    if (toolState.isCadDrawing) {
-      if (cadStep === 1) {
-        const point = getGridIntersection(e);
-        if (point) setDrawBaseEnd(point);
-      } else if (cadStep === 2 && drawBaseEnd) {
-        const heightVal = getVerticalHeightIntersection(e, drawBaseEnd);
-        setDrawHeight(heightVal);
+    if (toolState.isCadDrawing && drawSession) {
+      if (drawSession.phase === 'base') {
+        const resolved = resolveDrawPlane(e, drawSession);
+        if (resolved) {
+          const snapped = snapForDraw(e, drawSession.plane, resolved.raw);
+          setDrawSession(updateDrawBase(drawSession, snapped.point, snapped));
+        }
+      } else if (drawSession.phase === 'height') {
+        const height = sampleDrawHeight(e, drawSession);
+        setDrawSession(updateDrawHeight(drawSession, height, drawSession.snap));
       }
     }
   };
 
-  const setViewOrientation = (dir: 'top' | 'front' | 'side' | 'iso') => {
-    if (!cameraRef.current || !controlsRef.current) return;
-    const camera = cameraRef.current;
-    if (dir === 'top') camera.position.set(0, 8, 0);
-    else if (dir === 'front') camera.position.set(0, 0, 8);
-    else if (dir === 'side') camera.position.set(8, 0, 0);
-    else if (dir === 'iso') camera.position.set(4, 4, 5);
-    camera.lookAt(0, 0, 0);
-    controlsRef.current.update();
-  };
 
-  const totalVerts = meshes.reduce((acc, m) => acc + m.vertices.length, 0);
-  const totalFaces = meshes.reduce((acc, m) => acc + m.faces.length, 0);
+
+
   const isBlockout = activeWorkspaceMode === 'blockout';
 
   /**
@@ -4955,16 +5284,16 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       <div className="absolute top-2 left-2 flex flex-col items-start gap-1.5 z-10 font-mono text-[10px]">
         <div className="flex items-center gap-1.5 pointer-events-none">
         {isQuadSubViewport ? (
-          <span className="cad-card px-2 py-0.5 text-[#ff9a3c] font-extrabold uppercase border-[#3b3f46] bg-[#101114]/90 backdrop-blur tracking-wider">
-            {cameraType} {cameraType === 'perspective' ? '3D' : 'ORTHO'}
+          <span className="px-2 py-0.5 rounded-[5px] bg-[var(--ts-app)]/90 backdrop-blur-md border border-[var(--ts-border)] text-[var(--ts-accent)] font-mono text-[10px] font-semibold tracking-wide uppercase">
+            {cameraType} {cameraType === 'perspective' ? '3D' : 'Ortho'}
           </span>
         ) : toolState.isPainting3D ? (
-          <span className="cad-card px-2 py-0.5 text-[#ff9a3c] font-bold uppercase border-[#3b3f46] bg-[#191b1e]/90 tracking-wider">
+          <span className="px-2 py-0.5 rounded-[5px] bg-[var(--ts-app)]/90 backdrop-blur-md border border-[var(--ts-border)] text-[var(--ts-accent)] font-mono text-[10px] font-semibold tracking-wide uppercase">
             3D Paint
           </span>
         ) : (
-          <span className="px-2.5 py-1 rounded-lg bg-[#131417]/85 backdrop-blur-md border border-white/[0.08] shadow-lg shadow-black/30 text-[#ff9a3c] font-bold uppercase tracking-wider">
-            {cameraType} VIEWPORT ({toolState.editMode.toUpperCase()} MODE)
+          <span className="px-2 py-0.5 rounded-[5px] bg-[var(--ts-app)]/90 backdrop-blur-md border border-[var(--ts-border)] text-[var(--ts-accent)] font-mono text-[10px] font-semibold tracking-wide uppercase">
+            {cameraType === 'perspective' ? '3D' : cameraType} · {toolState.editMode}
           </span>
         )}
         {toolState.modalTransform && (
@@ -5009,12 +5338,22 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         )}
         {toolState.placeOnClick && (
           <span className="cad-card px-2.5 py-1 text-[#00ffcc] font-bold border-cyan-700 bg-[#191b1e] animate-pulse">
-            PLACEMENT MODE: CLICK ANYWHERE TO DROP {toolState.activePrimitive.toUpperCase()} GHOST
+            PLACE {toolState.activePrimitive.toUpperCase()} · click viewport or a face
+            {placementHover?.surface ? ' · on surface' : ''}
           </span>
         )}
         {toolState.isCadDrawing && (
           <span className="cad-card px-2.5 py-1 text-emerald-400 font-bold border-emerald-900 bg-[#191b1e] animate-pulse">
-            CAD DRAWING: {cadStep === 1 ? 'PART 1 (FLAT WIDTH & DEPTH)' : cadStep === 2 ? 'PART 2 (3D HEIGHT EXTRUSION)' : 'CLICK GRID TO START'}
+            DRAW { (toolState.cadDrawPrimitive || toolState.activePrimitive || 'cube').toUpperCase() }
+            {' · '}
+            {cameraType}
+            {drawSession?.snap.kind === 'surface' ? ' · on surface' : ''}
+            {' · '}
+            {!drawSession
+              ? 'click viewport or a face'
+              : drawSession.phase === 'height'
+                ? `height ${formatDrawDimensions({ x: 0, y: drawSession.height, z: 0 }).h}`
+                : 'click opposite corner'}
           </span>
         )}
         {!toolState.isPainting3D && componentReadout && (
@@ -5064,53 +5403,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         )}
       </div>
 
-      {!isQuadSubViewport && (
-        <div className="absolute top-2 right-2 flex flex-col items-end gap-1 z-10 font-mono text-[10px]">
-          <div className="p-1 flex items-center gap-0.5 rounded-lg bg-[#131417]/85 backdrop-blur-md border border-white/[0.08] shadow-lg shadow-black/30">
-            <button onClick={() => setViewOrientation('top')} className="px-2 py-1 rounded-[5px] font-bold text-[#9ba0a8] hover:text-white hover:bg-[#33363c] transition-colors">
-              TOP
-            </button>
-            <button onClick={() => setViewOrientation('front')} className="px-2 py-1 rounded-[5px] font-bold text-[#9ba0a8] hover:text-white hover:bg-[#33363c] transition-colors">
-              FRONT
-            </button>
-            <button onClick={() => setViewOrientation('side')} className="px-2 py-1 rounded-[5px] font-bold text-[#9ba0a8] hover:text-white hover:bg-[#33363c] transition-colors">
-              SIDE
-            </button>
-            <button onClick={() => setViewOrientation('iso')} className="px-2 py-1 rounded-[5px] font-bold text-[#ff9a3c] hover:text-white hover:bg-[#33363c] transition-colors">
-              3D ISO
-            </button>
-            <span className="w-px h-3.5 bg-white/10 mx-0.5" />
-            <button
-              onClick={() => setToolState((s) => ({ ...s, xray: !s.xray }))}
-              className={`px-2 py-1 rounded-[5px] font-bold transition-colors ${toolState.xray ? 'text-[#ff9a3c] bg-[#ed7300]/15' : 'text-[#858a93] hover:text-white hover:bg-[#33363c]'}`}
-              title="Toggle X-Ray (Alt+Z) — see through meshes like Blender"
-            >
-              X-Ray{toolState.xray ? ' · ON' : ''}
-            </button>
-            <button
-              onClick={() => setToolState((s) => ({ ...s, showBones: s.showBones !== undefined ? !s.showBones : !shouldShowBones }))}
-              className={`px-2 py-1 rounded-[5px] font-bold transition-colors ${shouldShowBones ? 'text-[#5fd0a0] bg-[#2d9d78]/15' : 'text-[#858a93] hover:text-white hover:bg-[#33363c]'}`}
-              title="Toggle Skeleton / Bone Visibility in Viewport"
-            >
-              Bones{shouldShowBones ? ' · ON' : ''}
-            </button>
-            {onOpenUVModal && (
-              <>
-                <span className="w-px h-3.5 bg-white/10 mx-0.5" />
-                <button
-                  onClick={onOpenUVModal}
-                  className="px-2.5 py-1 rounded-[5px] bg-gradient-to-b from-[#f9821a] to-[#e06d00] text-white font-bold hover:from-[#ff9a3c] hover:to-[#ed7300] transition shadow-sm shadow-[#ed7300]/30"
-                  title="Open UV Mapping Studio Popup (Hotkey: U)"
-                >
-                  UV Studio
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* LightWave navigation is available in every Model and Blockout viewport. */}
+      {/* LightWave navigation combined with X-Ray and Bones in the top right. */}
       <LightwaveNavToolbar
         toolState={toolState}
         setToolState={setToolState}
@@ -5123,24 +5416,39 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         maximizeTitle={isViewportMaximized ? 'Restore all viewports' : 'Maximize this viewport'}
         showOrbit={cameraType === 'perspective'}
         compact={isQuadSubViewport && !isViewportMaximized}
-        placement={isBlockout ? 'top-right' : 'bottom-right'}
-      />
+        placement="top-right"
+      >
+        {!isQuadSubViewport && (
+          <div className="flex items-center gap-0.5 text-[10px]">
+            <button
+              type="button"
+              onClick={() => setToolState((s) => ({ ...s, xray: !s.xray }))}
+              className={`px-2 py-1 rounded-[4px] font-bold transition-colors ${
+                toolState.xray
+                  ? 'text-[#ff9a3c] bg-[#ed7300]/15'
+                  : 'text-[#858a93] hover:text-white hover:bg-[#33363c]'
+              }`}
+              title="Toggle X-Ray (Alt+Z) — see through meshes like Blender"
+            >
+              X-Ray{toolState.xray ? ' · ON' : ''}
+            </button>
+            <button
+              type="button"
+              onClick={() => setToolState((s) => ({ ...s, showBones: s.showBones !== undefined ? !s.showBones : !shouldShowBones }))}
+              className={`px-2 py-1 rounded-[4px] font-bold transition-colors ${
+                shouldShowBones
+                  ? 'text-[#5fd0a0] bg-[#2d9d78]/15'
+                  : 'text-[#858a93] hover:text-white hover:bg-[#33363c]'
+              }`}
+              title="Toggle Skeleton / Bone Visibility in Viewport"
+            >
+              Bones{shouldShowBones ? ' · ON' : ''}
+            </button>
+          </div>
+        )}
+      </LightwaveNavToolbar>
 
-      {!isQuadSubViewport && !toolState.isPainting3D && (
-        <div className="absolute bottom-2 left-2 px-3 py-1.5 text-[10px] font-mono flex items-center gap-3 rounded-lg bg-[#131417]/85 backdrop-blur-md border border-white/[0.08] shadow-lg shadow-black/30 text-[#9ba0a8]">
-          <span>Scene Objects: <strong className="text-amber-400">{meshes.length}</strong></span>
-          <span>Rig Bones: <strong className="text-[#ed7300]">{bones.length}</strong></span>
-          <span>Total Verts: <strong className="text-[#ff9a3c]">{totalVerts}</strong></span>
-          <span>Total Faces: <strong className="text-[#ed7300]">{totalFaces}</strong></span>
-          <span>Selected Mesh: <strong className="text-[#ff9a3c]">{activeMesh?.name || 'None'}</strong></span>
-          {toolState.xray && (
-            <span className="text-[#ed7300] font-bold" title="Alt+Z to toggle">
-              X-RAY
-            </span>
-          )}
-          <span className="text-[#6a7a8c]">{STANDARD_NAV_HINT}</span>
-        </div>
-      )}
+
 
       {/* Perforated Marquee Box Overlay */}
       {marqueeBox && containerRef.current && (() => {

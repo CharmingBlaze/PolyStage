@@ -76,11 +76,11 @@ export const AnimEditPopup: React.FC<AnimEditPopupProps> = ({
   if (!isOpen) return null;
 
   const kindIcon = (kind: AnimEditKind) => {
-    if (kind === 'camera') return <Camera className="w-3 h-3 text-[#ed7300]" />;
-    if (kind === 'bone') return <Bone className="w-3 h-3 text-[#ed7300]" />;
-    if (kind === 'particle') return <Sparkles className="w-3 h-3 text-[#e68619]" />;
+    if (kind === 'camera') return <Camera className="w-3 h-3 text-[#00b4c4]" />;
+    if (kind === 'bone') return <Bone className="w-3 h-3 text-[#00b4c4]" />;
+    if (kind === 'particle') return <Sparkles className="w-3 h-3 text-[#00b4c4]" />;
     if (kind === 'light') return <Maximize className="w-3 h-3 text-[#f1c40f]" />;
-    return <Box className="w-3 h-3 text-[#e68619]" />;
+    return <Box className="w-3 h-3 text-[#00b4c4]" />;
   };
 
   const patchAxis = (
@@ -95,7 +95,7 @@ export const AnimEditPopup: React.FC<AnimEditPopupProps> = ({
 
   return (
     <div
-      className="absolute z-40 shadow-2xl rounded-lg border border-[#3b3f46] bg-[#101114]/95 backdrop-blur-md font-mono text-[10px] text-[#c6cad1] select-none"
+      className="absolute z-40 shadow-2xl rounded-lg border border-[#3a3f4a] bg-[#1a1c22]/95 backdrop-blur-md font-mono text-[10px] text-[#bcc4d0] select-none"
       style={{ left: position.x, top: position.y, width: minimized ? 220 : 268 }}
     >
       <div
@@ -104,9 +104,9 @@ export const AnimEditPopup: React.FC<AnimEditPopupProps> = ({
           setDragging(true);
           dragStart.current = { x: e.clientX - position.x, y: e.clientY - position.y };
         }}
-        className="h-8 px-2 flex items-center justify-between border-b border-[#26282d] bg-[#242424] cursor-grab active:cursor-grabbing rounded-t-lg"
+        className="h-8 px-2 flex items-center justify-between border-b border-[#1c1f26] bg-[#242424] cursor-grab active:cursor-grabbing rounded-t-lg"
       >
-        <div className="flex items-center gap-1.5 font-bold text-[#ed7300]">
+        <div className="flex items-center gap-1.5 font-bold text-[#00b4c4]">
           <GripHorizontal className="w-3.5 h-3.5 text-[#6f6f6f]" />
           <Settings2 className="w-3 h-3" />
           <span>ANIM EDIT</span>
@@ -114,7 +114,7 @@ export const AnimEditPopup: React.FC<AnimEditPopupProps> = ({
         <div className="flex items-center gap-0.5">
           <button
             type="button"
-            className="p-1 hover:bg-[#3b3f46] rounded text-[#a6abb4] hover:text-white"
+            className="p-1 hover:bg-[#3a3f4a] rounded text-[#a6abb4] hover:text-white"
             title={minimized ? 'Expand' : 'Collapse'}
             onClick={() => setMinimized((v) => !v)}
           >
@@ -170,8 +170,8 @@ export const AnimEditPopup: React.FC<AnimEditPopupProps> = ({
                     type="button"
                     className={`h-7 rounded border flex items-center justify-center gap-1 ${
                       gizmoMode === mode.id
-                        ? 'border-[#ed7300] bg-[#ed7300]/20 text-[#ed7300]'
-                        : 'border-[#3b3f46] text-[#858a93] hover:text-white'
+                        ? 'border-[#00b4c4] bg-[#00b4c4]/20 text-[#00b4c4]'
+                        : 'border-[#3a3f4a] text-[#858a93] hover:text-white'
                     }`}
                     onClick={() => onGizmoMode(mode.id)}
                   >
@@ -223,7 +223,7 @@ export const AnimEditPopup: React.FC<AnimEditPopupProps> = ({
                   <div className="text-[#858a93]">Rate {target.rate ?? 0}/s · {target.enabled === false ? 'OFF' : 'ON'}</div>
                   <button
                     type="button"
-                    className="w-full h-7 cad-button text-[#e68619] font-bold"
+                    className="w-full h-7 cad-button text-[#00b4c4] font-bold"
                     onClick={() => onOpenParticleStudio?.()}
                   >
                     Open Particle Studio
@@ -235,7 +235,7 @@ export const AnimEditPopup: React.FC<AnimEditPopupProps> = ({
                 <button
                   type="button"
                   className={`w-full h-8 rounded text-white font-bold flex items-center justify-center gap-1 ${
-                    target.kind === 'light' ? 'bg-[#f1c40f] text-black' : 'bg-[#ed7300]'
+                    target.kind === 'light' ? 'bg-[#f1c40f] text-black' : 'bg-[#00b4c4]'
                   }`}
                   onClick={onKeyNow}
                 >

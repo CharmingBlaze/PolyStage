@@ -300,7 +300,7 @@ export function applyLiveLightProps(light: THREE.Light, partial: Partial<CADLigh
 /** Build a selectable viewport gizmo for a CAD light. */
 export function createCadLightHelper(L: CADLight, selected: boolean): THREE.Group {
   const helper = new THREE.Group();
-  const color = new THREE.Color(selected ? '#ed7300' : L.color || '#fff5e6');
+  const color = new THREE.Color(selected ? '#00b4c4' : L.color || '#fff5e6');
   const mat = new THREE.MeshBasicMaterial({
     color,
     depthTest: false,

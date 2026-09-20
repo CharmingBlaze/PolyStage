@@ -1,0 +1,12 @@
+PolyStage modeling icons in this folder are original 16x16 glyphs
+drawn for this application. They are not copies of Blender icons.
+
+License: MIT, same as the PolyStage application source.
+Filled white (#fff) so CSS masks can tint them with currentColor.
+
+Includes: move, rotate, scale, transform, pivot, orientation-local,
+orientation-global, snap, center, extrude, inset, bevel, knife, loopcut,
+cad, object, vertex, edge, face, camera, light, zoom, maximize, bone,
+pose, weld, trash, outliner, add, mirror.
+
+Blender-derived icons remain in /public/blender-icons (GPL-2.0+).

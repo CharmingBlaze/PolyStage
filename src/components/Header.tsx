@@ -1,35 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import {
-  RotateCcw,
-  RotateCw,
-  HelpCircle,
-  Film,
-  Sparkles,
-  Plus,
-  Trash2,
-  Edit2,
-  Layers,
-  Square,
-  LayoutGrid,
-  Palette,
-  Paintbrush,
-  Eye,
-  Columns2,
-  Upload,
-  Box,
-  Bone,
-  ChevronDown,
-  PanelTopClose,
-  PenLine,
-} from 'lucide-react';
 import type { ToolState, CADMesh, ViewMode, CADScene, EditMode, WorkspaceMode, HeaderWorkspace, RigMode } from '../types/cad';
 import {
   exportToOBJ, exportToSTL, exportToGLTF, exportToBlockbench,
   exportProjectJSON, downloadFile
 } from '../utils/exporters';
-import { APP_FULL, APP_NAME, APP_YEAR, PROJECT_EXT, PROJECT_EXT_LEGACY } from '../brand';
+import { APP_NAME, PROJECT_EXT, PROJECT_EXT_LEGACY } from '../brand';
 import { BrandMark } from './BrandMark';
+import { BlenderIcon } from './icons/BlenderIcon';
 
 type MenuId = 'file' | 'edit' | 'mesh' | 'skeleton' | 'window' | 'help' | null;
 
@@ -85,6 +63,10 @@ interface HeaderProps {
   onTogglePalette?: () => void;
   isOutlinerOpen?: boolean;
   onToggleOutliner?: () => void;
+  isToolbarOpen?: boolean;
+  onToggleToolbar?: () => void;
+  isToolbarFloating?: boolean;
+  onToggleToolbarFloat?: () => void;
 }
 
 function MenuDropdown({
@@ -132,8 +114,8 @@ function MenuDropdown({
         ref={btnRef}
         type="button"
         onClick={() => setOpenMenu(open ? null : id)}
-        className={`px-2 py-0.5 text-[11px] transition ${
-          open ? 'bg-[#3b3f46] text-white' : accent ? 'text-[#ed7300] hover:bg-[#34383f]' : 'text-[#c6cad1] hover:bg-[#34383f] hover:text-white'
+        className={`px-2 py-0.5 text-[11px] rounded-[6px] transition ${
+          open ? 'bg-[var(--ts-surface)] text-[var(--ts-text-hi)]' : accent ? 'text-[var(--ts-accent)] hover:bg-[var(--ts-hover)]' : 'text-[var(--ts-text)] hover:bg-[var(--ts-hover)] hover:text-[var(--ts-text-hi)]'
         }`}
       >
         {label}
@@ -141,7 +123,7 @@ function MenuDropdown({
       {open &&
         createPortal(
           <div
-            className="fixed z-[100000] min-w-[220px] py-0 adobe-menu"
+            className="fixed z-[9999] min-w-[220px] py-0 adobe-menu"
             style={{ top: menuPos.top, left: menuPos.left }}
             onMouseDown={(e) => e.stopPropagation()}
           >
@@ -158,19 +140,21 @@ function MenuDropdown({
                     item.onClick();
                     setOpenMenu(null);
                   }}
-                  className={`w-full px-3 py-1.5 rounded-[5px] flex items-center justify-between gap-6 text-left text-[11px] transition ${
+                  className={`adobe-menu-item ${
                     item.disabled || !item.onClick
-                      ? 'text-[#6e6e6e] cursor-not-allowed'
+                      ? ''
                       : item.danger
-                        ? 'text-[#ec5b62] hover:bg-[#2e3136]'
-                        : 'text-[#c6cad1] hover:bg-[#ed7300] hover:text-white'
+                        ? 'is-danger'
+                        : item.active
+                          ? 'is-on'
+                          : ''
                   }`}
                 >
                   <span className="flex items-center gap-2">
                     {item.icon}
                     {item.label}
                   </span>
-                  {item.shortcut && <span className="font-mono text-[10px] text-[#858a93]">{item.shortcut}</span>}
+                  {item.shortcut && <span className="font-mono text-[10px] text-[var(--ts-text-muted)]">{item.shortcut}</span>}
                 </button>
               )
             )}
@@ -217,10 +201,18 @@ export const Header: React.FC<HeaderProps> = ({
   onTogglePalette,
   isOutlinerOpen,
   onToggleOutliner,
+  isToolbarOpen = true,
+  onToggleToolbar,
+  isToolbarFloating = false,
+  onToggleToolbarFloat,
 }) => {
   const [isRenamingScene, setIsRenamingScene] = useState(false);
   const [sceneNameInput, setSceneNameInput] = useState('');
   const [openMenu, setOpenMenu] = useState<MenuId>(null);
+  const [isViewOpen, setIsViewOpen] = useState(false);
+  const viewBtnRef = useRef<HTMLButtonElement>(null);
+  const viewMenuRef = useRef<HTMLDivElement>(null);
+  const [viewPos, setViewPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 });
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
   const menuBarRef = useRef<HTMLDivElement>(null);
   const headerShellRef = useRef<HTMLDivElement>(null);
@@ -228,12 +220,40 @@ export const Header: React.FC<HeaderProps> = ({
   const activeScene = scenes.find((s) => s.id === activeSceneId) || scenes[0];
 
   useEffect(() => {
+    if (!isViewOpen || !viewBtnRef.current) return;
+    const place = () => {
+      const rect = viewBtnRef.current!.getBoundingClientRect();
+      setViewPos({
+        top: rect.bottom + 4,
+        right: Math.max(8, window.innerWidth - rect.right),
+      });
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [isViewOpen]);
+
+  useEffect(() => {
     const onDocDown = (e: MouseEvent) => {
       const root = headerShellRef.current;
-      if (!root?.contains(e.target as Node)) setOpenMenu(null);
+      const viewMenu = viewMenuRef.current;
+      const target = e.target as Node;
+      if (!root?.contains(target)) {
+        setOpenMenu(null);
+      }
+      if (!viewBtnRef.current?.contains(target) && !viewMenu?.contains(target)) {
+        setIsViewOpen(false);
+      }
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpenMenu(null);
+      if (e.key === 'Escape') {
+        setOpenMenu(null);
+        setIsViewOpen(false);
+      }
     };
     document.addEventListener('mousedown', onDocDown);
     window.addEventListener('keydown', onKey);
@@ -397,6 +417,12 @@ export const Header: React.FC<HeaderProps> = ({
     { type: 'sep' },
     {
       type: 'item',
+      label: 'Transform Gizmo',
+      shortcut: 'T',
+      onClick: () => setToolState((s) => ({ ...s, transformMode: 'combined' })),
+    },
+    {
+      type: 'item',
       label: 'Move Tool',
       shortcut: 'G',
       onClick: () => setToolState((s) => ({ ...s, transformMode: 'move' })),
@@ -412,6 +438,12 @@ export const Header: React.FC<HeaderProps> = ({
       label: 'Scale Tool',
       shortcut: 'S',
       onClick: () => setToolState((s) => ({ ...s, transformMode: 'scale' })),
+    },
+    {
+      type: 'item',
+      label: 'Pivot Tool',
+      shortcut: '.',
+      onClick: () => setToolState((s) => ({ ...s, transformMode: 'pivot' })),
     },
     { type: 'sep' },
     { type: 'item', label: 'Add Primitive…', onClick: onOpenAssetBrowser || onOpenPresets },
@@ -443,6 +475,16 @@ export const Header: React.FC<HeaderProps> = ({
     { type: 'item', label: 'Easy Rig Workspace', onClick: () => onSelectWorkspace('rig') },
     { type: 'item', label: 'Animation Workspace', onClick: () => onSelectWorkspace('animation') },
     { type: 'sep' },
+    {
+      type: 'item',
+      label: isToolbarOpen ? 'Hide Toolbar' : 'Show Toolbar',
+      onClick: () => onToggleToolbar?.(),
+    },
+    {
+      type: 'item',
+      label: isToolbarFloating ? 'Dock Toolbar' : 'Float Toolbar',
+      onClick: () => onToggleToolbarFloat?.(),
+    },
     {
       type: 'item',
       label: isOutlinerOpen ? 'Hide Floating Outliner' : 'Floating Outliner',
@@ -486,30 +528,32 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <div
       ref={headerShellRef}
-      className="relative sp-menubar select-none z-[5000] font-sans text-[#c6cad1]"
+      className="relative sp-menubar select-none font-sans text-[var(--ts-text)]"
     >
       {headerCollapsed ? (
-        <div className="h-6 px-2 flex items-center gap-2 bg-[#26282d]">
-          <BrandMark size={16} className="shrink-0 shadow-sm" />
-          <span className="text-[10px] text-[#858a93] font-mono truncate">{APP_FULL}</span>
+        <div className="h-6 px-2 flex items-center gap-2 bg-[var(--ts-panel)]">
+          <BrandMark size={16} className="shrink-0" />
+          <span className="sp-wordmark truncate">{APP_NAME}</span>
           <div className="flex-1" />
           <button
             type="button"
             onClick={() => setHeaderCollapsed(false)}
-            className="h-5 px-1.5 rounded border border-[#3b3f46] bg-[#191b1e] text-[#858a93] hover:text-white hover:border-[#ed7300] flex items-center gap-1 text-[9px] font-mono"
+            className="h-6 px-1.5 rounded-[6px] border border-[var(--ts-border-hi)] bg-[var(--ts-app)] text-[var(--ts-text-muted)] hover:text-[var(--ts-text-hi)] hover:border-[var(--ts-active-border)] flex items-center gap-1 text-[11px]"
             title="Show header"
+            aria-label="Show header"
           >
-            <ChevronDown className="w-3 h-3" />
+            <BlenderIcon name="show" size={12} />
             Show
           </button>
         </div>
       ) : (
-        <div className="h-9 px-2 flex items-center gap-1.5 bg-[#26282d] overflow-x-auto overflow-y-visible custom-scrollbar">
+        <div className="h-9 px-2 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 bg-[var(--ts-panel)]">
           {/* Brand + menus */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            <BrandMark size={20} className="shrink-0 shadow-md" />
-            <span className="font-semibold text-[11px] text-[#eaedf1] whitespace-nowrap hidden md:inline">
-              {APP_NAME} <span className="text-[9px] text-[#858a93] font-mono">{APP_YEAR}</span>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <BrandMark size={24} className="shrink-0" />
+            <span className="sp-wordmark hidden md:inline">
+              <span className="sp-wordmark__poly">Poly</span>
+              <span className="sp-wordmark__stage">Stage</span>
             </span>
             <div className="sp-sep-v h-3.5 mx-0.5 self-center" />
             <div ref={menuBarRef} className="flex items-center gap-0.5 text-[11px]">
@@ -518,14 +562,11 @@ export const Header: React.FC<HeaderProps> = ({
               <MenuDropdown id="mesh" label="Mesh" openMenu={openMenu} setOpenMenu={setOpenMenu} items={meshMenu} />
               <MenuDropdown id="skeleton" label="Skeleton" openMenu={openMenu} setOpenMenu={setOpenMenu} items={skeletonMenu} />
               <MenuDropdown id="window" label="Window" openMenu={openMenu} setOpenMenu={setOpenMenu} items={windowMenu} />
-              <MenuDropdown id="help" label="Help" openMenu={openMenu} setOpenMenu={setOpenMenu} items={helpMenu} accent />
+              <MenuDropdown id="help" label="Help" openMenu={openMenu} setOpenMenu={setOpenMenu} items={helpMenu} />
             </div>
           </div>
 
-          <div className="sp-sep-v h-4 shrink-0 self-center" />
-
-          {/* Workspaces */}
-          <div className="sp-workspace-seg shrink-0">
+          <nav className="sp-workspace-seg justify-self-center" aria-label="Workspaces">
             <button
               type="button"
               onClick={() => onSelectWorkspace('modeling')}
@@ -534,70 +575,74 @@ export const Header: React.FC<HeaderProps> = ({
                   ? 'is-active'
                   : ''
               }
+              title="Model workspace"
+              aria-label="Model workspace"
+              aria-pressed={activeWorkspaceMode === 'modeling' && !toolState.isPainting3D && !uvSplitOpen}
             >
               Model
             </button>
             <button
               type="button"
               onClick={() => onSelectWorkspace('blockout')}
-              className={`inline-flex items-center gap-0.5 ${activeWorkspaceMode === 'blockout' ? 'is-active' : ''}`}
-              title="Vector Blockout — draw Front/Side/Top silhouettes and build 3D"
+              className={activeWorkspaceMode === 'blockout' ? 'is-active' : ''}
+              title="Vector Blockout"
+              aria-label="Blockout workspace"
             >
-              <PenLine className="w-3 h-3" />
-              <span>Blockout</span>
+              Blockout
             </button>
             <button
               type="button"
               onClick={() => onSelectWorkspace('paint')}
-              className={`inline-flex items-center gap-0.5 ${activeWorkspaceMode === 'paint' ? 'is-active' : ''}`}
+              className={activeWorkspaceMode === 'paint' ? 'is-active' : ''}
               title="Paint"
+              aria-label="Paint workspace"
             >
-              <Palette className="w-3 h-3" />
-              <span className="hidden lg:inline">Paint</span>
+              Paint
             </button>
             <button
               type="button"
               onClick={() => onSelectWorkspace('brush')}
-              className={`inline-flex items-center gap-0.5 ${
+              className={
                 toolState.isPainting3D && activeWorkspaceMode === 'modeling' && !uvSplitOpen ? 'is-active' : ''
-              }`}
+              }
               title="3D Brush (B)"
+              aria-label="3D brush"
             >
-              <Paintbrush className="w-3 h-3" />
-              <span className="hidden lg:inline">Brush</span>
+              Brush
             </button>
             <button
               type="button"
               onClick={() => onSelectWorkspace('rig')}
-              className={`inline-flex items-center gap-0.5 ${activeWorkspaceMode === 'rigging' ? 'is-active' : ''}`}
-              title="Easy Rig & Skin"
+              className={activeWorkspaceMode === 'rigging' ? 'is-active' : ''}
+              title="Rig and Skin"
+              aria-label="Rig workspace"
             >
-              <Bone className="w-3 h-3" />
-              <span className="hidden lg:inline">Rig</span>
+              Rig
             </button>
             <button
               type="button"
               onClick={() => onSelectWorkspace('animation')}
-              className={`inline-flex items-center gap-0.5 ${activeWorkspaceMode === 'animation' ? 'is-active' : ''}`}
+              className={activeWorkspaceMode === 'animation' ? 'is-active' : ''}
               title="Animation"
+              aria-label="Animation workspace"
             >
-              <Film className="w-3 h-3" />
-              <span className="hidden lg:inline">Anim</span>
+              Anim
             </button>
             <button
               type="button"
               onClick={() => onSelectWorkspace('uv')}
-              className={`inline-flex items-center gap-0.5 ${uvSplitOpen ? 'is-active' : ''}`}
+              className={uvSplitOpen ? 'is-active' : ''}
               title="UV Editor"
+              aria-label="UV workspace"
             >
-              <Columns2 className="w-3 h-3" />
-              <span className="hidden lg:inline">UV</span>
+              UV
             </button>
-          </div>
+          </nav>
 
+          <div className="flex items-center justify-end gap-1.5 min-w-0">
           {/* Scene */}
-          <div className="flex items-center gap-1 bg-[#191b1e] px-1.5 py-0.5 rounded border border-[#101114] shrink-0 min-w-0">
-            <Layers className="w-3 h-3 text-[#e68619] shrink-0" />
+          <div className="ts-chip shrink-0 min-w-0">
+            <BlenderIcon name="scene" size={12} className="text-[var(--ts-accent)] shrink-0" />
             {isRenamingScene ? (
               <input
                 type="text"
@@ -606,183 +651,175 @@ export const Header: React.FC<HeaderProps> = ({
                 onBlur={handleSaveRenameScene}
                 onKeyDown={(e) => e.key === 'Enter' && handleSaveRenameScene()}
                 autoFocus
-                className="cad-input px-1 py-0 text-[10px] text-[#e68619] outline-none w-24 font-mono"
+                className="cad-input px-1 py-0 text-[11px] text-[var(--ts-accent)] outline-none w-24 font-mono"
               />
             ) : (
               <select
                 value={activeSceneId}
                 onChange={(e) => setActiveSceneId(e.target.value)}
-                className="bg-transparent font-mono text-[10px] text-[#e68619] font-bold outline-none cursor-pointer max-w-[140px]"
+                className="bg-transparent font-mono text-[11px] text-[var(--ts-accent)] font-semibold outline-none cursor-pointer max-w-[140px]"
               >
                 {scenes.map((scene: CADScene) => (
-                  <option key={scene.id} value={scene.id} className="bg-[#191b1e] text-[#e68619]">
+                  <option key={scene.id} value={scene.id} className="bg-[var(--ts-app)] text-[var(--ts-accent)]">
                     {scene.name} ({scene.meshes.length})
                   </option>
                 ))}
               </select>
             )}
-            <button type="button" onClick={handleStartRenameScene} className="p-0.5 text-[#858a93] hover:text-white" title="Rename Scene">
-              <Edit2 className="w-3 h-3" />
+            <button type="button" onClick={handleStartRenameScene} className="ts-chrome-btn" title="Rename Scene" aria-label="Rename scene">
+              <BlenderIcon name="rename" size={12} />
             </button>
-            <button type="button" onClick={onAddScene} className="p-0.5 text-[#ed7300] hover:text-white" title="Add Scene">
-              <Plus className="w-3 h-3" />
+            <button type="button" onClick={onAddScene} className="ts-chrome-btn text-[var(--ts-accent)]" title="Add Scene" aria-label="Add scene">
+              <BlenderIcon name="add" size={12} />
             </button>
             {scenes.length > 1 && (
-              <button type="button" onClick={() => onDeleteScene(activeSceneId)} className="p-0.5 text-[#ec5b62]" title="Delete Scene">
-                <Trash2 className="w-3 h-3" />
+              <button type="button" onClick={() => onDeleteScene(activeSceneId)} className="ts-chrome-btn text-[var(--ts-danger)]" title="Delete Scene" aria-label="Delete scene">
+                <BlenderIcon name="trash" size={12} />
               </button>
             )}
           </div>
-
-          <div className="flex-1 min-w-2" />
 
           {/* History */}
-          <div className="flex items-center gap-0.5 bg-[#191b1e] p-0.5 rounded border border-[#101114] shrink-0">
-            <button type="button" onClick={undo} disabled={!canUndo} className={`p-1 rounded hover:bg-[#34383f] ${!canUndo && 'opacity-30'}`} title="Undo">
-              <RotateCcw className="w-3 h-3" />
+          <div className="ts-chip shrink-0 p-0.5">
+            <button type="button" onClick={undo} disabled={!canUndo} className={`ts-chrome-btn ${!canUndo && 'opacity-30'}`} title="Undo" aria-label="Undo">
+              <BlenderIcon name="undo" size={12} />
             </button>
-            <button type="button" onClick={redo} disabled={!canRedo} className={`p-1 rounded hover:bg-[#34383f] ${!canRedo && 'opacity-30'}`} title="Redo">
-              <RotateCw className="w-3 h-3" />
+            <button type="button" onClick={redo} disabled={!canRedo} className={`ts-chrome-btn ${!canRedo && 'opacity-30'}`} title="Redo" aria-label="Redo">
+              <BlenderIcon name="redo" size={12} />
             </button>
           </div>
 
-          {/* Viewport layout */}
-          <div className="flex items-center gap-0.5 bg-[#191b1e] p-0.5 rounded border border-[#101114] font-mono text-[10px] shrink-0">
+          {/* View and docks stay one click away, not always on the bar. */}
+          <div className="relative shrink-0">
             <button
-              type="button"
-              onClick={() => setToolState((s) => ({ ...s, viewportLayout: 'single' }))}
-              className={`px-1.5 py-0.5 rounded flex items-center gap-0.5 ${
-                toolState.viewportLayout === 'single' ? 'bg-[#ed7300] text-white font-bold' : 'text-[#7e838c] hover:text-white'
-              }`}
-              title="Single view"
-            >
-              <Square className="w-3 h-3" />
-              1
-            </button>
-            <button
+              ref={viewBtnRef}
               type="button"
               onClick={() => {
-                setActiveWorkspaceMode('modeling');
-                setToolState((s) => ({
-                  ...s,
-                  viewportLayout: 'quad',
-                  ...(activeWorkspaceMode === 'rigging' || s.editMode === 'bone'
-                    ? { editMode: 'object' as const, showBones: false }
-                    : {}),
-                }));
+                setOpenMenu(null);
+                setIsViewOpen((prev) => !prev);
               }}
-              className={`px-1.5 py-0.5 rounded flex items-center gap-0.5 ${
-                toolState.viewportLayout === 'quad' ? 'bg-[#ed7300] text-white font-bold' : 'text-[#7e838c] hover:text-white'
+              className={`px-2 py-1 rounded-[6px] border text-[11px] font-semibold uppercase tracking-wide transition ${
+                isViewOpen
+                  ? 'border-dashed border-[var(--ts-accent)] bg-transparent text-[var(--ts-accent)]'
+                  : 'border-[var(--ts-border)] bg-[var(--ts-app)] text-[var(--ts-text-muted)] hover:text-[var(--ts-text-hi)]'
               }`}
-              title="Quad view"
             >
-              <LayoutGrid className="w-3 h-3" />
-              Quad
+              View
             </button>
+            {isViewOpen &&
+              createPortal(
+                <div
+                  ref={viewMenuRef}
+                  className="fixed z-[9999] min-w-[220px] p-2 adobe-menu flex flex-col gap-2"
+                  style={{ top: `${viewPos.top}px`, right: `${viewPos.right}px` }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setToolState((s) => ({ ...s, viewportLayout: 'single' }))}
+                      className={`flex-1 px-1.5 py-1 rounded-[6px] text-[11.5px] ${
+                        toolState.viewportLayout === 'single' ? 'text-[var(--ts-accent)] border border-dashed border-[var(--ts-accent)] bg-transparent' : 'text-[var(--ts-text-muted)] hover:text-[var(--ts-text-hi)]'
+                      }`}
+                    >
+                      Single
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveWorkspaceMode('modeling');
+                        setToolState((s) => ({
+                          ...s,
+                          viewportLayout: 'quad',
+                          ...(activeWorkspaceMode === 'rigging' || s.editMode === 'bone'
+                            ? { editMode: 'object' as const, showBones: false }
+                            : {}),
+                        }));
+                      }}
+                      className={`flex-1 px-1.5 py-1 rounded-[6px] text-[11.5px] ${
+                        toolState.viewportLayout === 'quad' ? 'text-[var(--ts-accent)] border border-dashed border-[var(--ts-accent)] bg-transparent' : 'text-[var(--ts-text-muted)] hover:text-[var(--ts-text-hi)]'
+                      }`}
+                    >
+                      Quad
+                    </button>
+                  </div>
+                  <label className="flex items-center gap-2 text-[11px] text-[var(--ts-text-muted)]">
+                    Shading
+                    <select
+                      value={toolState.viewMode}
+                      onChange={(e) => setToolState((s) => ({ ...s, viewMode: e.target.value as ViewMode }))}
+                      className="flex-1 bg-[var(--ts-app)] border border-[var(--ts-border-hi)] rounded-[6px] px-1.5 py-1 text-[var(--ts-text-hi)] outline-none"
+                      aria-label="Shading mode"
+                    >
+                      {viewModes.map((mode) => (
+                        <option key={mode.id} value={mode.id}>
+                          {mode.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setToolState((s) => ({ ...s, xray: !s.xray }))}
+                    className={`px-1.5 py-1 rounded-[6px] text-[11px] text-left ${
+                      toolState.xray ? 'border border-dashed border-[var(--ts-accent)] bg-transparent text-[var(--ts-accent-hi)]' : 'text-[var(--ts-text-muted)] hover:text-[var(--ts-text-hi)]'
+                    }`}
+                  >
+                    X-Ray (Alt+Z)
+                  </button>
+                  <div className="flex items-center gap-0.5 border-t border-[var(--ts-border)] pt-2">
+                    {onToggleOutliner && (
+                      <button type="button" onClick={onToggleOutliner} className={`ts-chrome-btn ${isOutlinerOpen ? 'is-on' : ''}`} title="Outliner (O)" aria-label="Toggle outliner">
+                        <BlenderIcon name="outliner" size={12} />
+                      </button>
+                    )}
+                    {onToggleToolWindow && (
+                      <button type="button" onClick={onToggleToolWindow} className={`ts-chrome-btn ${isToolWindowOpen ? 'is-on' : ''}`} title="Tools (Shift+T)" aria-label="Toggle tools">
+                        <BlenderIcon name="tools" size={12} />
+                      </button>
+                    )}
+                    {onTogglePalette && (
+                      <button type="button" onClick={onTogglePalette} className={`ts-chrome-btn ${isPaletteOpen ? 'is-on' : ''}`} title="Primitives" aria-label="Toggle primitives">
+                        <BlenderIcon name="primitives" size={12} />
+                      </button>
+                    )}
+                    <button type="button" onClick={onOpenAssetBrowser || onOpenPresets} className="ts-chrome-btn" title="3D Assets" aria-label="Open 3D assets">
+                      <BlenderIcon name="mesh" size={12} />
+                    </button>
+                    {onOpenImportModal && (
+                      <button type="button" onClick={onOpenImportModal} className="ts-chrome-btn" title="Import 3D (Ctrl+I)" aria-label="Import 3D">
+                        <BlenderIcon name="import" size={12} />
+                      </button>
+                    )}
+                  </div>
+                </div>,
+                document.body,
+              )}
           </div>
 
-          {/* Shading */}
-          <div className="flex items-center gap-1 bg-[#191b1e] px-1.5 py-0.5 rounded border border-[#101114] font-mono text-[10px] shrink-0">
-            <Eye className="w-3 h-3 text-[#ed7300]" />
-            <select
-              value={toolState.viewMode}
-              onChange={(e) => setToolState((s) => ({ ...s, viewMode: e.target.value as ViewMode }))}
-              className="bg-transparent font-mono text-[10px] text-[#eaedf1] font-bold outline-none cursor-pointer max-w-[88px]"
-            >
-              {viewModes.map((mode) => (
-                <option key={mode.id} value={mode.id} className="bg-[#191b1e] text-white">
-                  {mode.label}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={() => setToolState((s) => ({ ...s, xray: !s.xray }))}
-              className={`ml-0.5 px-1.5 py-0.5 rounded border text-[9px] font-bold transition ${
-                toolState.xray
-                  ? 'border-[#ed7300]/50 bg-[#ed7300]/20 text-[#ff9a3c]'
-                  : 'border-transparent text-[#858a93] hover:text-white'
-              }`}
-              title="X-Ray (Alt+Z) — see through meshes"
-            >
-              X-Ray
-            </button>
+          <button
+            type="button"
+            onClick={onOpenShortcuts}
+            className="ts-chrome-btn"
+            title="Shortcuts (?)"
+            aria-label="Keyboard shortcuts"
+          >
+            <BlenderIcon name="help" size={12} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setHeaderCollapsed(true)}
+            className="ts-chrome-btn"
+            title="Hide header"
+            aria-label="Hide header"
+          >
+            <BlenderIcon name="hide" size={12} />
+          </button>
           </div>
 
-          {/* Quick docks — icon buttons */}
-          <div className="flex items-center gap-0.5 bg-[#191b1e] p-0.5 rounded border border-[#101114] shrink-0">
-            {onToggleOutliner && (
-              <button
-                type="button"
-                onClick={onToggleOutliner}
-                className={`p-1 rounded ${isOutlinerOpen ? 'bg-[#ed7300] text-white' : 'text-[#858a93] hover:text-white'}`}
-                title="Floating Outliner (O)"
-              >
-                <Layers className="w-3 h-3" />
-              </button>
-            )}
-            {onToggleToolWindow && (
-              <button
-                type="button"
-                onClick={onToggleToolWindow}
-                className={`p-1 rounded ${isToolWindowOpen ? 'bg-[#ff9a3c] text-white' : 'text-[#858a93] hover:text-white'}`}
-                title="Tool Palette (Shift+T)"
-              >
-                <Sparkles className="w-3 h-3" />
-              </button>
-            )}
-            {onTogglePalette && (
-              <button
-                type="button"
-                onClick={onTogglePalette}
-                className={`p-1 rounded ${isPaletteOpen ? 'bg-[#ed7300] text-white' : 'text-[#858a93] hover:text-white'}`}
-                title="Primitives"
-              >
-                <Box className="w-3 h-3" />
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={onOpenAssetBrowser || onOpenPresets}
-              className="p-1 rounded text-[#e68619] hover:bg-[#34383f]"
-              title="3D Assets"
-            >
-              <Layers className="w-3 h-3" />
-            </button>
-            {onOpenImportModal && (
-              <button
-                type="button"
-                onClick={onOpenImportModal}
-                className="p-1 rounded text-[#858a93] hover:text-white hover:bg-[#34383f]"
-                title="Import 3D (Ctrl+I)"
-              >
-                <Upload className="w-3 h-3" />
-              </button>
-            )}
-          </div>
-
-          {/* Collapse / help */}
-          <div className="flex items-center gap-0.5 shrink-0">
-            <button
-              type="button"
-              onClick={onOpenShortcuts}
-              className="p-1 hover:bg-[#34383f] text-[#858a93] hover:text-[#ed7300] rounded"
-              title="Shortcuts (?)"
-            >
-              <HelpCircle className="w-3 h-3" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setHeaderCollapsed(true)}
-              className="h-6 px-1.5 rounded border border-[#3b3f46] bg-[#191b1e] text-[#858a93] hover:text-white hover:border-[#ed7300] flex items-center gap-1 text-[9px] font-mono"
-              title="Hide header to free vertical space"
-            >
-              <PanelTopClose className="w-3.5 h-3.5" />
-              Hide
-            </button>
-          </div>
         </div>
       )}
     </div>
   );
 };
+

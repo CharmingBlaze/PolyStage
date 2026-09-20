@@ -31,14 +31,14 @@ export interface MaterialSlot {
 }
 
 const DEFAULT_MATERIALS: MaterialSlot[] = [
-  { id: 'mat_default', name: 'White PBR', color: '#e2e8f0', shading: 'pbr', roughness: 0.4, metalness: 0.1, emissive: '#000000', emissiveIntensity: 0, pattern: 'solid', tileScale: 1, doubleSided: true },
-  { id: 'mat_crimson', name: 'Ruby Red', color: '#f83800', shading: 'pbr', roughness: 0.25, metalness: 0.4, emissive: '#000000', emissiveIntensity: 0, pattern: 'solid', tileScale: 1, doubleSided: true },
+  { id: 'mat_default', name: 'White PBR', color: '#e2e8f0', shading: 'pbr', roughness: 0.4, metalness: 0.1, emissive: '#16191e', emissiveIntensity: 0, pattern: 'solid', tileScale: 1, doubleSided: true },
+  { id: 'mat_crimson', name: 'Ruby Red', color: '#f83800', shading: 'pbr', roughness: 0.25, metalness: 0.4, emissive: '#16191e', emissiveIntensity: 0, pattern: 'solid', tileScale: 1, doubleSided: true },
   { id: 'mat_cyber', name: 'Neon Cyan', color: '#00f6ff', shading: 'emissive', roughness: 0.1, metalness: 0.0, emissive: '#00f6ff', emissiveIntensity: 3.0, pattern: 'solid', tileScale: 1, doubleSided: true },
-  { id: 'mat_gold', name: 'Gold Metal', color: '#ffd700', shading: 'metallic', roughness: 0.15, metalness: 0.95, emissive: '#000000', emissiveIntensity: 0, pattern: 'solid', tileScale: 1, doubleSided: true },
-  { id: 'mat_emerald', name: 'Emerald', color: '#00e436', shading: 'glass', roughness: 0.05, metalness: 0.1, emissive: '#000000', emissiveIntensity: 0, pattern: 'solid', tileScale: 1, doubleSided: true },
-  { id: 'mat_checker', name: 'Checker 2D', color: '#29adff', shading: 'unlit', roughness: 0.5, metalness: 0.0, emissive: '#000000', emissiveIntensity: 0, pattern: 'checker', tileScale: 1, doubleSided: true },
-  { id: 'mat_obsidian', name: 'Obsidian', color: '#1d2b53', shading: 'pbr', roughness: 0.1, metalness: 0.85, emissive: '#000000', emissiveIntensity: 0, pattern: 'solid', tileScale: 1, doubleSided: true },
-  { id: 'mat_toon', name: 'Toon Pink', color: '#ff77a8', shading: 'toon', roughness: 0.8, metalness: 0.0, emissive: '#000000', emissiveIntensity: 0, pattern: 'solid', tileScale: 1, doubleSided: true },
+  { id: 'mat_gold', name: 'Gold Metal', color: '#ffd700', shading: 'metallic', roughness: 0.15, metalness: 0.95, emissive: '#16191e', emissiveIntensity: 0, pattern: 'solid', tileScale: 1, doubleSided: true },
+  { id: 'mat_emerald', name: 'Emerald', color: '#00e436', shading: 'glass', roughness: 0.05, metalness: 0.1, emissive: '#16191e', emissiveIntensity: 0, pattern: 'solid', tileScale: 1, doubleSided: true },
+  { id: 'mat_checker', name: 'Checker 2D', color: '#29adff', shading: 'unlit', roughness: 0.5, metalness: 0.0, emissive: '#16191e', emissiveIntensity: 0, pattern: 'checker', tileScale: 1, doubleSided: true },
+  { id: 'mat_obsidian', name: 'Obsidian', color: '#1d2b53', shading: 'pbr', roughness: 0.1, metalness: 0.85, emissive: '#16191e', emissiveIntensity: 0, pattern: 'solid', tileScale: 1, doubleSided: true },
+  { id: 'mat_toon', name: 'Toon Pink', color: '#ff77a8', shading: 'toon', roughness: 0.8, metalness: 0.0, emissive: '#16191e', emissiveIntensity: 0, pattern: 'solid', tileScale: 1, doubleSided: true },
 ];
 
 const GRADIENT_PRESETS: { id: string; name: string; stops: GradientStop[] }[] = [
@@ -80,8 +80,8 @@ const GRADIENT_PRESETS: { id: string; name: string; stops: GradientStop[] }[] = 
     id: 'monochrome',
     name: 'Mono',
     stops: [
-      { id: 's1', color: '#101114', position: 0, opacity: 100 },
-      { id: 's2', color: '#ffffff', position: 100, opacity: 100 },
+      { id: 's1', color: '#1a1c22', position: 0, opacity: 100 },
+      { id: 's2', color: '#e2e6ec', position: 100, opacity: 100 },
     ],
   },
 ];
@@ -156,7 +156,7 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
     const newMat: MaterialSlot = {
       id: newId,
       name: `Mat ${materialSlots.length + 1}`,
-      color: activePalette.palette[0] || '#ff9a3c',
+      color: activePalette.palette[0] || '#00d4e2',
       shading: 'pbr',
       roughness: 0.4,
       metalness: 0.2,
@@ -275,7 +275,7 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
     const tileSize = Math.max(8, Math.floor(32 / scale));
 
     if (activeMaterial.pattern === 'checker' || activeMaterial.pattern === 'checker4') {
-      ctx.fillStyle = '#2e3136';
+      ctx.fillStyle = '#282c35';
       for (let y = 0; y < 256; y += tileSize) {
         for (let x = 0; x < 256; x += tileSize) {
           if (((x / tileSize) + (y / tileSize)) % 2 === 0) {
@@ -284,7 +284,7 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
         }
       }
     } else if (activeMaterial.pattern === 'grid') {
-      ctx.strokeStyle = '#ffffff';
+      ctx.strokeStyle = '#e2e6ec';
       ctx.lineWidth = Math.max(1, 4 / scale);
       for (let i = 0; i <= 256; i += tileSize) {
         ctx.beginPath();
@@ -297,7 +297,7 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
         ctx.stroke();
       }
     } else if (activeMaterial.pattern === 'dots') {
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = '#e2e6ec';
       const radius = Math.max(2, 6 / scale);
       for (let y = tileSize / 2; y < 256; y += tileSize) {
         for (let x = tileSize / 2; x < 256; x += tileSize) {
@@ -307,7 +307,7 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
         }
       }
     } else if (activeMaterial.pattern === 'stripes') {
-      ctx.fillStyle = '#2e3136';
+      ctx.fillStyle = '#282c35';
       for (let x = 0; x < 256; x += tileSize * 2) {
         ctx.fillRect(x, 0, tileSize, 256);
       }
@@ -354,7 +354,7 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
     const newId = `stop_${Date.now()}`;
     const newStop: GradientStop = {
       id: newId,
-      color: activePalette.palette[0] || '#e68619',
+      color: activePalette.palette[0] || '#00b4c4',
       position: 50,
       opacity: 100,
       midpoint: 50,
@@ -446,6 +446,7 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
           onClick={handleEditMaterialInPixelPaint}
           className="sp-mat__ghost-btn"
           title="Bake and open in Pixel Paint"
+          aria-label="Bake and open in Pixel Paint"
         >
           <Pencil className="w-3 h-3" />
           Paint
@@ -458,10 +459,10 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
           <div className="sp-mat__section-head">
             <span>Materials</span>
             <div className="flex items-center gap-0.5">
-              <button type="button" className="sp-mat__icon-btn" title="Duplicate" onClick={handleDuplicateActiveMaterial}>
+              <button type="button" className="sp-mat__icon-btn" title="Duplicate" aria-label="Duplicate material" onClick={handleDuplicateActiveMaterial}>
                 <Copy className="w-3 h-3" />
               </button>
-              <button type="button" className="sp-mat__icon-btn is-accent" title="New material" onClick={handleCreateNewMaterial}>
+              <button type="button" className="sp-mat__icon-btn is-accent" title="New material" aria-label="New material" onClick={handleCreateNewMaterial}>
                 <Plus className="w-3 h-3" />
               </button>
             </div>
@@ -693,12 +694,13 @@ export const MaterialPanel: React.FC<MaterialPanelProps> = ({
                   value={selectedStop?.position ?? 0}
                   onChange={(e) => handleUpdateSelectedStop('position', Math.max(0, Math.min(100, +e.target.value)))}
                 />
-                <span className="text-[#8b909a]">%</span>
+                <span className="text-[#6e7584]">%</span>
                 <input
                   type="color"
-                  value={selectedStop?.color || '#ffffff'}
+                  value={selectedStop?.color || '#e2e6ec'}
                   onChange={(e) => handleUpdateSelectedStop('color', e.target.value)}
                   className="sp-mat__color"
+                  aria-label="Gradient stop color"
                 />
               </div>
             </label>

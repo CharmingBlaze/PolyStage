@@ -12,6 +12,7 @@ import type {
   WorkspaceMode,
 } from '../types/cad';
 import type { KnifeHit } from '../utils/meshCutTools';
+import type { PenSession } from '../utils/penTool';
 
 type PaneId = 'top' | 'front' | 'side' | 'perspective';
 
@@ -55,6 +56,8 @@ interface QuadViewportProps {
   activeWorkspaceMode?: WorkspaceMode;
   /** `blockout` = Side | Front | Perspective. */
   layout?: 'quad' | 'blockout';
+  penSession?: PenSession | null;
+  setPenSession?: React.Dispatch<React.SetStateAction<PenSession | null>>;
 }
 
 export const QuadViewport: React.FC<QuadViewportProps> = ({
@@ -95,6 +98,8 @@ export const QuadViewport: React.FC<QuadViewportProps> = ({
   setSceneSelection,
   activeWorkspaceMode,
   layout = 'quad',
+  penSession = null,
+  setPenSession,
 }) => {
   const [splitRatioX, setSplitRatioX] = useState<number>(layout === 'blockout' ? 33.33 : 50);
   const [splitRatioY, setSplitRatioY] = useState<number>(50);
@@ -171,6 +176,8 @@ export const QuadViewport: React.FC<QuadViewportProps> = ({
     sceneSelection,
     setSceneSelection,
     activeWorkspaceMode,
+    penSession,
+    setPenSession,
   };
 
   return isBlockoutLayout ? (
@@ -233,12 +240,12 @@ export const QuadViewport: React.FC<QuadViewportProps> = ({
         style={{ zIndex: 5 }}
       >
         <div
-          className="absolute top-0 bottom-0 w-1 -ml-0.5 pointer-events-auto cursor-col-resize bg-transparent hover:bg-[#ed7300]/40"
+          className="absolute top-0 bottom-0 w-1 -ml-0.5 pointer-events-auto cursor-col-resize bg-transparent hover:bg-[#00b4c4]/40"
           style={{ left: `${splitRatioX}%` }}
           onPointerDown={handlePointerDownSplitter}
         />
         <div
-          className="absolute left-0 right-0 h-1 -mt-0.5 pointer-events-auto cursor-row-resize bg-transparent hover:bg-[#ed7300]/40"
+          className="absolute left-0 right-0 h-1 -mt-0.5 pointer-events-auto cursor-row-resize bg-transparent hover:bg-[#00b4c4]/40"
           style={{ top: `${splitRatioY}%` }}
           onPointerDown={handlePointerDownSplitter}
         />

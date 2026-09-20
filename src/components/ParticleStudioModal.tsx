@@ -101,16 +101,16 @@ export const ParticleStudioModal: React.FC<ParticleStudioModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 font-sans">
-      <div className="w-full max-w-5xl h-[80vh] bg-[#26282d] border border-[#3b3f46] rounded-lg shadow-2xl flex flex-col overflow-hidden">
-        <div className="h-10 px-3 border-b border-[#3b3f46] flex items-center justify-between bg-[#191b1e]">
-          <div className="flex items-center gap-2 text-[#e68619] font-mono text-xs font-bold uppercase">
+      <div className="w-full max-w-5xl h-[80vh] bg-[#1c1f26] border border-[#3a3f4a] rounded-lg shadow-2xl flex flex-col overflow-hidden">
+        <div className="h-10 px-3 border-b border-[#3a3f4a] flex items-center justify-between bg-[#16191e]">
+          <div className="flex items-center gap-2 text-[#00b4c4] font-mono text-xs font-bold uppercase">
             <Sparkles className="w-4 h-4" />
             Particle Studio (Game Export)
           </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
-              className="cad-button h-7 px-2 text-[#ed7300] text-[10px] font-bold flex items-center gap-1"
+              className="cad-button h-7 px-2 text-[#00b4c4] text-[10px] font-bold flex items-center gap-1"
               onClick={() => downloadFile(`${draft.identifier.replace(':', '_')}.particle.json`, exportParticleGameJson(draft), 'application/json')}
             >
               <Download className="w-3.5 h-3.5" /> Export JSON
@@ -118,14 +118,14 @@ export const ParticleStudioModal: React.FC<ParticleStudioModalProps> = ({
             <button type="button" className="cad-button h-7 px-2 text-[#2d9d78] text-[10px] font-bold" onClick={() => { onSave(draft); onClose(); }}>
               Save to Scene
             </button>
-            <button type="button" className="p-1.5 hover:bg-[#34383f] rounded" onClick={onClose}>
+            <button type="button" className="p-1.5 hover:bg-[#282c35] rounded" onClick={onClose}>
               <X className="w-4 h-4 text-[#858a93]" />
             </button>
           </div>
         </div>
 
         <div className="flex-1 flex min-h-0">
-          <div className="w-72 border-r border-[#3b3f46] overflow-y-auto p-3 space-y-3 text-[10px] font-mono custom-scrollbar">
+          <div className="w-72 border-r border-[#3a3f4a] overflow-y-auto p-3 space-y-3 text-[10px] font-mono custom-scrollbar">
             <div className="space-y-1">
               <span className="text-[#858a93] uppercase">Presets</span>
               <div className="grid grid-cols-2 gap-1">
@@ -134,7 +134,7 @@ export const ParticleStudioModal: React.FC<ParticleStudioModalProps> = ({
                     key={preset.id}
                     type="button"
                     title={preset.hint}
-                    className="h-7 rounded border border-[#3b3f46] hover:border-[#e68619] text-[9px] font-bold"
+                    className="h-7 rounded border border-[#3a3f4a] hover:border-[#00b4c4] text-[9px] font-bold"
                     onClick={() => {
                       const next = createParticleFromPreset(preset.id);
                       setDraft({
@@ -169,15 +169,15 @@ export const ParticleStudioModal: React.FC<ParticleStudioModalProps> = ({
             </label>
             <label className="block space-y-1">
               <span className="text-[#858a93] uppercase">Rate ({draft.rate}/s)</span>
-              <input type="range" min={1} max={200} value={draft.rate} onChange={(e) => patch({ rate: Number(e.target.value) })} className="w-full accent-[#e68619]" />
+              <input type="range" min={1} max={200} value={draft.rate} onChange={(e) => patch({ rate: Number(e.target.value) })} className="w-full accent-[#00b4c4]" />
             </label>
             <label className="block space-y-1">
               <span className="text-[#858a93] uppercase">Lifetime ({draft.lifetime.toFixed(2)}s)</span>
-              <input type="range" min={0.1} max={5} step={0.05} value={draft.lifetime} onChange={(e) => patch({ lifetime: Number(e.target.value) })} className="w-full accent-[#ed7300]" />
+              <input type="range" min={0.1} max={5} step={0.05} value={draft.lifetime} onChange={(e) => patch({ lifetime: Number(e.target.value) })} className="w-full accent-[#00b4c4]" />
             </label>
             <label className="block space-y-1">
               <span className="text-[#858a93] uppercase">Speed ({draft.startSpeed.toFixed(2)})</span>
-              <input type="range" min={0} max={8} step={0.1} value={draft.startSpeed} onChange={(e) => patch({ startSpeed: Number(e.target.value) })} className="w-full accent-[#ed7300]" />
+              <input type="range" min={0} max={8} step={0.1} value={draft.startSpeed} onChange={(e) => patch({ startSpeed: Number(e.target.value) })} className="w-full accent-[#00b4c4]" />
             </label>
             <label className="block space-y-1">
               <span className="text-[#858a93] uppercase">Start Size</span>
@@ -217,7 +217,7 @@ export const ParticleStudioModal: React.FC<ParticleStudioModalProps> = ({
               {playing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
               {playing ? 'Pause' : 'Play'}
             </button>
-            <div className="absolute bottom-3 left-3 text-[9px] font-mono text-[#858a93] bg-[#2e3136]/80 px-2 py-1 rounded border border-[#3b3f46]">
+            <div className="absolute bottom-3 left-3 text-[9px] font-mono text-[#858a93] bg-[#282c35]/80 px-2 py-1 rounded border border-[#3a3f4a]">
               Snowstorm-style preview · exports engine-agnostic .particle.json
             </div>
           </div>

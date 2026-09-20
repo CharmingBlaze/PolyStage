@@ -671,16 +671,16 @@ export const UVEditor: React.FC<UVEditorProps> = ({
     const dpr=window.devicePixelRatio||1,w=canvas.clientWidth,h=canvas.clientHeight;
     ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
     // PolyStage charcoal stage (not navy/cyan)
-    ctx.fillStyle='#1e2023';ctx.fillRect(0,0,w,h);
+    ctx.fillStyle='#16191e';ctx.fillRect(0,0,w,h);
     const v=viewRef.current;
     // Neighboring tiles / checker — charcoal tones
     for(let tu=-1;tu<=1;tu++)for(let tv=-1;tv<=1;tv++){
       const x=v.x+tu*v.scale,y=v.y+tv*v.scale;
-      ctx.fillStyle=(tu===0&&tv===0)?'#191b1e':'#222222';ctx.fillRect(x,y,v.scale,v.scale);
+      ctx.fillStyle=(tu===0&&tv===0)?'#16191e':'#222222';ctx.fillRect(x,y,v.scale,v.scale);
       const tile=Math.max(8,v.scale/16);for(let yy=0;yy<v.scale;yy+=tile)for(let xx=0;xx<v.scale;xx+=tile){
-        if((Math.floor(xx/tile)+Math.floor(yy/tile))%2===0){ctx.fillStyle=tu===0&&tv===0?'#303030':'#1e2023';ctx.fillRect(x+xx,y+yy,tile,tile)}
+        if((Math.floor(xx/tile)+Math.floor(yy/tile))%2===0){ctx.fillStyle=tu===0&&tv===0?'#303030':'#16191e';ctx.fillRect(x+xx,y+yy,tile,tile)}
       }
-      ctx.strokeStyle=tu===0&&tv===0?'#ed7300':'#2e3136';ctx.lineWidth=tu===0&&tv===0?2:1;ctx.strokeRect(x,y,v.scale,v.scale);
+      ctx.strokeStyle=tu===0&&tv===0?'#00b4c4':'#282c35';ctx.lineWidth=tu===0&&tv===0?2:1;ctx.strokeRect(x,y,v.scale,v.scale);
       if(tu!==0||tv!==0){ctx.fillStyle='#6a6a6a';ctx.font='10px monospace';ctx.fillText(`${1001+tu+tv*10}`,x+6,y+14)}
     }
     if(showTexture&&textureCanvas&&textureCanvas.width>0&&textureCanvas.height>0){
@@ -706,7 +706,7 @@ export const UVEditor: React.FC<UVEditorProps> = ({
       const imageW=baseW*referenceLayer.scale,imageH=baseH*referenceLayer.scale;
       ctx.drawImage(referenceLayer.image,-imageW/2,-imageH/2,imageW,imageH);
       if(editReferenceImage&&!referenceLayer.locked){
-        ctx.globalAlpha=1;ctx.strokeStyle='#ff9a3c';ctx.lineWidth=2;ctx.setLineDash([6,4]);
+        ctx.globalAlpha=1;ctx.strokeStyle='#00d4e2';ctx.lineWidth=2;ctx.setLineDash([6,4]);
         ctx.strokeRect(-imageW/2,-imageH/2,imageW,imageH);ctx.setLineDash([]);
       }
       ctx.restore();
@@ -726,7 +726,7 @@ export const UVEditor: React.FC<UVEditorProps> = ({
       }else ctx.fillStyle=overlap?'rgba(236,91,98,.45)':selected?'rgba(237,115,0,.28)':'rgba(255,255,255,.04)';
       ctx.fill();
       // Perforated (dashed) face borders — stronger dash on selection
-      ctx.strokeStyle=overlap?'#ec5b62':selected?'#ed7300':'#6e6e6e';
+      ctx.strokeStyle=overlap?'#ec5b62':selected?'#00b4c4':'#6e6e6e';
       ctx.lineWidth=selected?2.6:1.15;
       ctx.setLineDash(selected ? [6, 3] : [2, 3]);
       ctx.stroke();
@@ -745,12 +745,12 @@ export const UVEditor: React.FC<UVEditorProps> = ({
     topology.edges.forEach(edge=>{
       const a=uvToScreen(getPosition(edge.cornerA)),b=uvToScreen(getPosition(edge.cornerB)),selected=selectedUvEdges.has(edge.id);
       ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
-      ctx.strokeStyle=selected?'#ff9a3c':edge.seam?'#ec5b62':edge.boundary?'#c6cad1':'#51565f';
+      ctx.strokeStyle=selected?'#00d4e2':edge.seam?'#ec5b62':edge.boundary?'#bcc4d0':'#51565f';
       ctx.lineWidth=selected?3:edge.seam||edge.boundary?2:1;ctx.setLineDash(edge.seam?[5,3]:[]);ctx.stroke();ctx.setLineDash([]);
     });
     if(mode==='vertex')topology.vertices.forEach(vertex=>{
       const p=uvToScreen(getPosition(vertex.id)),selected=selectedUvVertices.has(vertex.id);
-      ctx.beginPath();ctx.arc(p.x,p.y,selected?5:3.5,0,Math.PI*2);ctx.fillStyle=selected?'#ed7300':vertex.pinned?'#ec5b62':'#e6e6e6';ctx.fill();ctx.strokeStyle='#101114';ctx.lineWidth=1.5;ctx.stroke();
+      ctx.beginPath();ctx.arc(p.x,p.y,selected?5:3.5,0,Math.PI*2);ctx.fillStyle=selected?'#00b4c4':vertex.pinned?'#ec5b62':'#e6e6e6';ctx.fill();ctx.strokeStyle='#1a1c22';ctx.lineWidth=1.5;ctx.stroke();
       if(vertex.pinned){ctx.fillStyle='#ffb0b0';ctx.font='9px sans-serif';ctx.fillText('•',p.x,p.y+3)}
     });
 
@@ -760,7 +760,7 @@ export const UVEditor: React.FC<UVEditorProps> = ({
       const { minX, minY, maxX, maxY, cx, cy, corners, rotateHandle } = gizmo;
       ctx.save();
       // Perforated selection bounds
-      ctx.strokeStyle = '#ed7300';
+      ctx.strokeStyle = '#00b4c4';
       ctx.lineWidth = 1.5;
       ctx.setLineDash([6, 4]);
       ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
@@ -770,27 +770,27 @@ export const UVEditor: React.FC<UVEditorProps> = ({
       ctx.beginPath();
       ctx.moveTo(cx, minY);
       ctx.lineTo(rotateHandle.x, rotateHandle.y);
-      ctx.strokeStyle = '#ff9a3c';
+      ctx.strokeStyle = '#00d4e2';
       ctx.lineWidth = 1.5;
       ctx.stroke();
       ctx.beginPath();
       ctx.arc(rotateHandle.x, rotateHandle.y, HANDLE_R, 0, Math.PI * 2);
-      ctx.fillStyle = transform === 'rotate' ? '#ed7300' : '#ff9a3c';
+      ctx.fillStyle = transform === 'rotate' ? '#00b4c4' : '#00d4e2';
       ctx.fill();
-      ctx.strokeStyle = '#101114';
+      ctx.strokeStyle = '#1a1c22';
       ctx.lineWidth = 1.5;
       ctx.stroke();
       // Small rotate glyph
       ctx.beginPath();
       ctx.arc(rotateHandle.x, rotateHandle.y, 3, -0.8, Math.PI * 1.2);
-      ctx.strokeStyle = '#101114';
+      ctx.strokeStyle = '#1a1c22';
       ctx.lineWidth = 1.2;
       ctx.stroke();
 
       // Corner scale handles
       corners.forEach((c) => {
-        ctx.fillStyle = transform === 'scale' ? '#ed7300' : '#ff9a3c';
-        ctx.strokeStyle = '#101114';
+        ctx.fillStyle = transform === 'scale' ? '#00b4c4' : '#00d4e2';
+        ctx.strokeStyle = '#1a1c22';
         ctx.lineWidth = 1.5;
         ctx.fillRect(c.x - HANDLE_R / 2, c.y - HANDLE_R / 2, HANDLE_R, HANDLE_R);
         ctx.strokeRect(c.x - HANDLE_R / 2, c.y - HANDLE_R / 2, HANDLE_R, HANDLE_R);
@@ -803,15 +803,15 @@ export const UVEditor: React.FC<UVEditorProps> = ({
       ctx.lineTo(cx, cy + HANDLE_R);
       ctx.lineTo(cx - HANDLE_R, cy);
       ctx.closePath();
-      ctx.fillStyle = transform === 'move' ? '#ed7300' : '#ff9a3c';
+      ctx.fillStyle = transform === 'move' ? '#00b4c4' : '#00d4e2';
       ctx.fill();
-      ctx.strokeStyle = '#101114';
+      ctx.strokeStyle = '#1a1c22';
       ctx.lineWidth = 1.5;
       ctx.stroke();
       ctx.restore();
     }
 
-    if(boxRectRef.current){const {a,b}=boxRectRef.current;ctx.fillStyle='#ed73001f';ctx.strokeStyle='#ed7300';ctx.setLineDash([4,3]);ctx.fillRect(a.x,a.y,b.x-a.x,b.y-a.y);ctx.strokeRect(a.x,a.y,b.x-a.x,b.y-a.y);ctx.setLineDash([])}
+    if(boxRectRef.current){const {a,b}=boxRectRef.current;ctx.fillStyle='#00b4c41f';ctx.strokeStyle='#00b4c4';ctx.setLineDash([4,3]);ctx.fillRect(a.x,a.y,b.x-a.x,b.y-a.y);ctx.strokeRect(a.x,a.y,b.x-a.x,b.y-a.y);ctx.setLineDash([])}
   };
   drawRef.current=draw;
 

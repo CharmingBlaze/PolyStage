@@ -112,7 +112,7 @@ export const ImportModelModal: React.FC<ImportModelModalProps> = ({
 
   return (
     <div
-      className="fixed z-50 shadow-2xl rounded-xl border border-[#3b3f46] bg-[#202226]/95 backdrop-blur-lg font-mono text-[11px] select-none text-[#c6cad1] flex flex-col overflow-hidden"
+      className="fixed z-50 shadow-2xl rounded-xl border border-[#3a3f4a] bg-[#202226]/95 backdrop-blur-lg font-mono text-[11px] select-none text-[#bcc4d0] flex flex-col overflow-hidden"
       style={{
         left: `${position.x}px`,
         top: `${position.y}px`,
@@ -122,17 +122,17 @@ export const ImportModelModal: React.FC<ImportModelModalProps> = ({
     >
       <div
         onMouseDown={handleMouseDown}
-        className="h-10 px-3 flex items-center justify-between border-b border-[#101114] bg-[#222222] cursor-grab active:cursor-grabbing flex-shrink-0"
+        className="h-10 px-3 flex items-center justify-between border-b border-[#1a1c22] bg-[#222222] cursor-grab active:cursor-grabbing flex-shrink-0"
       >
-        <div className="flex items-center gap-2 font-bold text-[#ff9a3c]">
+        <div className="flex items-center gap-2 font-bold text-[#00d4e2]">
           <GripHorizontal className="w-4 h-4 text-[#51565f]" />
-          <Upload className="w-4 h-4 text-[#ed7300]" />
+          <Upload className="w-4 h-4 text-[#00b4c4]" />
           <span>IMPORT 3D MODEL</span>
         </div>
         <div className="flex items-center gap-1">
           <button
             onClick={() => setIsMinimized(!isMinimized)}
-            className="p-1 hover:bg-[#26282d] rounded text-[#7e838c] hover:text-white"
+            className="p-1 hover:bg-[#1c1f26] rounded text-[#7e838c] hover:text-white"
             title={isMinimized ? 'Expand Dialog' : 'Minimize Dialog'}
           >
             {isMinimized ? <Maximize2 className="w-3.5 h-3.5" /> : <Minus className="w-3.5 h-3.5" />}
@@ -156,10 +156,10 @@ export const ImportModelModal: React.FC<ImportModelModalProps> = ({
             onClick={() => !isLoading && fileInputRef.current?.click()}
             className={`flex-1 border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer transition ${
               dragOver
-                ? 'border-[#ed7300] bg-[#ed7300]/10 text-white'
+                ? 'border-[#00b4c4] bg-[#00b4c4]/10 text-white'
                 : preview
                   ? 'border-emerald-500/50 bg-emerald-950/20 text-emerald-300'
-                  : 'border-[#3b3f46] hover:border-[#ed7300] bg-[#24262b] text-[#7e838c]'
+                  : 'border-[#3a3f4a] hover:border-[#00b4c4] bg-[#21242c] text-[#7e838c]'
             }`}
           >
             <input
@@ -172,7 +172,7 @@ export const ImportModelModal: React.FC<ImportModelModalProps> = ({
 
             {isLoading ? (
               <div className="flex flex-col items-center gap-2 text-center text-[#aaaaaa]">
-                <Upload className="w-10 h-10 text-[#ed7300] animate-pulse" />
+                <Upload className="w-10 h-10 text-[#00b4c4] animate-pulse" />
                 <div className="font-bold text-white text-sm">Parsing {fileName}…</div>
               </div>
             ) : preview ? (
@@ -193,19 +193,19 @@ export const ImportModelModal: React.FC<ImportModelModalProps> = ({
               </div>
             ) : (
               <div className="flex flex-col items-center gap-2 text-center">
-                <Upload className="w-10 h-10 text-[#ed7300]" />
+                <Upload className="w-10 h-10 text-[#00b4c4]" />
                 <div className="font-bold text-white text-xs">Drag & Drop 3D Model File Here</div>
                 <div className="text-[9px] text-[#7e838c]">
                   OBJ, STL, PLY, glTF/GLB, JSON, bbmodel
                 </div>
-                <button className="mt-2 px-3 py-1 bg-[#ed7300] text-white font-bold text-[10px] rounded-lg hover:bg-[#ff9a3c] transition shadow">
+                <button className="mt-2 px-3 py-1 bg-[#00b4c4] text-white font-bold text-[10px] rounded-lg hover:bg-[#00d4e2] transition shadow">
                   Browse Files
                 </button>
               </div>
             )}
           </div>
 
-          <div className="mt-4 flex items-center justify-between flex-shrink-0 pt-3 border-t border-[#101114]">
+          <div className="mt-4 flex items-center justify-between flex-shrink-0 pt-3 border-t border-[#1a1c22]">
             <span className="text-[9px] text-[#51565f]">Formats: .OBJ .STL .PLY .GLTF .GLB .JSON .BBMODEL</span>
             <div className="flex gap-2">
               <button
@@ -219,7 +219,7 @@ export const ImportModelModal: React.FC<ImportModelModalProps> = ({
                 onClick={handleConfirmImport}
                 className={`px-4 py-1.5 rounded-lg font-bold text-xs transition ${
                   preview
-                    ? 'bg-[#ed7300] text-white hover:bg-[#ff9a3c] shadow-md shadow-[#ed7300]/30'
+                    ? 'bg-[#00b4c4] text-white hover:bg-[#00d4e2] shadow-md shadow-[#00b4c4]/30'
                     : 'bg-[#202226] text-[#555555] cursor-not-allowed'
                 }`}
               >

@@ -16,7 +16,7 @@ type GraphChannel = {
 const AXIS_COLORS: Record<Axis, string> = {
   x: '#ec5b62',
   y: '#2d9d78',
-  z: '#ed7300',
+  z: '#00b4c4',
 };
 
 const CHANNEL_KEYS: Record<ChannelKind, 'posKeyframes' | 'rotKeyframes' | 'sclKeyframes'> = {
@@ -353,7 +353,7 @@ export const AnimGraphEditor: React.FC<AnimGraphEditorProps> = ({
 
   return (
     <div ref={wrapRef} className="flex-1 min-h-0 flex flex-col bg-[#080a0f]" onWheel={onWheel}>
-      <div className="h-8 shrink-0 px-2 border-b border-[#101114] flex items-center gap-1.5 overflow-x-auto custom-scrollbar">
+      <div className="h-8 shrink-0 px-2 border-b border-[#1a1c22] flex items-center gap-1.5 overflow-x-auto custom-scrollbar">
         <span className="text-[9px] font-mono text-[#6a9fd8] shrink-0 truncate max-w-[120px]">
           {track ? track.targetName : 'Select a track'}
         </span>
@@ -388,9 +388,9 @@ export const AnimGraphEditor: React.FC<AnimGraphEditorProps> = ({
           </div>
         ))}
         <div className="ml-auto flex items-center gap-1 shrink-0 text-[8px] font-mono text-[#464b53]">
-          <button type="button" className="h-5 px-1.5 rounded border border-[#101114] hover:text-white" onClick={() => setValueZoom((z) => clamp(z * 1.2, 0.25, 8))}>+</button>
-          <button type="button" className="h-5 px-1.5 rounded border border-[#101114] hover:text-white" onClick={() => setValueZoom((z) => clamp(z / 1.2, 0.25, 8))}>-</button>
-          <button type="button" className="h-5 px-1.5 rounded border border-[#101114] hover:text-white" onClick={() => { setValueZoom(1); setValuePan(0); }}>Fit</button>
+          <button type="button" className="h-5 px-1.5 rounded border border-[#1a1c22] hover:text-white" onClick={() => setValueZoom((z) => clamp(z * 1.2, 0.25, 8))}>+</button>
+          <button type="button" className="h-5 px-1.5 rounded border border-[#1a1c22] hover:text-white" onClick={() => setValueZoom((z) => clamp(z / 1.2, 0.25, 8))}>-</button>
+          <button type="button" className="h-5 px-1.5 rounded border border-[#1a1c22] hover:text-white" onClick={() => { setValueZoom(1); setValuePan(0); }}>Fit</button>
           <span>Drag points · RMB/MMB pan · Wheel zoom</span>
         </div>
       </div>
